@@ -1,0 +1,176 @@
+import { h, ago, fmtNum, pretty, download, pickFile, hash01, clamp } from './util.js';
+import { icon } from './icons.js';
+import { boards, postKey, S, exportAll, importAll, tagc } from './store.js';
+import { getProvider } from './providers.js';
+import { Gallery } from './gallery.js';
+import { toast, promptText, confirmDlg, popover, segmented } from './ui.js';
+import { downloadMany, selBar, openExternal } from './actions.js';
+import { bindContext } from './ctxmenu.js';
+import { pinPopover, quickPin } from './pins.js';
+import { dialog } from './ui.js';
+
+const HUES = [128, 35, 200, 330, 85, 260, 10, 170];
+
+function tagline(b) {
+  return b.terms.map((t) => (t.op === '+' ? '' : t.op === '-' ? '−' : '≈') + pretty(t.t));
+}
+
+function card(b, ctx) {
+  const covers = (b.kind === 'pins' ? b.posts.slice(0, 4).map((p) => p.sample || p.thumb) : (b.cover || []).slice(0, 4)).filter(Boolean);
+  const tilt = (i) => (hash01(b.id + i) - 0.5) * 14;
+  const stack = h('div', { class: 'bc-stack' },
+    covers.length ? covers.map((src, i) =>
+      h('div', { class: 'bc-photo', style: `--r:${tilt(i)}deg;--i:${i};--n:${covers.length};--x:${covers.length === 1 ? 27 : 4 + i * (46 / (covers.length - 1))}%` }, h('img', { src, alt: '', loading: 'lazy', draggable: 'false' })))
+      : h('div', { class: 'bc-empty' }, h('i', { html: icon(b.kind === 'smart' ? 'compass' : 'pin', 34) }), h('span', {}, b.kind === 'smart' ? 'run it once to get a cover' : b.inbox ? 'tap the pin on anything to drop it here' : 'empty — pin something')),
+    h('i', { class: 'bc-tape' }),
+  );
+  const meta = b.kind === 'pins'
+    ? h('div', { class: 'bc-meta' }, b.inbox ? h('span', { class: 'quick' }, 'QUICK PIN') : null, `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`, h('span', {}, ago(b.updated)))
+    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), h('span', {}, getProvider(b.provider).name));
+  const chips = b.kind === 'smart'
+    ? h('div', { class: 'bc-tags' }, tagline(b).slice(0, 6).map((t) => h('span', {}, t)), b.terms.length > 6 ? h('span', {}, `+${b.terms.length - 6}`) : null)
+    : null;
+  const el = h('article', { class: 'bcard' + (b.inbox ? ' inbox' : '') + (b.kind === 'smart' ? ' live' : ''), 'data-id': b.id, style: `--bh:${b.hue}`, tabindex: 0 }, stack,
+    h('div', { class: 'bc-info' }, h('h3', {}, b.name), meta, chips),
+    b.inbox ? null : h('div', { class: 'bc-act' },
+      h('button', { title: 'Rename', html: icon('edit', 15), onclick: async (e) => { e.stopPropagation(); const n = await promptText('Rename board', b.name); if (n) { boards.update(b.id, { name: n }); ctx.refresh(); } } }),
+      h('button', { title: 'Colour', html: icon('flame', 15), onclick: (e) => { e.stopPropagation(); huePop(e.currentTarget, b, ctx); } }),
+      h('button', { title: 'Delete', html: icon('trash', 15), onclick: async (e) => { e.stopPropagation(); if (await confirmDlg('Delete board?', `“${b.name}” and its ${b.kind === 'pins' ? b.posts.length + ' pins' : 'saved search'} will be removed.`)) { boards.remove(b.id); ctx.refresh(); } } }),
+    ),
+  );
+  const open = () => (b.kind === 'smart' ? ctx.runSmart(b) : ctx.go(`#/board/${b.id}`));
+  el.addEventListener('click', open);
+  el.addEventListener('keydown', (e) => e.key === 'Enter' && open());
+  return el;
+}
+
+function huePop(anchor, b, ctx) {
+  popover(anchor, h('div', { class: 'huepick' }, HUES.map((hue) => h('button', { style: `--bh:${hue}`, class: hue === b.hue ? 'on' : '', onclick: () => { boards.update(b.id, { hue }); ctx.refresh(); } }))), { align: 'right' });
+}
+
+async function newBoard(ctx) {
+  const kind = await dialog({
+    title: 'New board',
+    body: [
+      h('p', { class: 'dlg-text' }, h('b', {}, 'Pin board'), ' — a collection you drop posts into by hand: references, favourites, things to read.'),
+      h('p', { class: 'dlg-text' }, h('b', {}, 'Live board'), ' — a saved search that refreshes itself. Make one by searching for something and pressing the save button.'),
+    ],
+    actions: [{ label: 'Cancel', value: null }, { label: 'Live board', value: 'live' }, { label: 'Pin board', value: 'pins', cls: 'primary' }],
+  });
+  if (kind === 'live') {
+    toast('Search for something, then press the save button to keep it as a live board.', { ms: 4200 });
+    return ctx.go('#/roam');
+  }
+  if (kind !== 'pins') return;
+  const n = await promptText('Name your pin board', '', 'e.g. Wallpapers, To read, Reference…');
+  if (n) ctx.go('#/board/' + boards.create(n, 'pins').id);
+}
+
+export function renderBoards(root, ctx) {
+  const list = boards.all();
+  const pinBoards = list.filter((b) => b.kind === 'pins').sort((a, c) => (c.inbox ? 1 : 0) - (a.inbox ? 1 : 0) || c.updated - a.updated);
+  const live = list.filter((b) => b.kind === 'smart');
+  const head = h('div', { class: 'vhead' },
+    h('div', {}, h('h1', {}, 'Boards'), h('p', {}, `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}`)),
+    h('div', { class: 'vhead-act' },
+      h('button', { class: 'btn', html: icon('download', 16) + '<span>Export</span>', onclick: () => { download('board-roamer-backup.json', exportAll()); toast('Backup saved via your browser download'); } }),
+      h('button', { class: 'btn', html: icon('folder', 16) + '<span>Import</span>', onclick: async () => { const f = await pickFile('.json'); if (!f) return; try { importAll(await f.text()); toast('Imported'); ctx.refresh(); } catch (e) { toast('Import failed: ' + e.message, { kind: 'err' }); } } }),
+      h('button', { class: 'btn primary', html: icon('plus', 16) + '<span>New board</span>', onclick: () => newBoard(ctx) }),
+    ),
+  );
+  const section = (title, hint, items, empty) => [
+    h('div', { class: 'bsec' }, h('h3', {}, title), h('span', {}, hint)),
+    items.length ? h('div', { class: 'bgrid' }, items.map((b) => card(b, ctx))) : empty,
+  ];
+  const grid = h('div', { class: 'bwrap' },
+    ...section('Pins', 'one tap on any pin button drops a post into the first board; right-click or long-press to choose another', pinBoards, null),
+    ...section('Live boards', 'saved searches that refresh themselves', live,
+      h('div', { class: 'bhint' }, h('i', { html: icon('compass', 22) }), h('p', {}, 'None yet. Search for something and press the save button (next to the search bar) to keep it here.'))));
+  root.replaceChildren(head, grid);
+  bindContext(grid, (e) => {
+    const el = e.target.closest('.bcard');
+    if (!el) return null;
+    const b = boards.get(el.dataset.id);
+    if (!b) return null;
+    const dup = () => {
+      const c = boards.create(b.name + ' copy', b.kind, { hue: b.hue, provider: b.provider, terms: b.terms && JSON.parse(JSON.stringify(b.terms)), filters: b.filters && JSON.parse(JSON.stringify(b.filters)), cover: b.cover });
+      if (b.kind === 'pins') boards.add(c.id, b.posts.slice().reverse());
+      ctx.refresh();
+    };
+    return [
+      { header: b.name },
+      { label: b.kind === 'smart' ? 'Run this search' : 'Open board', icon: b.kind === 'smart' ? 'compass' : 'boards', run: () => (b.kind === 'smart' ? ctx.runSmart(b) : ctx.go('#/board/' + b.id)) },
+      b.kind === 'pins' && b.posts.length && { label: 'Slideshow', icon: 'play', run: () => ctx.go('#/board/' + b.id) },
+      { sep: true },
+      !b.inbox && { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) { boards.update(b.id, { name: n }); ctx.refresh(); } } },
+      !b.inbox && { label: 'Colour', icon: 'flame', sub: HUES.map((hue) => ({ label: `Hue ${hue}°`, checked: hue === b.hue, run: () => { boards.update(b.id, { hue }); ctx.refresh(); } })) },
+      !b.inbox && { label: 'Duplicate', icon: 'copy', run: dup },
+      { label: 'Export this board', icon: 'download', run: () => { download(`board-${b.name.replace(/\W+/g, '-')}.json`, JSON.stringify({ app: 'board-roamer', v: 2, boards: [b] }, null, 1)); toast('Board exported'); } },
+      b.kind === 'smart' && { label: 'Copy search as text', icon: 'link', run: () => navigator.clipboard.writeText(b.terms.map((t) => (t.op === '+' ? '' : t.op) + t.t).join(' ')) },
+      !b.inbox && { sep: true },
+      !b.inbox && { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (await confirmDlg('Delete board?', `“${b.name}” will be removed.`)) { boards.remove(b.id); ctx.refresh(); } } },
+      b.inbox && b.posts.length && { sep: true },
+      b.inbox && b.posts.length && { label: 'Empty the Pins board', icon: 'trash', danger: true, run: async () => { if (await confirmDlg('Empty Pins?', `All ${b.posts.length} pins will be removed from this board.`, 'Empty')) { boards.removePosts(b.id, b.posts.map(postKey)); ctx.refresh(); } } },
+    ];
+  });
+}
+
+/* ------------------------------------------------------------------ one board */
+export function renderBoard(root, id, ctx) {
+  const b = boards.get(id);
+  if (!b || b.kind !== 'pins') {
+    root.replaceChildren(h('div', { class: 'empty-state' }, h('h2', {}, 'Board not found'), h('button', { class: 'btn primary', onclick: () => ctx.go('#/boards') }, 'Back to boards')));
+    return null;
+  }
+  let sort = 'new';
+  const scroller = h('div', { class: 'gal' + (S('blurThumbs') ? ' blur' : '') + (S('showMeta') ? ' meta-on' : '') });
+  const posts = () => {
+    const l = b.posts.slice();
+    if (sort === 'old') l.reverse();
+    if (sort === 'score') l.sort((x, y) => y.score - x.score);
+    if (sort === 'shuffle') l.sort(() => Math.random() - 0.5);
+    return l;
+  };
+  const gal = new Gallery(scroller, {
+    onOpen: (vi, tile) => ctx.openViewer(gal, vi, tile),
+    onNeedMore: () => {},
+    onPin: (ps) => quickPin(ps),
+    onOpenSite: (p) => openExternal(p.url),
+    onSelect: (n) => bar.update(n),
+    contextExtra: (p) => [{ label: 'Remove from this board', icon: 'trash', danger: true, run: () => { boards.removePosts(id, [postKey(p)]); fill(); title(); toast('Removed from board', { ms: 1400 }); } }],
+  });
+  const bar = selBar(gal, [
+    { label: 'Download', icon: 'download', run: (sel) => downloadMany(sel) },
+    { label: 'Remove', icon: 'trash', cls: 'danger', run: (sel) => { boards.removePosts(id, sel.map(postKey)); gal.setSelectMode(false); fill(); title(); toast(`Removed ${sel.length}`); } },
+    { label: 'Move to…', icon: 'pin', run: (sel, el) => pinPopover(el, sel) },
+  ]);
+  const count = h('span', { class: 'bd-count' });
+  const name = h('h1', { class: 'bd-name', title: b.inbox ? 'The built-in Pins board' : 'Click to rename', onclick: async () => { if (b.inbox) return; const n = await promptText('Rename board', b.name); if (n) { boards.update(id, { name: n }); name.textContent = n; } } }, b.name);
+  const title = () => (count.textContent = `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`);
+  const fill = () => {
+    gal.setItems(posts());
+    gal.setFoot(b.posts.length ? h('div', { class: 'foot-end' }, h('i', { html: icon('pin', 16) }), `${b.posts.length} pinned`) : h('div', { class: 'empty-state' }, h('div', { class: 'es-art', html: icon('pin', 56) }), h('h2', {}, 'Nothing pinned yet'), h('p', {}, 'Press B on any post or use the pin button on a tile.'), h('button', { class: 'btn primary', onclick: () => ctx.go('#/roam') }, 'Go roaming')));
+  };
+  const head = h('div', { class: 'vhead bd', style: `--bh:${b.hue}` },
+    h('button', { class: 'ibtn', title: 'All boards', html: icon('left', 20), onclick: () => ctx.go('#/boards') }),
+    h('div', { class: 'bd-title' }, name, count),
+    h('div', { class: 'vhead-act' },
+      segmented([['new', 'Newest'], ['old', 'Oldest'], ['score', 'Score'], ['shuffle', 'Shuffle']], sort, (v) => { sort = v; fill(); }),
+      h('button', { class: 'btn', title: 'Select posts', html: icon('select', 16) + '<span>Select</span>', onclick: () => gal.setSelectMode(!gal.selectMode) }),
+      h('button', { class: 'btn', html: icon('play', 16) + '<span>Slideshow</span>', onclick: () => b.posts.length && ctx.openViewer(gal, 0, null, true) }),
+      h('button', { class: 'btn', html: icon('download', 16) + '<span>Save all</span>', onclick: () => downloadMany(b.posts) }),
+      b.inbox ? null : h('button', { class: 'ibtn', title: 'Delete board', html: icon('trash', 18), onclick: async () => { if (await confirmDlg('Delete board?', `“${b.name}” and its ${b.posts.length} pins will be removed.`)) { boards.remove(id); ctx.go('#/boards'); } } }),
+    ),
+  );
+  root.replaceChildren(head, scroller, bar);
+  title();
+  requestAnimationFrame(fill);
+  return gal;
+}
+
+/** Keep a smart board's cover fresh from its latest results. */
+export function updateCover(id, posts) {
+  const b = boards.get(id);
+  if (!b || b.kind !== 'smart') return;
+  boards.update(id, { cover: posts.slice(0, 4).map((p) => p.sample || p.thumb) });
+}

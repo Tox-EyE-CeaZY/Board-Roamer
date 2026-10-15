@@ -1,0 +1,374 @@
+/* ============================================================================
+   BOARD ROAMER — phones & touch.
+   html.phone  = narrow screen, or a phone held sideways
+   html.touch  = the primary pointer is a finger (phones AND tablets)
+   Nothing here applies on a desktop with a mouse.
+   ========================================================================== */
+
+/* ---- desktop: the phone-only chrome stays out of the way ---- */
+#appbar, #tabbar, .fab, .ptr, .layout-cycle { display: none; }
+html.phone .layout-cycle { display: grid; }
+
+/* ============================================================ any touch device (phones + tablets) */
+html.touch { -webkit-tap-highlight-color: transparent; }
+html.touch body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html.touch input, html.touch textarea { -webkit-user-select: text; user-select: text; }
+html.touch img { -webkit-user-drag: none; -webkit-touch-callout: none; }
+html.touch .tile-act, html.touch .vw-nav { display: none !important; }
+html.touch .tbtns { display: flex; }
+html.touch .pc-knob { scale: 1; }
+html.touch .cm-k { display: none; }
+html.touch .fc-act, html.touch .bc-act, html.touch .tr-act { opacity: 1; }
+html.touch .gal, html.touch #v-other, html.touch .pn-body, html.touch .st-body, html.touch .routes, html.touch .rd-film, html.touch .vw-film { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* comfortable targets */
+html.touch .ibtn { min-width: 44px; min-height: 44px; }
+html.touch .btn { height: 42px; }
+html.touch .seg-b { padding: 11px 13px; }
+html.touch .chipbtn { padding: 10px 12px; }
+html.touch .input { padding: 11px 12px; font-size: 16px; }
+html.touch .tbtns button { width: 36px; height: 36px; }
+html.touch .trow { padding: 2px 0 2px 12px; }
+html.touch .tname { padding: 9px 0; }
+html.touch .pm-row { padding: 12px 16px; }
+html.touch .tgl { width: 52px; height: 28px; }
+html.touch .tgl i { width: 20px; height: 20px; }
+html.touch .tgl.on i { transform: translateX(24px); }
+html.touch input[type='range'] { height: 32px; }
+html.touch input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -9px; }
+html.touch .vbtn, html.touch .rbtn { width: 44px; height: 44px; }
+
+/* ============================================================ sheets (phones): popovers + context menus */
+.sheet-back { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: flex-end; background: oklch(0 0 0 / .55); opacity: 0; transition: opacity .22s; }
+.sheet-back.in { opacity: 1; }
+.pop.sheet, .ctxm.sheet {
+  position: relative; left: auto; top: auto; width: 100%; min-width: 0; max-width: none; max-height: min(84vh, calc(100% - 28px)); margin: 0;
+  display: flex; flex-direction: column; overflow: hidden; padding: 0 0 var(--safe-b, 0px);
+  background: var(--bg2); border: 0; border-top: 3px solid var(--accent); box-shadow: none; opacity: 1;
+  transform: translateY(105%); transform-origin: bottom; transition: transform .3s var(--ease);
+}
+.pop.sheet.in, .ctxm.sheet.in { transform: none; }
+.sheet-grab { flex: none; height: 28px; display: grid; place-items: center; cursor: grab; }
+.sheet-grab i { width: 46px; height: 4px; background: var(--line2); border-radius: 3px; }
+.sheet-body { overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
+.pop.sheet.wide-pop, .pop.sheet.pin-pop, .pop.sheet.prov-pop { width: 100%; }
+.sheet .fpanel { padding: 0 16px 8px; }
+.sheet .frow { grid-template-columns: 1fr; gap: 8px; padding: 12px 0; }
+.sheet .rate-row { width: 100%; } .sheet .rbig { flex: 1; width: auto; padding: 10px 0 8px; }
+.sheet .seg { width: 100%; } .sheet .seg-b { flex: 1 1 auto; text-align: center; }
+.sheet .pm-list { max-height: none; }
+.cm-sheet-head { display: flex; align-items: center; gap: 4px; flex: none; padding: 0 12px 8px; border-bottom: 1px solid var(--line); font: 800 11.5px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.cm-sheet-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.cm-sheet-head[hidden] { display: none; }
+.cm-back { width: 44px; height: 44px; margin-left: -8px; display: grid; place-items: center; color: var(--ink); }
+.cm-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 4px 0 8px; }
+.ctx-sheet .cm-i { min-height: 54px; padding: 0 20px 0 18px; gap: 16px; font-size: 15px; }
+.ctx-sheet .cm-ic { width: 26px; }
+.ctx-sheet .cm-head { padding: 12px 20px 6px; max-width: none; }
+.ctx-sheet .cm-i:active { background: color-mix(in oklch, var(--accent) 22%, transparent); }
+
+/* ============================================================ the phone shell */
+html.phone { --appbar: 54px; --tabbar: 62px; --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px); }
+html.phone body { position: fixed; inset: 0; width: 100%; overscroll-behavior: none; }
+html.phone .rail { display: none; }
+html.phone #app { display: block; margin-top: calc(var(--appbar) + var(--safe-t)); height: calc(100% - var(--appbar) - var(--tabbar) - var(--safe-t) - var(--safe-b)); }
+html.phone .main { height: 100%; }
+html.phone #grain, html.phone .grain { display: none; }
+html.phone #topo { opacity: calc(var(--topo-op) * .8); }
+
+html.phone #appbar {
+  position: fixed; z-index: 60; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 2px;
+  height: calc(var(--appbar) + var(--safe-t)); padding: var(--safe-t) 6px 0 12px; background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.ab-brand { display: grid; place-items: center; width: 40px; height: 44px; color: var(--ink); margin-left: -6px; }
+.ab-title { margin-left: 4px; font: 800 18px var(--f-display); letter-spacing: -.02em; }
+.dial-mini { width: 38px; height: 38px; margin: 0 8px 0 4px; display: grid; place-items: center; border-radius: 50%; font: 800 12.5px var(--f-mono); letter-spacing: -.02em;
+  background: radial-gradient(circle at 30% 25%, oklch(.35 .08 var(--ph, 200)), oklch(.2 .04 var(--ph, 200))); color: oklch(.92 .12 var(--ph, 200));
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px oklch(.75 .16 var(--ph, 200)); }
+.dial-mini b { font: inherit; }
+
+html.phone #tabbar {
+  position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr);
+  height: calc(var(--tabbar) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line2);
+}
+.tab-ind { position: absolute; top: -1px; left: 0; width: 20%; height: 3px; background: var(--accent); translate: calc(var(--i, 0) * 100%) 0; transition: translate .38s var(--spring); }
+.tab-ind::after { content: ''; position: absolute; left: 22%; right: 22%; top: 3px; height: 10px; background: linear-gradient(var(--accent), transparent); opacity: .22; }
+.tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--faint); transition: color .2s; }
+.tab-t { font: 700 9.5px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; }
+.tab.on { color: var(--accent); }
+.tab:active .tab-ic { transform: scale(.88); }
+.tab-ic { display: grid; transition: transform .2s var(--spring); }
+.tab .nav-badge { top: 5px; right: calc(50% - 26px); }
+
+.fab { position: fixed; z-index: 55; right: 14px; bottom: calc(var(--tabbar) + var(--safe-b) + 14px); width: 48px; height: 48px; place-items: center; background: var(--accent); color: var(--accent-ink);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); animation: rise .25s var(--spring); }
+html.phone .fab:not([hidden]) { display: grid; }
+.fab:active { transform: scale(.92); }
+
+.ptr { position: absolute; z-index: 9; left: 50%; top: 4px; width: 38px; height: 38px; margin-left: -19px; place-items: center; border-radius: 50%; background: var(--bg3); color: var(--accent); pointer-events: none; opacity: 0;
+  transform: translateY(calc(var(--k, 0) * 56px - 40px)) rotate(calc(var(--k, 0) * 300deg)); box-shadow: 0 6px 18px oklch(0 0 0 / .4); }
+html.phone .ptr { display: grid; }
+.ptr.pulling { opacity: 1; } .ptr.ready { color: var(--accent-ink); background: var(--accent); }
+.ptr.spin { opacity: 1; transform: translateY(18px); animation: spin .6s linear infinite; }
+
+/* search row */
+html.phone .strip { padding: 8px 10px 4px; gap: 8px; align-items: flex-start; }
+html.phone .field { --c: 12px; min-height: 52px; padding: 4px 4px 4px 12px; }
+html.phone .f-ic { display: none; }
+html.phone .q { min-width: 56px; height: 40px; font-size: 16px; }
+html.phone .q::placeholder { font-size: 14px; }
+html.phone .go { width: 46px; height: 44px; }
+html.phone .strip-tools { flex: none; }
+html.phone .strip-tools .ibtn.big { width: 52px; height: 52px; }
+html.phone .strip-tools .ibtn.big[title^='Surprise'] { display: none; }
+html.phone .chip { height: 34px; }
+html.phone .chip .op { width: 34px; } html.phone .chip .x { width: 32px; margin-right: 10px; }
+html.phone .chip.summary { height: 38px; } html.phone .chip.summary .ct.preview { max-width: 22ch; }
+html.phone .chip.collapse { height: 32px; }
+html.phone .sugg { max-height: 44vh; }
+html.phone .sg { padding: 12px 14px; grid-template-columns: 14px 1fr auto auto; } html.phone .sg-c { display: none; }
+html.phone .clear-btn, html.phone .field .ibtn { min-width: 40px; }
+
+/* toolbar + quick routes + cards */
+html.phone .tbar { padding: 2px 8px 4px 12px; min-height: 48px; gap: 6px; }
+html.phone .odo { font-size: 22px; }
+html.phone .st-t, html.phone .st-h { display: none; }
+html.phone .layout-seg, html.phone .tools input[type='range'], html.phone .top-btn { display: none; }
+html.phone .tools { gap: 0; }
+html.phone .routes { padding: 2px 12px 10px; scroll-snap-type: x proximity; }
+html.phone .route { height: 38px; padding: 0 16px; scroll-snap-align: start; }
+html.phone .dossier-host:not(:empty) { padding: 0 10px 8px; }
+html.phone .dossier { grid-template-columns: 1fr; gap: 10px; padding: 14px 14px 12px 20px; --c: 14px; }
+html.phone .ds-head { min-width: 0; } html.phone .ds-head h2 { font-size: 26px; }
+html.phone .ds-act { flex-wrap: wrap; } html.phone .ds-act .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .ds-wiki { -webkit-line-clamp: 4; }
+html.phone .boardbar { margin: 0 10px 8px; flex-wrap: wrap; gap: 8px; padding: 10px 10px 10px 14px; }
+html.phone .boardbar .vw-spacer { display: none; }
+html.phone .boardbar .btn { flex: 1 1 auto; justify-content: center; height: 40px; }
+html.phone .boardbar .ibtn { margin-left: auto; }
+
+/* gallery */
+html.phone .gal { padding: 2px 8px 28px; }
+html.phone .tile::after, html.phone .tile-clip, html.phone .skeleton i { clip-path: polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px); }
+html.phone .tile .stamp { left: 2px; top: 1px; font-size: 10.5px; }
+html.phone .badges { left: 22px; top: 5px; } html.phone .badge { padding: 2px 5px; font-size: 9px; }
+html.phone .pinmark { right: 5px; top: 5px; width: 22px; height: 22px; } html.phone .selbox { right: 6px; top: 6px; width: 26px; height: 26px; }
+html.phone .skeleton { column-count: 2; column-gap: 6px; } html.phone .skeleton i { margin-bottom: 6px; }
+html.phone .gal-foot { min-height: 40px; }
+html.phone .foot-end::before, html.phone .foot-end::after { width: 24px; }
+html.phone .empty-state { padding: 44px 20px; } html.phone .empty-state h2 { font-size: 24px; }
+html.phone .selbar { left: 8px; right: 8px; bottom: 10px; translate: none; justify-content: space-between; gap: 2px; padding: 8px 10px; --c: 14px; }
+html.phone .selbar .btn:not(.primary) span { display: none; }
+html.phone .selbar .btn { padding: 0 12px; } html.phone .selbar .vw-sep { display: none; } html.phone .sb-count span { display: none; }
+
+/* ============================================================ the other screens */
+html.phone .vhead { padding: 14px 14px 8px; gap: 12px; }
+html.phone .vhead h1 { font-size: 36px; }
+html.phone .vhead p { margin-top: 14px; font-size: 11.5px; }
+html.phone .vhead-act { width: 100%; gap: 6px; }
+html.phone .vhead-act .input, html.phone .fadd { flex: 1 1 100%; width: 100%; }
+html.phone .fadd .input { width: 100%; }
+html.phone .vhead-act .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .vhead.bd { flex-wrap: wrap; padding: 10px 12px 6px; gap: 8px; align-items: flex-start; }
+html.phone .bd-title { flex: 1 1 0; min-width: 0; } html.phone .bd-name { font-size: 24px; word-break: break-word; }
+html.phone .vhead.bd .vhead-act { margin-left: 0; }
+html.phone .pool-meta { gap: 4px 10px; }
+html.phone .pool-desc { margin: 0 12px 8px; }
+html.phone .jump { flex: 1 1 100%; } html.phone .jump .input { flex: 1; width: auto; } html.phone .jump .btn { flex: none; }
+html.phone .bgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; padding: 14px 12px 24px; }
+html.phone .bc-info { padding: 10px 12px 14px; } html.phone .bc-info h3 { font-size: 15px; } html.phone .bc-tags { display: none; }
+html.phone .bc-act { top: 8px; right: 4px; } html.phone .bc-act button { width: 36px; height: 36px; }
+html.phone .bc-act button:not(:last-child) { display: none; }
+html.phone .fgrid { grid-template-columns: 1fr; gap: 12px; padding: 6px 12px; }
+html.phone .f-group { padding: 16px 14px 6px; }
+html.phone .fc-act button { width: 38px; height: 38px; }
+html.phone .pools-ctl { padding: 4px 12px 12px; gap: 10px; }
+html.phone .pools-ctl .input { width: 100%; flex: 1 1 100%; } html.phone .pools-ctl .seg { flex: 1 1 100%; } html.phone .pools-ctl .seg-b { flex: 1 1 auto; text-align: center; padding: 11px 6px; }
+html.phone .pools-ctl .spacer { display: none; }
+html.phone .pgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; padding: 8px 12px; }
+html.phone .shelf { padding: 4px 12px; } html.phone .f-progress { margin: 0 12px 4px; }
+html.phone .trail { padding: 6px 12px 28px 38px; } html.phone .trail::before { left: 15px; }
+html.phone .tr-card { padding: 10px 12px 10px 14px; } html.phone .tr-thumbs img { width: 36px; height: 36px; }
+html.phone .tr-act { position: static; justify-content: flex-end; }
+html.phone .tr-day { margin: 20px 0 10px; }
+
+/* settings = a full screen page */
+html.phone .settings { width: 100vw; border-left: 0; top: 0; padding-top: var(--safe-t); z-index: 1100; }
+html.phone .st-head { padding: 12px 8px 4px 18px; } html.phone .st-head h2 { font-size: 26px; }
+html.phone .st-nav { padding: 0 12px 10px; } html.phone .st-nav button { padding: 10px 12px; }
+html.phone .st-body { padding: 4px 18px calc(var(--safe-b) + 40px); }
+html.phone .two { grid-template-columns: 1fr; }
+html.phone .theme-row { grid-template-columns: repeat(3, 1fr); gap: 6px; } html.phone .theme-card span { font-size: 9.5px; }
+html.phone .st-row { padding: 12px 0; gap: 14px; }
+html.phone .row-btns .btn { flex: 1 1 auto; justify-content: center; }
+
+/* dialogs, toasts, help */
+html.phone .dlg-back, html.phone .help-back { padding: 12px; }
+html.phone .dlg { width: 100%; padding: 22px 18px 18px; }
+html.phone .dlg-actions { gap: 8px; } html.phone .dlg-actions .btn { flex: 1; justify-content: center; }
+html.phone #toasts { left: 12px; right: 12px; bottom: calc(var(--tabbar) + var(--safe-b) + 14px); translate: none; }
+html.phone .toast { max-width: 100%; width: fit-content; }
+html.phone .help { padding: 22px 18px; } html.phone .help-grid { grid-template-columns: 1fr; gap: 18px; }
+
+/* ============================================================ phone held sideways: a slim rail instead of the bars */
+html.phone.landscape #appbar, html.phone.landscape #tabbar, html.phone.landscape .fab { display: none !important; }
+html.phone.landscape .rail { display: flex; width: 64px; padding: 6px 0; overflow-y: auto; scrollbar-width: none; }
+html.phone.landscape .brand, html.phone.landscape .brand-name, html.phone.landscape .ni-t, html.phone.landscape .dial small { display: none; }
+html.phone.landscape .nav { --ih: 46px; gap: 2px; }
+html.phone.landscape .rail .dial b { width: 40px; height: 40px; font-size: 12.5px; }
+html.phone.landscape .rail .ibtn { min-height: 40px; }
+html.phone.landscape #app { display: grid; grid-template-columns: 64px minmax(0, 1fr); margin-top: 0; height: 100%; }
+html.phone.landscape .strip { padding: 6px 10px 2px; }
+html.phone.landscape .field { min-height: 46px; }
+html.phone.landscape .tbar { min-height: 38px; }
+html.phone.landscape .dossier-host { display: none; }
+html.phone.landscape .routes { padding-bottom: 6px; }
+html.phone.landscape .vhead h1 { font-size: 28px; }
+html.phone.landscape .settings { padding-left: 0; }
+html.phone.landscape #toasts { bottom: 14px; }
+html.phone.landscape .pgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); } html.phone.landscape .bgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html.phone.landscape .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ---- polish: the phone toolbar, the card above the results, page titles ---- */
+html.phone .tools .ibtn.big { width: 44px; height: 44px; border: 0; background: none; }
+html.phone .tools .ibtn.big.lit::after { bottom: 6px; }
+html.phone .vhead:not(.bd) h1 { display: none; }
+html.phone .vhead:not(.bd) p { margin-top: 0; }
+html.phone .vhead:not(.bd) { padding-top: 12px; }
+/* artist / tag card: one tight block instead of half a screen */
+html.phone .ds-wiki { display: none; }
+html.phone .ds-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+html.phone .ds-head h2 { font-size: 24px; order: 2; } html.phone .ds-kick { order: 1; flex: 1 1 100%; } html.phone .ds-n { order: 3; margin: 0; }
+html.phone .ds-body { gap: 4px; }
+html.phone .ds-links { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -14px 0 0; padding-right: 14px; }
+html.phone .ds-links a { flex: none; }
+html.phone .ds-aka { font-size: 11.5px; }
+html.phone .dossier { padding: 10px 12px 10px 18px; gap: 8px; }
+html.phone .ds-act .ibtn { margin-left: auto; }
+
+
+/* ============================================================ viewer on a phone / touch */
+.v-more, .pn-grab { display: none; }
+html.touch #viewer { background: oklch(.1 .015 205 / var(--vbg-a, .97)); }
+/* no filter and no cross-fade here: re-blurring a screen-sized layer on every swipe is what made the transition flash and tear */
+html.touch #viewer .vw-bg { inset: 0; filter: none; opacity: .32; transition: none; }
+html.phone #viewer { --peek: calc(66px + var(--safe-b, 0px)); --film: 76px; inset: 0; }
+html.phone #viewer.no-film { --film: 0px; }
+html.phone .v-desk, html.phone .vw-top .vw-sep, html.phone .vw-top .vw-spacer { display: none; }
+html.phone .v-more { display: grid; }
+html.phone .vw-top { height: calc(56px + var(--safe-t, 0px)); padding: var(--safe-t, 0px) 2px 0 2px; gap: 0; }
+html.phone .vw-count { margin: 0 8px 0 2px; font-size: 11px; }
+html.phone .vw-title { flex: 1; min-width: 0; max-width: none; }
+html.phone .vw-title b { font-size: 14px; } html.phone .vw-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.phone .vw-pool { position: absolute; left: 8px; right: 8px; top: calc(56px + var(--safe-t, 0px)); margin: 0; max-width: none; overflow-x: auto; scrollbar-width: none; background: oklch(0 0 0 / .6); padding: 2px 4px 2px 10px; }
+html.phone .vw-pool > * { flex: none; }
+html.phone .vp-name { max-width: 46vw; } html.phone .vp-b { width: 36px; height: 36px; } html.phone .vp-read { height: 34px; }
+html.phone .vw-main { inset: 0; bottom: calc(var(--peek) + var(--film)); }
+html.phone .vw-film { bottom: var(--peek); height: var(--film); padding: 6px 10px; }
+html.phone .fs { width: 50px; height: 60px; }
+html.phone #viewer.is-video.chrome-off, html.phone #viewer.immersive { --peek: 0px; --film: 0px; }
+
+/* the info panel becomes a bottom sheet with a peek row */
+html.phone .vw-panel {
+  position: fixed; z-index: 12; left: 0; right: 0; bottom: 0; top: auto; width: auto; height: min(78vh, 680px); margin: 0; padding-bottom: var(--safe-b, 0px);
+  background: var(--bg2); border-left: 0; border-top: 3px solid var(--accent); backdrop-filter: none; opacity: 1; pointer-events: auto;
+  transform: translateY(calc(100% - var(--peek) + var(--dy, 0px))); transition: transform .36s var(--ease);
+}
+html.phone #viewer.sheet-open .vw-panel { transform: translateY(var(--dy, 0px)); }
+html.phone #viewer.no-panel .vw-panel { margin: 0; opacity: 1; pointer-events: auto; }
+html.phone #viewer.chrome-off .vw-panel, html.phone #viewer.immersive .vw-panel { margin: 0; opacity: 1; pointer-events: none; transform: translateY(105%); }
+html.phone .pn-grab { display: grid; place-items: center; flex: none; order: 0; height: 22px; touch-action: none; cursor: grab; }
+html.phone .pn-grab i { width: 44px; height: 4px; background: oklch(1 0 0 / .28); border-radius: 3px; }
+html.phone .pn-score { order: 1; flex: none; height: 44px; padding: 0 16px; border-bottom: 1px solid oklch(1 0 0 / .08); gap: 14px; touch-action: none; cursor: pointer; }
+html.phone .pn-score::after { content: 'Info & tags  ⌃'; margin-left: auto; font: 700 10px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+html.phone #viewer.sheet-open .pn-score::after { content: 'Close  ⌄'; color: #99a; }
+html.phone .pn-tabs { order: 2; } html.phone .pn-body { order: 3; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 28px; }
+html.phone .pn-tab { padding: 15px 0 13px; }
+html.phone .tg-group { padding: 10px 16px 4px; }
+html.phone .tg-foot .btn { flex: 1 1 auto; justify-content: center; }
+html.phone .ir { padding: 11px 0; } html.phone .info, html.phone .tg-foot { padding-left: 16px; padding-right: 16px; }
+.vw-scrim { position: absolute; z-index: 11; inset: 0; background: oklch(0 0 0 / .55); opacity: 0; pointer-events: none; transition: opacity .3s; }
+html.phone #viewer.sheet-open .vw-scrim { opacity: 1; pointer-events: auto; }
+
+/* tap to hide the controls (any touch screen) */
+html.touch #viewer.chrome-off .vw-top, html.touch #viewer.chrome-off .vw-film { opacity: 0; pointer-events: none; }
+html.touch #viewer.chrome-off .vw-top { translate: 0 -14px; }
+html.touch:not(.phone) #viewer.chrome-off { --d: .5s; --film: 0px; }
+html.touch:not(.phone) #viewer.chrome-off .vw-panel { margin-right: -372px; transform: translate(44px, 56px); opacity: 0; pointer-events: none; }
+html.touch #viewer.chrome-off .pc-bar { opacity: 0; pointer-events: none; }
+html.touch #viewer.chrome-off .pc-mini { opacity: 1; }
+
+.vw-ripple { position: absolute; z-index: 7; top: 50%; width: 34%; height: 44%; translate: 0 -50%; display: grid; place-items: center; font: 800 16px var(--f-mono); color: #fff; opacity: 0; pointer-events: none; border-radius: 50%; background: radial-gradient(closest-side, oklch(1 0 0 / .26), transparent); }
+.vw-ripple.left { left: -4%; } .vw-ripple.right { right: -4%; }
+.vw-ripple.go { animation: ripple .65s ease-out; }
+@keyframes ripple { 0% { opacity: 0; transform: scale(.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.1); } }
+
+/* video controls: bigger, no hover-only bits */
+.pc-bigplay { display: none; }
+html.touch .pc.paused .pc-bigplay { display: grid; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 92px; height: 92px; place-items: center; color: #fff; background: oklch(0 0 0 / .55);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); transition: scale .15s var(--spring); }
+html.touch .pc.paused .pc-bigplay:active { scale: .9; }
+html.touch #viewer.chrome-off .pc.paused .pc-bigplay { display: none; }
+html.touch .pc-bar { padding: 44px 8px 10px; gap: 0; }
+html.touch .pc-b { height: 46px; min-width: 44px; }
+html.touch .pc-vol { display: none; }
+html.touch .pc-time { min-width: 0; margin: 0 4px 0 0; font-size: 11px; }
+html.touch .pc-seek { height: 46px; margin: 0 4px; }
+html.touch .pc-seek::before { height: 5px; margin-top: -2.5px; } html.touch .pc-fill { height: 5px; margin-top: -2.5px; } html.touch .pc-buf i { height: 5px; margin-top: -2.5px; }
+html.touch .pc-knob { width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+html.touch .pc-speed { min-width: 44px; padding: 0 6px; }
+html.phone .pc-b[aria-label^='Loop'] { display: none; } /* loop lives in the long-press menu on a phone */
+
+/* the sheet and its dim layer must live in the same stacking context */
+html.phone .vw-main { z-index: auto; }
+
+
+/* ---- phone: pool strip never clips its buttons ---- */
+html.phone .vw-pool { overflow: hidden; }
+html.phone .vp-name { flex: 1 1 0; min-width: 36px; max-width: none; }
+html.phone .vp-pos, html.phone .vp-b, html.phone .vp-read, html.phone .vp-ic { flex: none; }
+
+/* ============================================================ comic reader on a phone / touch */
+.r-phone, .rd-label2 { display: none; }
+html.touch .rd-stage { touch-action: none; }
+html.touch .rd-stage.scroll { touch-action: pan-y; }
+.rd-stage.zooming .rd-img { transition: width .25s var(--ease), opacity .25s; }
+html.phone .r-desk, html.phone .rd-top .vw-sep { display: none; }
+html.phone .r-phone { display: grid; }
+html.phone #reader { inset: 0; --film: 84px; }
+html.phone .rd-top { height: calc(56px + var(--safe-t, 0px)); padding: var(--safe-t, 0px) 2px 0 2px; }
+html.phone .rd-top .vw-spacer { flex: 1; }
+html.phone .rd-title { flex: 1 1 0; min-width: 0; margin-left: 4px; } html.phone .rd-title b { max-width: none; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+html.phone .rd-label { display: none; }
+html.phone .rd-top .vw-spacer { display: none; }
+html.phone .rd-bottom { height: calc(60px + var(--safe-b, 0px)); padding: 12px 16px var(--safe-b, 0px); gap: 12px; }
+html.phone .rd-label2 { display: inline; flex: none; min-width: 58px; font: 700 12px var(--f-mono); color: #dde; font-variant-numeric: tabular-nums; }
+html.phone .rd-jump, html.phone .rd-pageno { display: none; }
+html.phone .rd-film { padding: 8px 10px; }
+html.phone .rd-end .rde { margin: 0 16px; padding: 24px 20px; } html.phone .rde .row-btns .btn { flex: 1 1 100%; justify-content: center; }
+html.phone .rd-col { width: 100%; padding: 60px 0 120px; }
+
+
+/* ---- gestures sheet ---- */
+.help-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.help-head h2 { margin-bottom: 18px; }
+html.phone .help { max-height: 88%; overflow-y: auto; overscroll-behavior: contain; padding: 18px 18px 20px; }
+html.phone .help h2 { font-size: 26px; margin-bottom: 14px; }
+html.phone .hk { align-items: flex-start; padding: 7px 0; font-size: 13.5px; }
+html.phone kbd { min-width: 0; max-width: 46%; text-align: left; white-space: normal; flex: none; }
+.help-kb { margin-top: 18px; border-top: 1px solid var(--line2); padding-top: 12px; }
+.help-kb summary { cursor: pointer; font: 700 10.5px var(--f-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); padding: 8px 0 14px; }
+
+
+/* ---- compact control rows on a phone ---- */
+html.phone .pools-ctl.compact { flex-wrap: nowrap; align-items: stretch; padding: 2px 12px 10px; gap: 8px; }
+html.phone .pools-ctl.compact .input { flex: 1 1 auto; width: auto; min-width: 0; }
+html.phone .pools-ctl.compact .btn { flex: none; justify-content: flex-start; }
+html.phone .pools-ctl.compact .btn span { max-width: 36vw; overflow: hidden; text-overflow: ellipsis; }
+html.phone .vhead-act .btn span { white-space: nowrap; }
+
+/* ---- performance + keyboard + tablets ---- */
+html.touch *, html.touch *::before, html.touch *::after { backdrop-filter: none !important; }
+html.phone.kbd #tabbar, html.phone.kbd .fab { display: none; }
+html.phone.kbd #app { height: calc(100% - var(--appbar) - var(--safe-t)); }
+html.phone .fc-thumbs { height: 96px; }
+@media (min-width: 701px) { html.touch .dossier { grid-template-columns: auto 1fr auto; } }
