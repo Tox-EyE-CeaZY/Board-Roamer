@@ -1,13 +1,14 @@
 import { h, download, pickFile, copyText, ago } from './util.js';
 import { RELEASES_URL } from './version.js';
-import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig } from './sync.js';
+import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
 import { icon } from './icons.js';
 import { S, setS, exportAll, importAll, wipe, DEFAULTS } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
-import { segmented, toast } from './ui.js';
+import { segmented, toast, confirmDlg } from './ui.js';
 import { reveal, openExternal } from './actions.js';
 import { checkForUpdate, installUpdate, onUpdate, appInfo } from './updates.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
+import { isNative } from './titlebar.js';
 
 let panel = null;
 
@@ -101,6 +102,11 @@ export function openSettings(section) {
           const info = await ping();
           setSyncConfig({ host: info.host || '' });
           toast('Connected to ' + (info.host || 'your desktop'));
+          // first connection only: the desktop can hand over its logins once. They never travel with normal syncing.
+          const private_ = /^http:\/\/100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(p.url);
+          if (private_ || await confirmDlg('Copy your login too?', 'This connection is not encrypted (it is not Tailscale). Your e621 username and API key would cross the network in plain text. Copy them anyway?', 'Copy login')) {
+            try { if (await claimCreds()) toast('Copied your login from the computer', { ms: 2600 }); } catch { /* the library can still sync */ }
+          }
           await syncNow();
         } catch (e) {
           setSyncConfig({ url: keep.url, code: keep.code });
@@ -138,6 +144,8 @@ export function openSettings(section) {
         h('div', { class: 'row-btns' },
           h('button', { class: 'btn', onclick: async () => { try { await syncNow(); } catch { /* toast shows it */ } } }, 'Sync now'),
           h('button', { class: 'btn', onclick: async () => { await hostConfig({ regen: true }); toast('New code made. Devices must re-enter it'); paintSync(); } }, 'New code')),
+        h('div', { class: 'st-row' }, h('div', {}, h('b', {}, cf.credsArmed ? 'Login ready for the next device' : 'Login not offered'), h('small', {}, cf.credsArmed ? 'The next device to connect gets your usernames and API keys once. Then they are forgotten, and never sync again.' : 'Your logins stay on this computer. Offer them once for a new device if you want it signed in too.')),
+          h('button', { class: 'btn', onclick: async () => { try { toast((await armCreds()) ? 'Login will go to the next device that connects' : 'There is no login saved to offer', { ms: 2600 }); } catch (e) { toast(e.message, { kind: 'err' }); } paintSync(); } }, cf.credsArmed ? 'Offer again' : 'Offer login')),
         cf.devices.length ? h('div', { class: 'st-note' }, 'Connected: ' + cf.devices.map((d) => `${d.name} (${d.ago < 90 ? 'just now' : Math.round(d.ago / 60) + ' min ago'})`).join(', ')) : h('div', { class: 'st-note' }, 'No device has connected yet.'),
         status,
         h('div', { class: 'st-note' }, 'The first time, Windows may ask to allow Board Roamer on the network. Allow it for private networks. Tailscale traffic is encrypted; on plain Wi-Fi the code protects access but the data is not encrypted, so prefer Tailscale on shared networks.'));
@@ -147,6 +155,31 @@ export function openSettings(section) {
     syncBox.replaceChildren(...rows);
   };
   paintSync();
+
+  /* --- background (desktop app only) */
+  const bgBox = h('div', { class: 'bg-box' });
+  const paintBg = async () => {
+    let c;
+    try { c = await (await fetch('/app/config')).json(); } catch { c = null; }
+    if (!c) return bgBox.replaceChildren(h('div', { class: 'st-note' }, 'Background options need the Board Roamer desktop app.'));
+    const post = async (patch) => {
+      try {
+        const r = await fetch('/app/config', { method: 'POST', body: JSON.stringify(patch) });
+        const j = await r.json();
+        if (j.error) throw new Error(j.error);
+      } catch (e) { toast(e.message, { kind: 'err' }); }
+      paintBg();
+    };
+    const trayName = c.os === 'macos' ? 'the menu bar' : 'the system tray';
+    const row = (title, hint, on, fn) => { const b = h('button', { class: 'tgl' + (on ? ' on' : ''), role: 'switch', onclick: fn }, h('i')); return h('div', { class: 'st-row' }, h('div', {}, h('b', {}, title), h('small', {}, hint)), b); };
+    const modes = [['tray', 'Closed (in the tray)'], ['minimized', 'Minimized'], ['open', 'Open']];
+    bgBox.replaceChildren(
+      row('Keep running when the window is closed', c.tray ? `Board Roamer stays in ${trayName}, so your other devices can still sync with it. Quit from the tray icon.` : `Needs ${trayName}, which this system did not provide. Closing the window quits the app.`, c.background && c.tray, () => post({ background: !c.background })),
+      row('Start when I sign in', 'Starts with your computer so syncing is ready before you open anything', c.autostart, () => post({ autostart: !c.autostart })),
+      h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'When it starts at sign-in'), h('small', {}, c.startMode === 'tray' && !c.tray ? 'No tray here, so it will start minimized' : 'How the window looks')),
+        segmented(modes, c.startMode, (v) => post({ startMode: v }))));
+  };
+  paintBg();
 
   /* --- updates */
   const updBox = h('div', { class: 'upd-box' });
@@ -217,6 +250,7 @@ export function openSettings(section) {
       seg('Blacklisted posts', 'blacklistMode', [['veil', 'Veil'], ['hide', 'Hide'], ['off', 'Off']], 'Veil keeps a click-to-reveal placeholder'),
       h('div', { class: 'st-note' }, 'Rules match like e621: space-separated tags must all match, -tag must be absent. Also supports rating:e and score:<N. Put #blur at the end of a line to blur those posts instead of hiding them. They stay blurred until you tap reveal, even when blacklisted posts are set to Hide or Off.')),
     sec('sync', 'Sync', syncBox),
+    isNative() && !isAndroid() ? sec('background', 'Background', bgBox) : null,
     sec('updates', 'Updates', updBox, toggle('Check for updates automatically', 'autoUpdate', 'Looks at this project’s GitHub releases when the app opens. Nothing is installed without your say-so')),
     sec('data', 'Data',
       toggle('Embed tags & source in saved files', 'embedMeta', 'Artist, tags, post link and the site’s MD5 go inside the image or video (XMP), so it can always be traced back'),
@@ -233,7 +267,7 @@ export function openSettings(section) {
   paintCreds();
   panel = h('aside', { class: 'settings' },
     h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
+    h('nav', { class: 'st-nav' }, ['source', 'look', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
     body);
   document.body.append(panel);
   requestAnimationFrame(() => panel?.classList.add('in'));

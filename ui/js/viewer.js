@@ -660,15 +660,21 @@ export class Viewer {
     }
   }
 
-  /** Counting taps on a picture. The second tap likes straight away (like TikTok); a third one pins. */
+  /**
+   * Counting taps on a picture: one hides the controls, two like it, three pin it. The like waits a moment to make sure
+   * no third tap follows, so a triple-tap only ever pins.
+   */
   _tapSeq(e) {
     const now = performance.now(), t = this._taps;
-    const near = t && now - t.t < 320 && Math.hypot(t.x - e.clientX, t.y - e.clientY) < 60;
+    const near = t && now - t.t < 300 && Math.hypot(t.x - e.clientX, t.y - e.clientY) < 60;
     if (near && t.n === 1) {
       clearTimeout(this._tapTimer);
-      this._taps = { n: 2, t: now, x: e.clientX, y: e.clientY };
-      this._like(e.clientX, e.clientY);
+      const x = e.clientX, y = e.clientY;
+      this._taps = { n: 2, t: now, x, y };
+      clearTimeout(this._likeTimer);
+      this._likeTimer = setTimeout(() => { if (this._taps?.n === 2) this._taps = null; this._like(x, y); }, 310);
     } else if (near && t.n === 2) {
+      clearTimeout(this._likeTimer); // it was the start of a triple-tap: the like never happens
       this._taps = { n: 3, t: now, x: e.clientX, y: e.clientY };
       this._pinTap(e.clientX, e.clientY);
     } else {

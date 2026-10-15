@@ -20,6 +20,10 @@ Grab the latest build from the [Releases page](../../releases/latest):
 The Android APK is universal: one file for ARM and x86 phones, tablets and emulators.
 `SHA256SUMS.txt` lists the checksum of every file.
 
+**Background.** On a computer, closing the window keeps Board Roamer running in the system tray (menu bar on macOS), so
+your phone can still sync with it. Settings → Background lets you turn that off, start the app when you sign in, and choose
+whether it starts closed (tray only), minimized or open. Quit from the tray icon. Opening the app again brings the window back.
+
 **Updates.** Settings → Updates checks this project's GitHub releases. On a computer it downloads the matching build,
 verifies it against `SHA256SUMS.txt`, swaps it in and restarts. On Android it downloads the APK and opens the system installer.
 
@@ -37,7 +41,7 @@ Launching it a second time reuses the running instance, so your boards are share
 Your data (boards, trail, settings) lives in the WebView profile: `%LOCALAPPDATA%\BoardRoamer` on Windows,
 `~/Library/Application Support/BoardRoamer` on macOS, `~/.local/share/BoardRoamer` on Linux. Downloads go to `Downloads/Board Roamer`.
 
-On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev`.
+On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libayatana-appindicator3-dev` (the last one is for the tray icon).
 
 ## What it does
 

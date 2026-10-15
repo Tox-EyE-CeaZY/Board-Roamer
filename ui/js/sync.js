@@ -5,7 +5,7 @@
  *   desktop   talks to its own hub over loopback, and only bothers while sharing is on
  *   android   talks to the desktop over the local network (Tailscale or Wi-Fi) through the native shell
  */
-import { syncData, on } from './store.js';
+import { syncData, on, S, setS } from './store.js';
 import { merge, same } from './syncmerge.js';
 import { isAndroid, native } from './platform.js';
 import { emit } from './store.js';
@@ -159,7 +159,8 @@ function schedule() {
 }
 
 async function tick() {
-  if (!active() || document.hidden || running || Date.now() < backoffUntil) return;
+  // on a computer the window may be hidden in the tray on purpose: keep syncing. A phone in the background should not.
+  if (!active() || (isAndroid() && document.hidden) || running || Date.now() < backoffUntil) return;
   try {
     const r = await rpc('GET', '/sync/info');
     if (r.status === 200 && r.rev !== lastRev) await syncNow({ quiet: true });
@@ -178,7 +179,7 @@ export async function startAutoSync() {
   const later = () => {
     clearTimeout(timer);
     if (!active() || applying) return;
-    timer = setTimeout(() => active() && !document.hidden && Date.now() >= backoffUntil && syncNow({ quiet: true }).catch(() => {}), 6000);
+    timer = setTimeout(() => active() && !(isAndroid() && document.hidden) && Date.now() >= backoffUntil && syncNow({ quiet: true }).catch(() => {}), 6000);
   };
   for (const ev of ['boards', 'subs', 'trail', 'settings', 'reading']) on(ev, later);
   document.addEventListener('visibilitychange', () => {
@@ -188,11 +189,34 @@ export async function startAutoSync() {
   if (active()) setTimeout(() => syncNow({ quiet: true }).catch(() => {}), 2500);
 }
 
+/* ------------------------------------------------------------------ logins: handed over once, never synced */
+/** Desktop: make the logins available to the NEXT device that connects (held in memory by the app, taken once). */
+export async function armCreds() {
+  const creds = Object.fromEntries(Object.entries(S('creds') || {}).filter(([, v]) => v && (v.user || v.key)));
+  const body = Object.keys(creds).length ? JSON.stringify(creds) : '{}';
+  const r = await fetch('/sync/creds', { method: 'PUT', body });
+  return (await r.json()).armed === true;
+}
+
+/** Phone, first connection only: ask the desktop for its logins. Resolves true when some arrived. */
+export async function claimCreds() {
+  const r = await rpc('GET', '/sync/creds');
+  if (r.status !== 200 || !r.text) return false;
+  const got = JSON.parse(r.text);
+  const mine = { ...(S('creds') || {}) };
+  let n = 0;
+  for (const [k, v] of Object.entries(got)) if (v && (v.user || v.key)) { mine[k] = { user: v.user || '', key: v.key || '' }; n++; }
+  if (n) setS('creds', mine);
+  return n > 0;
+}
+
 /* ------------------------------------------------------------------ desktop: sharing controls */
 export async function hostConfig(patch) {
   const res = await fetch('/sync/config', patch ? { method: 'POST', body: JSON.stringify(patch) } : undefined);
   const j = await res.json();
   if (j.error) throw new Error(j.error);
   if (patch && 'enabled' in patch) setHostEnabled(j.enabled);
+  // turning sharing on, or making a new code, is the moment to offer the login to the next device
+  if (patch && (patch.enabled === true || patch.regen)) { try { await armCreds(); j.credsArmed = true; } catch { /* the app will say so */ } }
   return j;
 }

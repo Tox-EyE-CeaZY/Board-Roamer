@@ -30,6 +30,8 @@ struct State {
     server: Option<Arc<Server>>,
     devices: HashMap<String, u64>,
     fails: Vec<Instant>,
+    /// The desktop's logins, held in memory only, for ONE new device to collect when it first connects.
+    creds: Option<Vec<u8>>,
 }
 
 static ST: OnceLock<Mutex<State>> = OnceLock::new();
@@ -116,6 +118,7 @@ pub fn init(dir: PathBuf) {
         server: None,
         devices: HashMap::new(),
         fails: Vec::new(),
+        creds: None,
     };
     let _ = ST.set(Mutex::new(state));
     if st().enabled {
@@ -166,7 +169,7 @@ fn net_request(rq: Request) {
     if path == "/ping" {
         return reply(rq, 200, "text/plain", b"board-roamer-sync".to_vec(), None);
     }
-    if path != "/sync/doc" && path != "/sync/info" {
+    if path != "/sync/doc" && path != "/sync/info" && path != "/sync/creds" {
         return json(rq, 404, serde_json::json!({ "error": "not found" }), None);
     }
     {
@@ -187,13 +190,47 @@ fn net_request(rq: Request) {
     }
     let name = header_val(&rq, "x-device").unwrap_or_else(|| "a device".into());
     st().devices.insert(name.chars().take(40).collect(), now_secs());
+    if path == "/sync/creds" {
+        return creds_claim(rq);
+    }
     doc_request(rq, &path);
+}
+
+/// A new device asks for the logins. They are handed over once, then forgotten.
+fn creds_claim(rq: Request) {
+    if rq.method() != &Method::Get {
+        return json(rq, 405, serde_json::json!({ "error": "method not allowed" }), None);
+    }
+    let taken = st().creds.take();
+    match taken {
+        Some(b) => reply(rq, 200, "application/json", b, None),
+        None => reply(rq, 204, "application/json", Vec::new(), None),
+    }
+}
+
+/// The desktop's own window arms (PUT) or disarms (DELETE) the one-time login handoff.
+fn creds_arm(mut rq: Request) {
+    match rq.method() {
+        Method::Put | Method::Post => {
+            let mut body = Vec::new();
+            let _ = rq.as_reader().take(64 * 1024).read_to_end(&mut body);
+            let ok = serde_json::from_slice::<serde_json::Value>(&body).map(|v| v.is_object() && v.as_object().map_or(false, |o| !o.is_empty())).unwrap_or(false);
+            st().creds = if ok { Some(body) } else { None };
+            json(rq, 200, serde_json::json!({ "armed": ok }), None);
+        }
+        Method::Delete => {
+            st().creds = None;
+            json(rq, 200, serde_json::json!({ "armed": false }), None);
+        }
+        _ => json(rq, 405, serde_json::json!({ "error": "method not allowed" }), None),
+    }
 }
 
 /// Routes shared by the loopback server (the app's own window) and the network listener.
 pub fn local_request(rq: Request, path: &str) {
     match path {
         "/sync/doc" | "/sync/info" => doc_request(rq, path),
+        "/sync/creds" => creds_arm(rq),
         "/sync/config" => config_request(rq),
         _ => json(rq, 404, serde_json::json!({ "error": "not found" }), None),
     }
@@ -256,6 +293,7 @@ fn config_request(mut rq: Request) {
             let mut s = st();
             s.token = random_token();
             s.devices.clear();
+            s.creds = None; // a new code means new devices: the login must be armed again on purpose
             save_config(&s);
         }
         if let Some(on) = v["enabled"].as_bool() {
@@ -271,6 +309,7 @@ fn config_request(mut rq: Request) {
                 let mut s = st();
                 s.enabled = false;
                 s.devices.clear();
+                s.creds = None;
                 save_config(&s);
             }
         }
@@ -280,7 +319,7 @@ fn config_request(mut rq: Request) {
     let devices: Vec<_> = s.devices.iter().map(|(n, t)| serde_json::json!({ "name": n, "ago": now.saturating_sub(*t) })).collect();
     let v = serde_json::json!({
         "enabled": s.enabled, "token": s.token, "port": s.port, "host": computer_name(),
-        "rev": s.rev, "addrs": addresses(), "devices": devices,
+        "rev": s.rev, "addrs": addresses(), "devices": devices, "credsArmed": s.creds.is_some(),
     });
     drop(s);
     json(rq, 200, v, None);

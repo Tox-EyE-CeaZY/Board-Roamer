@@ -733,6 +733,8 @@ function openFollow(f) {
 
 /* ---------- dossier */
 async function renderDossier() {
+  // a live board already says what this search is (and can be updated or saved), so no tag card on top of it
+  if (boards.get(st.smartId)?.kind === 'smart') return dossierEl.replaceChildren();
   const real = st.terms.filter((t) => !t.t.includes(':'));
   const pos = real.filter((t) => t.op === '+');
   if (pos.length !== 1 || real.some((t) => t.op === '~') || st.dossierOff.has(prov.id + pos[0]?.t)) return dossierEl.replaceChildren();
@@ -817,7 +819,7 @@ function updateBoardBar() {
     !same && h('button', { class: 'btn primary', title: 'Overwrite the board with what you are looking at now', onclick: () => updateBoardFromSearch(), html: icon('save', 15) + '<span>Update board</span>' }),
     !same && h('button', { class: 'btn', title: 'Go back to how the board was saved', onclick: () => runSmart(b) }, 'Revert'),
     h('button', { class: 'btn', title: 'Keep this board as is and save the current search separately', onclick: () => saveSmart() }, 'Save as new'),
-    h('button', { class: 'ibtn', title: 'Detach from this board', html: icon('close', 16), onclick: () => ((st.smartId = null), updateBoardBar()) }),
+    h('button', { class: 'ibtn', title: 'Detach from this board', html: icon('close', 16), onclick: () => ((st.smartId = null), updateBoardBar(), renderDossier()) }),
   );
   boardBar.hidden = false;
 }
@@ -851,6 +853,7 @@ async function saveSmart() {
   const b = boards.create(name, 'smart', { provider: prov.id, terms, filters: clone(st.filters), cover: st.loaded.slice(0, 10).map((p) => p.sample || p.thumb) });
   st.smartId = b.id;
   updateBoardBar();
+  renderDossier();
   toast(`Saved “${b.name}”`, { action: { label: 'View boards', run: () => go('#/boards') } });
 }
 
@@ -863,6 +866,7 @@ async function saveSmartFromEntry(e) {
 
 function runSmart(b) {
   st.smartId = b.id;
+  dossierEl.replaceChildren();
   if (b.provider !== prov.id) setProvider(b.provider, false);
   const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider);
   if (location.hash === next || (parseHash().view === 'roam' && roamHash(st.terms, st.filters, prov.id) === next)) return navigateRoam({ terms: b.terms, filters: { ...defaultFilters(), ...b.filters } });
