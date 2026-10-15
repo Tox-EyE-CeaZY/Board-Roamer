@@ -54,6 +54,7 @@ export const DEFAULTS = {
   keepAwake: true, // while a video plays or a comic is open
   privacyScreen: false, // Android: hide the app in the app switcher and block screenshots
   autoCloak: false, // cloak the screen whenever the app goes to the background
+  dtap: 'like', // double-tap a picture on a touch screen: like (favorite + upvote) | zoom
   filmPhone: false, // filmstrip in the viewer on a phone
   embedMeta: true, // write tags / artist / source / md5 into saved files
   volume: 0.8,
@@ -62,6 +63,7 @@ export const DEFAULTS = {
   readerRtl: false,
   readerFit: 'page', // page | width | height | orig
   readerCover: true, // first page stands alone in two-page mode
+  autoUpdate: true, // look for a newer version on GitHub now and then
   poolsTab: 'browse', // browse | library
   libSort: 'updates',
   subSort: 'latest',

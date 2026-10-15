@@ -15,15 +15,59 @@ function tagline(b) {
   return b.terms.map((t) => (t.op === '+' ? '' : t.op === '-' ? '−' : '≈') + pretty(t.t));
 }
 
-function card(b, ctx) {
-  const covers = (b.kind === 'pins' ? b.posts.slice(0, 4).map((p) => p.sample || p.thumb) : (b.cover || []).slice(0, 4)).filter(Boolean);
+/**
+ * The stack of polaroids on a board card. Covers are taken from a longer list than is shown: if one cannot be loaded
+ * (after trying the sample, the thumbnail, then the local proxy) its slot is dropped and the next picture moves up,
+ * so a card never shows a broken-image icon.
+ */
+function coverStack(b) {
+  const prox = (u) => '/img?u=' + encodeURIComponent(u);
+  const cands = (b.kind === 'pins'
+    ? b.posts.slice(0, 12).map((p) => [p.sample || p.thumb, p.thumb, p.thumb && prox(p.thumb)])
+    : (b.cover || []).slice(0, 12).map((u) => [u, prox(u)])
+  ).map((c) => [...new Set(c.filter(Boolean))]).filter((c) => c.length);
+  const stack = h('div', { class: 'bc-stack' });
+  const emptyNote = (text) => h('div', { class: 'bc-empty' }, h('i', { html: icon(b.kind === 'smart' ? 'compass' : 'pin', 34) }), h('span', {}, text));
+  if (!cands.length) {
+    stack.append(emptyNote(b.kind === 'smart' ? 'run it once to get a cover' : b.inbox ? 'tap the pin on anything to drop it here' : 'empty — pin something'));
+    return stack;
+  }
   const tilt = (i) => (hash01(b.id + i) - 0.5) * 14;
-  const stack = h('div', { class: 'bc-stack' },
-    covers.length ? covers.map((src, i) =>
-      h('div', { class: 'bc-photo', style: `--r:${tilt(i)}deg;--i:${i};--n:${covers.length};--x:${covers.length === 1 ? 27 : 4 + i * (46 / (covers.length - 1))}%` }, h('img', { src, alt: '', loading: 'lazy', draggable: 'false' })))
-      : h('div', { class: 'bc-empty' }, h('i', { html: icon(b.kind === 'smart' ? 'compass' : 'pin', 34) }), h('span', {}, b.kind === 'smart' ? 'run it once to get a cover' : b.inbox ? 'tap the pin on anything to drop it here' : 'empty — pin something')),
-    h('i', { class: 'bc-tape' }),
-  );
+  const slots = [];
+  let next = 0, note = null;
+  const layout = () => {
+    slots.forEach((el, i) => {
+      const n = slots.length;
+      el.style.cssText = `--r:${tilt(i)}deg;--i:${i};--n:${n};--t:${8 + (i % 2) * 7}%;--x:${n === 1 ? 27 : 4 + i * (46 / (n - 1))}%`;
+    });
+  };
+  const add = () => {
+    if (next >= cands.length) return false;
+    const srcs = cands[next++];
+    let k = 0;
+    const img = h('img', { alt: '', draggable: 'false', decoding: 'async' });
+    const slot = h('div', { class: 'bc-photo' }, img);
+    img.onload = () => slot.classList.add('ready');
+    img.onerror = () => {
+      if (++k < srcs.length) return void (img.src = srcs[k]);
+      const at = slots.indexOf(slot);
+      if (at >= 0) slots.splice(at, 1);
+      slot.remove();
+      if (!add() && !slots.length && !note) stack.append((note = emptyNote('covers could not load')));
+      layout();
+    };
+    slots.push(slot);
+    stack.append(slot);
+    img.src = srcs[0];
+    return true;
+  };
+  for (let i = 0; i < 4; i++) add();
+  layout();
+  return stack;
+}
+
+function card(b, ctx) {
+  const stack = coverStack(b);
   const meta = b.kind === 'pins'
     ? h('div', { class: 'bc-meta' }, b.inbox ? h('span', { class: 'quick' }, 'QUICK PIN') : null, `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`, h('span', {}, ago(b.updated)))
     : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), h('span', {}, getProvider(b.provider).name));

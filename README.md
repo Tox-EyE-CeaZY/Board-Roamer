@@ -1,12 +1,29 @@
 # Board Roamer
 
-A native desktop board viewer written in Rust. Pull artists, tags and tag combinations into a fast
+A board viewer written in Rust for **Windows, macOS, Linux and Android**. Pull artists, tags and tag combinations into a fast
 gallery with a proper viewer. Built for **e621**, with **e926, Danbooru, Gelbooru and Safebooru** supported too.
 
-Single 3 MB executable. The UI is embedded, and a small local server handles rate-limited, cached API
-access, so nothing needs installing besides WebView2 (already part of Windows 11).
+Single small executable. The UI is embedded, and a small local server handles rate-limited, cached API
+access, so nothing needs installing besides the system web view (WebView2 on Windows, built into macOS, WebKitGTK on Linux).
 
-## Run
+## Download
+
+Grab the latest build from the [Releases page](../../releases/latest):
+
+| Platform | File |
+| --- | --- |
+| Windows 64-bit / 32-bit / ARM | `board-roamer-windows-x64.exe` / `-x86.exe` / `-arm64.exe` |
+| macOS Apple Silicon / Intel | `BoardRoamer-macos-arm64.zip` / `BoardRoamer-macos-x64.zip` (unzip, then right-click the app and choose Open the first time) |
+| Linux 64-bit / ARM | `board-roamer-linux-x64` / `board-roamer-linux-arm64` (`chmod +x`, needs `libwebkit2gtk-4.1`) |
+| Android 10+ | `BoardRoamer.apk` (allow "install unknown apps" for your browser) |
+
+The Android APK is universal: one file for ARM and x86 phones, tablets and emulators.
+`SHA256SUMS.txt` lists the checksum of every file.
+
+**Updates.** Settings → Updates checks this project's GitHub releases. On a computer it downloads the matching build,
+verifies it against `SHA256SUMS.txt`, swaps it in and restarts. On Android it downloads the APK and opens the system installer.
+
+## Run from source
 
 ```
 cargo run --release            # native window
@@ -17,8 +34,10 @@ cargo run --release -- --browser --no-open  # serve only (http://127.0.0.1:4621)
 Or build once (`cargo build --release`) and double-click `target\release\board-roamer.exe`.
 Launching it a second time reuses the running instance, so your boards are shared.
 
-Your data (boards, trail, settings) lives in the WebView profile at `%LOCALAPPDATA%\BoardRoamer`.
-Downloads go to `Downloads\Board Roamer`.
+Your data (boards, trail, settings) lives in the WebView profile: `%LOCALAPPDATA%\BoardRoamer` on Windows,
+`~/Library/Application Support/BoardRoamer` on macOS, `~/.local/share/BoardRoamer` on Linux. Downloads go to `Downloads/Board Roamer`.
+
+On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev`.
 
 ## What it does
 
@@ -97,3 +116,36 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   js/viewer.js      lightbox
   js/search.js      chip search bar
 ```
+
+## Library, sync and phone
+
+- **Library**: save pools and comics (Add to library on a pool, or right-click one). The Pools tab flags new pages,
+  like Follows does for artists, and remembers where you stopped reading.
+- **#blur**: add `#blur` to a blacklist line (`wolf solo #blur`) to blur matching posts instead of hiding them. They stay
+  blurred, in the gallery and the viewer, until you tap reveal, even when blacklisting is set to Hide or Off.
+- **Sync**: Settings → Sync on the computer turns on sharing and shows an address and a pairing code. Enter them in the
+  phone's Settings → Sync. Boards, pins, follows, library, trail, reading progress and look/search settings merge both
+  ways over Tailscale or the same Wi-Fi. Logins and layout sizes stay per device.
+- **Phone layout**: bottom tab bar, sheets instead of popovers, swipe/pinch/long-press gestures, pull to refresh, Back
+  button support, and a touch-friendly comic reader.
+
+## Building and releasing
+
+Every push to `main` builds all platforms in GitHub Actions (`.github/workflows/build.yml`). Pushing a tag publishes a release:
+
+```
+git tag v1.4.0
+git push origin v1.4.0
+```
+
+The tag becomes the app version, the builds are attached to the release together with `SHA256SUMS.txt`, and installed
+copies offer the update.
+
+**Android signing.** An Android update only installs over an older version if both are signed with the same key. The key is
+never committed. Create it once with `python android/build.py` (it writes `android/board-roamer.keystore` and
+`android/keystore.pass`), back both up somewhere private, then add two repository secrets (Settings → Secrets and variables → Actions):
+
+- `ANDROID_KEYSTORE_B64`: the keystore file, base64-encoded (`base64 -w0 android/board-roamer.keystore`)
+- `ANDROID_KEYSTORE_PASS`: the contents of `android/keystore.pass`
+
+Local Android build: `python android/build.py` (needs the Android SDK build-tools 34, platform 34 and a JDK).

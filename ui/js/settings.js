@@ -1,20 +1,23 @@
 import { h, download, pickFile, copyText, ago } from './util.js';
+import { RELEASES_URL } from './version.js';
 import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig } from './sync.js';
 import { icon } from './icons.js';
 import { S, setS, exportAll, importAll, wipe, DEFAULTS } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
 import { segmented, toast } from './ui.js';
-import { reveal } from './actions.js';
+import { reveal, openExternal } from './actions.js';
+import { checkForUpdate, installUpdate, onUpdate, appInfo } from './updates.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
 
 let panel = null;
 
 const THEMES = [['night', 'Night Survey', '#0a1113', '#c8ff3d', 128], ['paper', 'Paper Chart', '#ece5d3', '#e8431c', 35], ['violet', 'Ultraviolet', '#0d0a18', '#ff5fd2', 335]];
 
-let offStatus = null;
+let offStatus = null, offUpd = null;
 export function closeSettings() {
   if (!panel) return;
   offStatus?.();
+  offUpd?.();
   const p = panel;
   panel = null;
   p.classList.remove('in');
@@ -145,6 +148,32 @@ export function openSettings(section) {
   };
   paintSync();
 
+  /* --- updates */
+  const updBox = h('div', { class: 'upd-box' });
+  offUpd?.();
+  offUpd = onUpdate((u) => {
+    const kids = [];
+    kids.push(h('div', { class: 'upd-ver' }, h('b', {}, 'Board Roamer ' + (u.current || '…')), h('small', {}, [u.os, u.arch].filter(Boolean).join(' · '))));
+    if (u.available) {
+      kids.push(h('div', { class: 'upd-new' },
+        h('b', {}, `Version ${u.latest.version} is available`),
+        u.latest.published ? h('small', {}, ago(u.latest.published)) : null,
+        u.latest.notes ? h('p', {}, u.latest.notes) : null,
+        h('div', { class: 'row-btns' },
+          h('button', { class: 'btn primary', disabled: u.installing, onclick: () => installUpdate() }, u.installing ? (u.progress ? `Downloading… ${u.progress}%` : 'Working…') : 'Update now'),
+          h('button', { class: 'btn', onclick: () => openExternal(u.latest.url) }, 'Release notes'))));
+    } else if (u.latest && !u.checking && !u.error) {
+      kids.push(h('div', { class: 'st-note' }, `You have the newest version${u.checked ? ` (checked ${ago(u.checked)})` : ''}.`));
+    }
+    if (u.checking) kids.push(h('div', { class: 'st-note' }, 'Checking GitHub…'));
+    if (u.error) kids.push(h('div', { class: 'st-note upd-err' }, u.error));
+    kids.push(h('div', { class: 'row-btns' },
+      h('button', { class: 'btn', disabled: u.checking || u.installing, onclick: () => checkForUpdate({ force: true }) }, u.checking ? 'Checking…' : 'Check now'),
+      h('button', { class: 'btn', onclick: () => openExternal(RELEASES_URL) }, 'All releases')));
+    updBox.replaceChildren(...kids);
+  });
+  appInfo().then(() => checkForUpdate().catch(() => {}));
+
   /* --- starred */
   const starBox = h('div', { class: 'star-list' });
   const paintStars = () => {
@@ -156,7 +185,7 @@ export function openSettings(section) {
   paintStars();
 
   /* --- blacklist */
-  const ta = h('textarea', { class: 'input mono', rows: 6, spellcheck: 'false', placeholder: 'one rule per line, e.g.\ngore\nscat -rating:e\nscore:<-5\n# comments start with #', oninput: () => setS('blacklist', ta.value.split('\n')) });
+  const ta = h('textarea', { class: 'input mono', rows: 6, spellcheck: 'false', placeholder: 'one rule per line, e.g.\ngore\nscat -rating:e\nscore:<-5\nwolf solo #blur\n# comments start with #', oninput: () => setS('blacklist', ta.value.split('\n')) });
   ta.value = S('blacklist').join('\n');
 
   const themeRow = h('div', { class: 'theme-row' }, THEMES.map(([id, name, bg, ac, hue]) => h('button', { class: 'theme-card' + (S('theme') === id ? ' on' : ''), style: `--tb:${bg};--ta:${ac}`, onclick: (e) => { setS('theme', id); setS('hue', hue); [...e.currentTarget.parentElement.children].forEach((c) => c.classList.toggle('on', c === e.currentTarget)); } }, h('i'), h('span', {}, name))));
@@ -173,6 +202,7 @@ export function openSettings(section) {
       toggle('Always show stats on tiles', 'showMeta'), toggle('Blur thumbnails until hovered', 'blurThumbs', 'Handy in public')),
     (isTouch() || isPhone()) ? sec('phone', 'Phone & touch',
       seg('Columns', 'mobileCols', [[1, '1'], [2, '2'], [3, '3'], [4, '4']], 'In the gallery when the phone is upright. One more when sideways'),
+      seg('Double-tap a picture', 'dtap', [['like', 'Like'], ['zoom', 'Zoom']], 'Like favorites and upvotes it. Triple-tap pins it. Pinch always zooms'),
       toggle('Haptic feedback', 'haptics', 'A small buzz on long-press and refresh'),
       toggle('Keep the screen on', 'keepAwake', 'While a video plays or a comic is open'),
       toggle('Cloak when I switch away', 'autoCloak', 'Shows the plain document the moment the app leaves the screen'),
@@ -185,14 +215,15 @@ export function openSettings(section) {
     sec('starred', 'Starred', starBox),
     sec('filters', 'Blacklist', ta,
       seg('Blacklisted posts', 'blacklistMode', [['veil', 'Veil'], ['hide', 'Hide'], ['off', 'Off']], 'Veil keeps a click-to-reveal placeholder'),
-      h('div', { class: 'st-note' }, 'Rules match like e621: space-separated tags must all match, -tag must be absent. Also supports rating:e and score:<N.')),
+      h('div', { class: 'st-note' }, 'Rules match like e621: space-separated tags must all match, -tag must be absent. Also supports rating:e and score:<N. Put #blur at the end of a line to blur those posts instead of hiding them. They stay blurred until you tap reveal, even when blacklisted posts are set to Hide or Off.')),
     sec('sync', 'Sync', syncBox),
+    sec('updates', 'Updates', updBox, toggle('Check for updates automatically', 'autoUpdate', 'Looks at this project’s GitHub releases when the app opens. Nothing is installed without your say-so')),
     sec('data', 'Data',
       toggle('Embed tags & source in saved files', 'embedMeta', 'Artist, tags, post link and the site’s MD5 go inside the image or video (XMP), so it can always be traced back'),
       h('div', { class: 'row-btns' },
         h('button', { class: 'btn', onclick: () => download('board-roamer-backup.json', exportAll()) }, 'Export backup'),
         h('button', { class: 'btn', onclick: async () => { const f = await pickFile('.json'); if (!f) return; try { importAll(await f.text()); toast('Imported — reloading…'); setTimeout(() => location.reload(), 700); } catch (e) { toast(e.message, { kind: 'err' }); } } }, 'Import backup'),
-        h('button', { class: 'btn', onclick: () => fetch('/open?reveal=' + encodeURIComponent('%USERPROFILE%\\Downloads\\Board Roamer'), { method: 'POST' }) }, 'Downloads folder')),
+        h('button', { class: 'btn', onclick: () => fetch('/open?reveal=downloads', { method: 'POST' }) }, 'Downloads folder')),
       h('div', { class: 'row-btns' },
         h('button', { class: 'btn', onclick: () => (wipe('tags'), toast('Tag memory cleared')) }, 'Forget tag info'),
         h('button', { class: 'btn', onclick: () => (wipe('trail'), toast('Trail cleared')) }, 'Clear trail'),
@@ -202,7 +233,7 @@ export function openSettings(section) {
   paintCreds();
   panel = h('aside', { class: 'settings' },
     h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
+    h('nav', { class: 'st-nav' }, ['source', 'look', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
     body);
   document.body.append(panel);
   requestAnimationFrame(() => panel?.classList.add('in'));
@@ -222,7 +253,7 @@ const SHORTCUTS = [
 
 const GESTURES = [
   ['Gallery', [['Tap', 'Open a post'], ['Long-press', 'Menu: pin, save, share, follow…'], ['Pull down', 'Run the search again'], ['Long-press → Select', 'Then tap to pick several']]],
-  ['Viewer', [['Swipe sideways', 'Previous / next'], ['Swipe down', 'Close'], ['Swipe up', 'Info, tags and boards'], ['Pinch · double-tap', 'Zoom in and out'], ['Tap', 'Hide / show the controls']]],
+  ['Viewer', [['Swipe sideways', 'Previous / next'], ['Swipe down', 'Close'], ['Swipe up', 'Info, tags and boards'], ['Pinch', 'Zoom in and out'], ['Double-tap', 'Like: favorite + upvote (or zoom, in Settings)'], ['Triple-tap', 'Quick pin'], ['Tap', 'Hide / show the controls']]],
   ['Video', [['Double-tap the sides', 'Back / forward 10 s'], ['Double-tap the middle', 'Play · pause'], ['Tap', 'Show the controls'], ['⛶ button', 'Fullscreen, turns sideways']]],
   ['Comic reader', [['Tap the sides', 'Turn the page'], ['Swipe sideways', 'Turn the page'], ['Pinch · double-tap', 'Zoom, then drag to look around'], ['Tap the middle', 'Controls'], ['Layout button', 'One page · two pages · scroll']]],
   ['Everywhere', [['Back button', 'Closes the top layer, then goes back'], ['Double-tap the cloak', 'Leave the plain-document screen']]],

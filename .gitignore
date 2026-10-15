@@ -1,1 +1,13 @@
+# build output
 /target
+/target-*/
+android/build/
+android/build-debug/
+android/out/
+*.apk
+*.idsig
+
+# signing keys and passwords: NEVER commit these
+*.keystore
+*.jks
+android/keystore.pass

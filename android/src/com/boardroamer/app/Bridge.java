@@ -111,6 +111,31 @@ final class Bridge {
         }, "br-sync").start();
     }
 
+    /** Download the new APK from this project's GitHub release and hand it to Android's installer. */
+    @JavascriptInterface
+    public void installUpdate(int id, String url) {
+        new Thread(() -> {
+            String out;
+            try {
+                File f = new File(ShareProvider.dir(a), "update.apk");
+                Updater.fetch(url, f, p -> a.runOnUiThread(() -> a.web.evaluateJavascript("window.__updProgress&&window.__updProgress(" + p + ")", null)));
+                boolean allowed = Build.VERSION.SDK_INT < 26 || a.getPackageManager().canRequestPackageInstalls();
+                if (!allowed) {
+                    a.runOnUiThread(() -> a.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + a.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+                    out = new JSONObject().put("status", "permission").toString();
+                } else {
+                    Uri u = Uri.parse("content://" + ShareProvider.AUTHORITY + "/update.apk");
+                    Intent i = new Intent(Intent.ACTION_VIEW).setDataAndType(u, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    a.runOnUiThread(() -> a.startActivity(i));
+                    out = new JSONObject().put("status", "installing").toString();
+                }
+            } catch (Throwable e) {
+                out = errorJson(msg(e));
+            }
+            a.resolve(id, out);
+        }, "br-update").start();
+    }
+
     private static String errorJson(String m) {
         try { return new JSONObject().put("error", m).toString(); } catch (Exception e) { return "{\"error\":\"failed\"}"; }
     }

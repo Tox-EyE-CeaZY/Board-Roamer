@@ -1,6 +1,7 @@
 import { h, ago, pretty, fmtNum, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, reading } from './store.js';
+import { S, setS, reading, library, on } from './store.js';
+import { toggleLibrary, renderLibrary } from './library.js';
 import { getProvider } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented } from './ui.js';
@@ -32,13 +33,26 @@ export function kindOf(pool, posts) {
 }
 export const KIND_LABEL = { comic: 'Comic', series: 'Series', collection: 'Collection' };
 
+/** Opening a saved pool counts as seeing its pages. */
+function touchLibrary(prov, pool, kind) {
+  const f = library.find(prov.credKey, pool.id);
+  if (!f) return;
+  const patch = { count: Math.max(f.count, pool.count), updated: pool.updated || f.updated, name: pool.name, seenCount: Math.max(f.seenCount, pool.count) };
+  if (kind && f.kind !== kind) patch.kind = kind;
+  library.update(f.id, patch, true);
+  library.update(f.id, {});
+}
+
 export async function loadPool(prov, id, onProgress) {
   const k = keyOf(prov, id);
+  const saved = library.find(prov.credKey, id);
+  if (fullCache.has(k) && saved && saved.count > fullCache.get(k).pool.count) (fullCache.delete(k), metaCache.delete(k)); // the library saw new pages since
   if (fullCache.has(k)) return fullCache.get(k);
   const pool = await poolInfo(prov, id);
   const posts = await prov.poolPosts(pool, onProgress);
   const res = { pool, posts, kind: kindOf(pool, posts) };
   fullCache.set(k, res);
+  touchLibrary(prov, pool, res.kind);
   return res;
 }
 
@@ -87,11 +101,20 @@ export async function renderPoolView(root, id, ctx) {
     kind === 'comic' ? ctx.readPool(id, posts[n - 1].id) : ctx.openViewer(gal, n - 1, null, false, { pool, kind });
   };
   const resume = prog && prog.i > 0 && prog.i < posts.length - 1;
+  const inLib = () => !!library.find(prov.credKey, id);
+  const libBtn = h('button', { class: 'btn', onclick: () => { toggleLibrary(prov, { pool, kind, cover: posts[0]?.sample || posts[0]?.thumb }); paintLib(); } });
+  const paintLib = () => {
+    libBtn.classList.toggle('on', inLib());
+    libBtn.innerHTML = icon('folder', 16) + `<span>${inLib() ? 'In library' : 'Add to library'}</span>`;
+    libBtn.title = inLib() ? 'Saved. New pages will be flagged on the Pools tab. Click to remove' : 'Keep this and get told when pages are added';
+  };
+  paintLib();
   const act = h('div', { class: 'vhead-act' },
     kind === 'comic' && h('button', { class: 'btn primary big', html: icon('book', 17) + `<span>${resume ? `Continue · page ${prog.i + 1}` : 'Read'}</span>`, onclick: () => ctx.readPool(id, posts[resume ? prog.i : 0]?.id) }),
     kind === 'comic' && resume && h('button', { class: 'btn', onclick: () => ctx.readPool(id, posts[0]?.id) }, 'Start over'),
     kind !== 'comic' && h('button', { class: 'btn primary', html: icon('play', 16) + '<span>Slideshow</span>', onclick: () => ctx.openViewer(gal, 0, null, true, { pool, kind }) }),
     kind !== 'comic' && h('button', { class: 'btn', html: icon('eye', 16) + '<span>Open first</span>', onclick: () => ctx.openViewer(gal, 0, null, false, { pool, kind }) }),
+    libBtn,
     h('div', { class: 'jump' }, pageInput, h('button', { class: 'btn', onclick: jump }, 'Go')),
     h('button', { class: 'btn', title: 'Select pages', html: icon('select', 16) + '<span>Select</span>', onclick: () => gal.setSelectMode(!gal.selectMode) }),
     h('button', { class: 'btn', title: 'Save every page, numbered, into a folder', html: icon('download', 16) + '<span>Save all</span>', onclick: () => downloadMany(posts, { dir: pool.name, numbered: true }) }),
@@ -112,6 +135,7 @@ export async function renderPoolView(root, id, ctx) {
     { label: 'Copy pool link', icon: 'link', run: () => (copyText(`${prov.web}/pools/${id}`), toast('Link copied', { ms: 1200 })) },
     { label: 'Copy pool name', icon: 'copy', run: () => copyText(pool.name) },
     { label: 'Open on site', icon: 'external', run: () => openExternal(`${prov.web}/pools/${id}`) },
+    { label: inLib() ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => { toggleLibrary(prov, { pool, kind, cover: posts[0]?.sample || posts[0]?.thumb }); paintLib(); } },
     { sep: true },
     kind === 'comic' && { label: 'Read', icon: 'book', run: () => ctx.readPool(id, posts[0]?.id) },
     { label: 'Save all pages', icon: 'download', run: () => downloadMany(posts, { dir: pool.name, numbered: true }) },
@@ -134,11 +158,17 @@ export function renderPools(root, ctx) {
   const more = h('button', { class: 'btn', onclick: () => load() }, 'Load more');
   const note = h('div', { class: 'pools-note' });
   const shelf = h('div', { class: 'shelf', hidden: true });
+  const libHost = h('div', { class: 'lib-host', hidden: true });
 
   const search = h('input', { class: 'input', placeholder: 'Search pools by name…', spellcheck: 'false', value: '', oninput: debounce((e) => { st.q = e.target.value.trim(); reset(); }, 450) });
+  const tabs = segmented([['browse', 'Browse'], ['library', 'Library']], S('poolsTab'), (v) => { setS('poolsTab', v); applyTab(); }, 'lib-tabs');
+  const paintTabs = () => {
+    const b = tabs.querySelector('[data-v="library"]'), n = library.all().length, fresh = library.unseen();
+    b.replaceChildren('Library', n ? h('span', { class: 'tab-n' }, String(n)) : null, fresh ? h('i', { class: 'tab-dot', title: `${fresh} with new pages` }) : null);
+  };
   const head = h('div', { class: 'vhead' },
     h('div', {}, h('h1', {}, 'Pools'), h('p', {}, 'Comics and collections, auto-sorted')),
-    h('div', { class: 'vhead-act' }, search));
+    h('div', { class: 'vhead-act' }, tabs, search));
   const catOpts = [['', 'All'], ['series', 'Series'], ['collection', 'Collections']];
   const orderOpts = [['updated_at', 'Recently updated'], ['created_at', 'Newest'], ['name', 'Name'], ['post_count', 'Biggest']];
   const comicsToggle = () => h('label', { class: 'tgl-row' }, h('button', { class: 'tgl' + (st.comicsOnly ? ' on' : ''), role: 'switch', onclick: (e) => { st.comicsOnly = !st.comicsOnly; e.currentTarget.classList.toggle('on', st.comicsOnly); applyFilter(); paintBadge(); } }, h('i')), h('span', {}, 'Comics only'));
@@ -160,12 +190,27 @@ export function renderPools(root, ctx) {
       segmented(catOpts, st.category, (v) => { st.category = v; reset(); }),
       segmented(orderOpts, st.order, (v) => { st.order = v; reset(); }),
       comicsToggle());
-  root.replaceChildren(h('div', { class: 'pools-page' }, head, ctl, shelf, grid, h('div', { class: 'pools-foot' }, note, more)));
+  const foot = h('div', { class: 'pools-foot' }, note, more);
+  root.replaceChildren(h('div', { class: 'pools-page' }, head, ctl, shelf, grid, foot, libHost));
+  const applyTab = () => {
+    const lib = S('poolsTab') === 'library';
+    ctl.hidden = lib || !prov.pools;
+    shelf.hidden = lib || !shelf.childElementCount;
+    grid.hidden = lib;
+    foot.hidden = lib;
+    search.hidden = lib;
+    libHost.hidden = !lib;
+    tabs.querySelectorAll('.seg-b').forEach((b) => b.classList.toggle('on', b.dataset.v === S('poolsTab')));
+    if (lib) renderLibrary(libHost, ctx);
+    paintTabs();
+  };
+  const offLib = on('library', () => (root.isConnected && root.contains(tabs) ? paintTabs() : offLib()));
 
   if (!prov.pools) {
     grid.replaceChildren(h('div', { class: 'empty-state' }, h('div', { class: 'es-art', html: icon('pool', 56) }), h('h2', {}, 'Pools live on e621'), h('p', {}, `${prov.name} doesn’t have pools. Switch the source to e621 or e926.`)));
     more.hidden = true;
     ctl.hidden = true;
+    applyTab();
     return;
   }
 
@@ -174,26 +219,63 @@ export function renderPools(root, ctx) {
   if (recent.length) {
     shelf.hidden = false;
     shelf.append(h('h3', {}, 'Continue reading'), h('div', { class: 'shelf-row' }, recent.map(([k, v]) =>
-      h('button', { class: 'shelf-card', title: v.name, onclick: () => ctx.readPool(v.pool, null, v.prov) },
+      h('button', { class: 'shelf-card', title: v.name, 'data-key': k, onclick: () => ctx.readPool(v.pool, null, v.prov) },
         h('div', { class: 'sc-img' }, v.cover ? h('img', { src: v.cover, alt: '', draggable: 'false' }) : null, h('i', { class: 'sc-bar' }, h('b', { style: `width:${Math.min(100, ((v.i + 1) / (v.total || 1)) * 100)}%` }))),
         h('span', {}, v.name), h('small', {}, `page ${v.i + 1} of ${v.total}`)))));
   }
 
+  // right-click / long-press a "Continue reading" card: browse the pool, start over, save it to the library…
+  bindContext(shelf, (e) => {
+    const el = e.target.closest('.shelf-card');
+    const v = el && reading.get(el.dataset.key);
+    if (!v) return null;
+    const pv = getProvider(v.prov);
+    const web = `${pv.web}/pools/${v.pool}`;
+    const inLib = () => !!library.find(pv.credKey, v.pool);
+    return [
+      { header: v.name },
+      { label: `Continue · page ${v.i + 1} of ${v.total}`, icon: 'book', run: () => ctx.readPool(v.pool, null, v.prov) },
+      { label: 'Browse this pool', icon: 'pool', run: () => ctx.go(`#/pool/${v.pool}?p=${v.prov}`) },
+      { label: 'Start over', icon: 'refresh', run: () => ctx.go(`#/pool/${v.pool}?p=${v.prov}&read=0`) },
+      { sep: true },
+      { label: inLib() ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => toggleLibrary(pv, { pool: { id: v.pool, name: v.name, count: v.total, updated: null, cat: 'collection' }, kind: v.kind || 'comic', cover: v.cover }) },
+      { label: 'Open on site', icon: 'external', run: () => openExternal(web) },
+      { label: 'Copy pool link', icon: 'link', run: () => (copyText(web), toast('Link copied', { ms: 1200 })) },
+    ];
+  });
+
   const card = (pool) => {
-    const cover = h('div', { class: 'pc-cover' }, h('i', { class: 'pc-ph', html: icon('pool', 30) }));
+    const libBtn = h('button', { class: 'lib-add', 'aria-label': 'Add to library', onclick: (e) => { e.stopPropagation(); addToLib(el); } });
+    const cover = h('div', { class: 'pc-cover' }, h('i', { class: 'pc-ph', html: icon('pool', 30) }), h('div', { class: 'lib-act' }, libBtn));
     const badge = h('span', { class: 'kind kind-' + (pool.cat === 'series' ? 'series' : 'collection'), html: icon('pool', 12) + (pool.cat === 'series' ? 'SERIES' : 'COLLECTION') });
     const el = h('article', { class: 'pcard', tabindex: 0, 'data-id': pool.id, onclick: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`), onkeydown: (e) => e.key === 'Enter' && ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
       cover, h('div', { class: 'pc-info' }, h('h3', {}, pool.name), h('div', { class: 'pc-meta' }, badge, h('span', {}, `${fmtNum(pool.count)} pages`), h('span', {}, ago(pool.updated)))));
     el._pool = pool;
     el._cover = cover;
     el._badge = badge;
+    el._libBtn = libBtn;
+    paintLibBtn(el);
     return el;
   };
+
+  const paintLibBtn = (el) => {
+    const on_ = !!library.find(prov.credKey, el._pool.id);
+    el._libBtn.classList.toggle('on', on_);
+    el._libBtn.innerHTML = icon('folder', 15);
+    el._libBtn.title = on_ ? 'In your library. Click to remove' : 'Add to library';
+  };
+  const addToLib = (el) => {
+    const pool = el._pool, p = st.covers.get(pool.ids[0]);
+    toggleLibrary(prov, { pool, kind: el._comic ? 'comic' : pool.cat === 'series' ? 'series' : 'collection', cover: p && (p.sample || p.thumb) });
+    paintLibBtn(el);
+  };
+  const offBtns = on('library', () => (root.isConnected && root.contains(grid) ? [...grid.children].forEach((el) => el._libBtn && paintLibBtn(el)) : offBtns()));
 
   const paintCover = (el) => {
     const pool = el._pool, p = st.covers.get(pool.ids[0]);
     if (!p) return;
-    el._cover.replaceChildren(h('img', { src: p.sample || p.thumb, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') }));
+    el._cover.querySelector('.pc-ph')?.remove();
+    el._cover.prepend(h('img', { src: p.sample || p.thumb, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') }));
     if (p.isComic) {
       el._comic = true;
       el._badge.className = 'kind kind-comic';
@@ -259,6 +341,7 @@ export function renderPools(root, ctx) {
       { header: pool.name },
       { label: 'Open pool', icon: 'pool', run: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
       el._comic && { label: 'Read', icon: 'book', run: () => ctx.readPool(pool.id, pool.ids[0], prov.id) },
+      { label: library.find(prov.credKey, pool.id) ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => addToLib(el) },
       { sep: true },
       { label: 'Open on site', icon: 'external', run: () => openExternal(`${prov.web}/pools/${pool.id}`) },
       { label: 'Copy pool link', icon: 'link', run: () => (copyText(`${prov.web}/pools/${pool.id}`), toast('Link copied', { ms: 1200 })) },
@@ -267,4 +350,5 @@ export function renderPools(root, ctx) {
   });
   st.gen = 0;
   load();
+  applyTab();
 }

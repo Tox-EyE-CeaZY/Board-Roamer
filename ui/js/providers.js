@@ -248,8 +248,9 @@ const e6 = {
     if (on) await call(this, `${this.web}/favorites.json?post_id=${post.id}`, { method: 'POST' });
     else await call(this, `${this.web}/favorites/${post.id}.json`, { method: 'DELETE' });
   },
-  async setVote(post, score) {
-    await call(this, `${this.web}/posts/${post.id}/votes.json?${qs({ score, no_unvote: 'false' })}`, { method: 'POST' });
+  /** `keep`: never undo a vote that is already there (double-tap likes must only ever add). */
+  async setVote(post, score, keep = false) {
+    await call(this, `${this.web}/posts/${post.id}/votes.json?${qs({ score, no_unvote: keep ? 'true' : 'false' })}`, { method: 'POST' });
   },
   async accountBlacklist() {
     const c = credsFor(this);
@@ -415,14 +416,30 @@ export function buildQuery(prov, terms, filters) {
 }
 
 /* ------------------------------------------------------------------ blacklist */
-export function compileBlacklist(lines) {
+/**
+ * One rule per line. A line that ends with (or contains) #blur only blurs matching posts: it never veils or hides them,
+ * and it keeps working when the blacklist mode is Off. `which` picks the rules to compile: 'hide' (default) or 'blur'.
+ */
+export function compileBlacklist(lines, which = 'hide') {
   return lines
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('#'))
     .map((l) => {
-      const parts = l.split(/\s+/);
-      return { line: l, pos: parts.filter((p) => !p.startsWith('-') && !p.startsWith('~')), neg: parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1)), any: parts.filter((p) => p.startsWith('~')).map((p) => p.slice(1)) };
-    });
+      const blur = /#blur\b/i.test(l);
+      const clean = l.replace(/\s*#blur\b/gi, '').trim();
+      const parts = clean.split(/\s+/).filter(Boolean);
+      return { line: l, blur, pos: parts.filter((p) => !p.startsWith('-') && !p.startsWith('~')), neg: parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1)), any: parts.filter((p) => p.startsWith('~')).map((p) => p.slice(1)), empty: !parts.length };
+    })
+    .filter((r) => !r.empty && r.blur === (which === 'blur'));
+}
+
+let blurCache = { sig: null, rules: [] };
+/** Does a #blur rule match this post? (Independent of the blacklist mode.) */
+export function isBlurred(post) {
+  const lines = S('blacklist') || [];
+  const sig = lines.join('\n');
+  if (blurCache.sig !== sig) blurCache = { sig, rules: compileBlacklist(lines, 'blur') };
+  return !!blacklistHit(post, blurCache.rules);
 }
 
 export function blacklistHit(post, rules) {

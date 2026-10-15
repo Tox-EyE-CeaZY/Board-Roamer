@@ -1,7 +1,7 @@
 import { h, clamp, fmtNum, fmtBytes, fmtDate, ago, copyText, pretty } from './util.js';
 import { icon } from './icons.js';
 import { S, setS, boards, postKey, tagc } from './store.js';
-import { CATS, CAT_LABEL, getProvider } from './providers.js';
+import { CATS, CAT_LABEL, getProvider, isBlurred } from './providers.js';
 import { toast, stamp, closePopover } from './ui.js';
 import { pinContent, pinPopover, quickPin } from './pins.js';
 import { Player } from './player.js';
@@ -32,6 +32,7 @@ export class Viewer {
     this.poolCtx = null;
     this.sheetOpen = false; // phone: the info sheet
     this.swx = this.swy = 0; // live swipe offsets (touch)
+    this._unblur = new Set(); // posts the viewer chose to reveal this session
     this._lastTouch = -1e9;
     this._build();
     this._sheetDrag();
@@ -235,7 +236,8 @@ export class Viewer {
     this.tx = this.ttx = this.ty = this.tty = 0;
     this.counter.textContent = this._counterText();
     this.hooks.onNavigate?.(post, this.i);
-    this.bg.style.backgroundImage = `url("${post.thumb}")`;
+    const blurred = isBlurred(post) && !this._unblur.has(postKey(post));
+    this.bg.style.backgroundImage = blurred ? 'none' : `url("${post.thumb}")`;
     const artist = post.artists.length ? post.artists.slice(0, 3).map(pretty).join(', ') : 'unknown artist';
     this.title.replaceChildren(h('b', {}, artist), h('span', {}, `#${post.id} · ${post.provider}`));
     this._paintToggles();
@@ -246,6 +248,7 @@ export class Viewer {
     this.media = el;
     this.stage.prepend(el);
     if (this.player) this.stage.append(this.player.el);
+    this._guard(post, el, blurred);
     this._relayoutMedia(true);
     const slide = !!(dir && isTouch() && old && !fromRect);
     if (fromRect && post.kind !== 'video') this._flip(el, fromRect);
@@ -278,6 +281,27 @@ export class Viewer {
     this._wake();
     if (this.i >= this.list.length - 6 && !this.poolCtx) this.hooks.onNeedMore?.();
     if (this.playing) this._armSlide(token);
+  }
+
+  /** A #blur post stays blurred (and a video silent and paused) until it is deliberately revealed. */
+  _guard(post, el, blurred) {
+    this.stage.querySelector('.vw-blur')?.remove();
+    this.root.classList.toggle('blur-on', blurred);
+    if (!blurred) return;
+    el.classList.add('blurred');
+    const vid = el.tagName === 'VIDEO';
+    if (vid) { el.muted = true; el.pause(); el.addEventListener('play', () => el.classList.contains('blurred') && el.pause()); }
+    const reveal = () => {
+      this._unblur.add(postKey(post));
+      el.classList.remove('blurred');
+      this.root.classList.remove('blur-on');
+      this.bg.style.backgroundImage = `url("${post.thumb}")`;
+      btn.remove();
+      this._renderFilm();
+      if (vid && S('autoplay')) el.play().catch(() => {});
+    };
+    const btn = h('button', { class: 'vw-blur', type: 'button', onclick: (e) => (e.stopPropagation(), reveal()) }, h('i', { html: icon('eye', 22) }), h('b', {}, 'Blurred'), h('small', {}, isTouch() ? 'Tap to reveal' : 'Click to reveal'));
+    this.stage.append(btn);
   }
 
   /** Jump any running slide to its end (a new touch should find the picture at rest). */
@@ -591,6 +615,8 @@ export class Viewer {
       return true;
     }
     if (this.pointers.size) return true; // another finger is still down
+    // pictures: one tap hides the controls, two likes it (favorite + upvote), three pins it
+    if (!this.isVideo && S('dtap') !== 'zoom') return this._tapSeq(e), true;
     // a tap: single (after a beat, in case it becomes a double) or double
     const now = performance.now(), prev = this._lastTap;
     if (prev && now - prev.t < 300 && Math.hypot(prev.x - e.clientX, prev.y - e.clientY) < 44) {
@@ -632,6 +658,69 @@ export class Viewer {
       this.root.classList.add('chrome-off');
       if (this.isVideo && this.player && !this.player.v.paused) this.root.classList.add('immersive');
     }
+  }
+
+  /** Counting taps on a picture. The second tap likes straight away (like TikTok); a third one pins. */
+  _tapSeq(e) {
+    const now = performance.now(), t = this._taps;
+    const near = t && now - t.t < 320 && Math.hypot(t.x - e.clientX, t.y - e.clientY) < 60;
+    if (near && t.n === 1) {
+      clearTimeout(this._tapTimer);
+      this._taps = { n: 2, t: now, x: e.clientX, y: e.clientY };
+      this._like(e.clientX, e.clientY);
+    } else if (near && t.n === 2) {
+      this._taps = { n: 3, t: now, x: e.clientX, y: e.clientY };
+      this._pinTap(e.clientX, e.clientY);
+    } else {
+      this._taps = { n: 1, t: now, x: e.clientX, y: e.clientY };
+      const hidden = this._hiddenAtDown;
+      this._tapTimer = setTimeout(() => { if (this._taps?.n === 1) this._taps = null; this._singleTap(hidden); }, 260);
+    }
+  }
+
+  /** A heart (or pin) that pops where the finger is and floats away. */
+  _burst(x, y, kind) {
+    const r = this.stage.getBoundingClientRect();
+    const el = h('div', { class: 'vw-burst ' + kind, style: `left:${x - r.left}px;top:${y - r.top}px;--rot:${(Math.random() - 0.5) * 24}deg`, html: icon(kind === 'pin' ? 'pin' : 'heart', 96) });
+    this.stage.append(el);
+    setTimeout(() => el.remove(), 900);
+  }
+
+  /** Double-tap: favorite + upvote. It only ever adds, so a stray double-tap cannot un-like something. */
+  async _like(x, y) {
+    const p = this.post;
+    if (!p) return;
+    const prov = getProvider(p.provider);
+    this._burst(x, y, 'heart');
+    haptic('tick');
+    if (!prov.fav && !prov.vote) {
+      if (!this._noLikeHint) { this._noLikeHint = true; toast(`${prov.name} has no favorites to like. Triple-tap pins the picture instead`, { ms: 3200 }); }
+      return;
+    }
+    const c = (S('creds') || {})[prov.credKey];
+    if (!c?.user || !c?.key) {
+      if (!this._noKeyHint) { this._noKeyHint = true; toast('Add your username + API key in Settings to favorite and upvote from a double-tap.', { kind: 'err', ms: 4200 }); }
+      return;
+    }
+    const jobs = [];
+    if (prov.fav && !p.faved) jobs.push(prov.setFav(p, true).then(() => { p.faved = true; p.favs += 1; this._paintToggles(); }));
+    if (prov.vote && !p._voted) jobs.push(prov.setVote(p, 1, true).then(() => { Object.defineProperty(p, '_voted', { value: true, enumerable: false, writable: true, configurable: true }); }));
+    if (!jobs.length) return;
+    try {
+      await Promise.all(jobs);
+      if (!this._likedHint) { this._likedHint = true; toast('Liked: added to your favorites and upvoted', { ms: 1800 }); }
+    } catch (e) {
+      toast(e.message, { kind: 'err' });
+    }
+  }
+
+  /** Triple-tap: quick pin (tap three times again to unpin; the toast has Undo). */
+  _pinTap(x, y) {
+    if (!this.post) return;
+    this._burst(x, y, 'pin');
+    haptic('heavy');
+    quickPin([this.post]);
+    setTimeout(() => this._paintToggles(), 60);
   }
 
   _doubleTap(e) {
@@ -1081,7 +1170,7 @@ export class Viewer {
     const frag = [];
     for (let k = a; k < b; k++) {
       const p = this.list[k];
-      frag.push(h('button', { class: 'fs' + (k === this.i ? ' cur' : ''), 'data-i': k, onclick: () => this.jump(k) }, h('img', { src: p.thumb, alt: '', loading: 'lazy', draggable: 'false' }), this.poolCtx ? h('i', { class: 'fs-n' }, k + 1) : null));
+      frag.push(h('button', { class: 'fs' + (k === this.i ? ' cur' : ''), 'data-i': k, onclick: () => this.jump(k) }, h('img', { src: p.thumb, alt: '', loading: 'lazy', draggable: 'false', class: isBlurred(p) && !this._unblur.has(postKey(p)) ? 'blurred' : '' }), this.poolCtx ? h('i', { class: 'fs-n' }, k + 1) : null));
     }
     this.film.replaceChildren(...frag);
     this.film.querySelector('.cur')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });

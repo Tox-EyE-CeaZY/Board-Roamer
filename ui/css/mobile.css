@@ -18,7 +18,7 @@ html.touch .tile-act, html.touch .vw-nav { display: none !important; }
 html.touch .tbtns { display: flex; }
 html.touch .pc-knob { scale: 1; }
 html.touch .cm-k { display: none; }
-html.touch .fc-act, html.touch .bc-act, html.touch .tr-act { opacity: 1; }
+html.touch .fc-act, html.touch .bc-act, html.touch .tr-act, html.touch .lib-act { opacity: 1; }
 html.touch .gal, html.touch #v-other, html.touch .pn-body, html.touch .st-body, html.touch .routes, html.touch .rd-film, html.touch .vw-film { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 /* comfortable targets */
 html.touch .ibtn { min-width: 44px; min-height: 44px; }
@@ -180,7 +180,7 @@ html.phone .bc-act { top: 8px; right: 4px; } html.phone .bc-act button { width: 
 html.phone .bc-act button:not(:last-child) { display: none; }
 html.phone .fgrid { grid-template-columns: 1fr; gap: 12px; padding: 6px 12px; }
 html.phone .f-group { padding: 16px 14px 6px; }
-html.phone .fc-act button { width: 38px; height: 38px; }
+html.phone .fc-act button, html.phone .lib-act button { width: 38px; height: 38px; }
 html.phone .pools-ctl { padding: 4px 12px 12px; gap: 10px; }
 html.phone .pools-ctl .input { width: 100%; flex: 1 1 100%; } html.phone .pools-ctl .seg { flex: 1 1 100%; } html.phone .pools-ctl .seg-b { flex: 1 1 auto; text-align: center; padding: 11px 6px; }
 html.phone .pools-ctl .spacer { display: none; }
@@ -372,3 +372,18 @@ html.phone.kbd #tabbar, html.phone.kbd .fab { display: none; }
 html.phone.kbd #app { height: calc(100% - var(--appbar) - var(--safe-t)); }
 html.phone .fc-thumbs { height: 96px; }
 @media (min-width: 701px) { html.touch .dossier { grid-template-columns: auto 1fr auto; } }
+
+html.phone .lib-head { padding: 0 12px; }
+html.phone .lib-tabs { width: 100%; } html.phone .lib-tabs .seg-b { flex: 1 1 0; justify-content: center; padding: 11px 6px; }
+
+/* double-tap like / triple-tap pin */
+.vw-burst { position: absolute; z-index: 8; width: 96px; height: 96px; margin: -48px 0 0 -48px; pointer-events: none; color: #ff4d6d; filter: drop-shadow(0 4px 14px oklch(0 0 0 / .55)); animation: burst .85s cubic-bezier(.2, .8, .2, 1) forwards; }
+.vw-burst.pin { color: var(--accent); }
+.vw-burst svg { width: 100%; height: 100%; fill: currentColor; stroke: currentColor; }
+@keyframes burst {
+  0% { opacity: 0; transform: scale(.3) rotate(var(--rot)); }
+  22% { opacity: 1; transform: scale(1.18) rotate(var(--rot)); }
+  55% { opacity: 1; transform: scale(1) rotate(var(--rot)) translateY(-8px); }
+  100% { opacity: 0; transform: scale(1.1) rotate(var(--rot)) translateY(-74px); }
+}
+@media (prefers-reduced-motion: reduce) { .vw-burst { animation-duration: .01s; animation-delay: .5s; } }

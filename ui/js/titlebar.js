@@ -34,6 +34,13 @@ document.addEventListener('fullscreenchange', () => {
 
 export function initTitlebar() {
   if (!isNative()) return;
+  window.__wstate = (s) => {
+    root.classList.toggle('maxed', !!s.max);
+    fs = !!s.fs;
+    root.classList.toggle('fullscreen', fs);
+  };
+  // macOS keeps its own window frame (traffic lights, resize edges), so no custom bar is drawn there
+  if (window.__plat === 'macos') return;
   root.classList.add('native');
   const bar = document.getElementById('titlebar');
   bar.hidden = false;

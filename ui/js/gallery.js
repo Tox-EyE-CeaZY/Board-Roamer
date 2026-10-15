@@ -1,7 +1,7 @@
 import { h, clamp, fmtNum, fmtDur, pretty } from './util.js';
 import { icon } from './icons.js';
 import { S, postKey, boards } from './store.js';
-import { blacklistHit, compileBlacklist } from './providers.js';
+import { blacklistHit, compileBlacklist, isBlurred } from './providers.js';
 import { showMenu } from './ctxmenu.js';
 import { isPhone, isLandscape } from './platform.js';
 import { postMenu } from './menus.js';
@@ -264,10 +264,12 @@ export class Gallery {
       };
       img.src = this._src(p, r);
       clip.append(img);
+      if (isBlurred(p)) el.classList.add('blurred');
       el.append(
         h('span', { class: 'stamp r-' + p.rating }, p.rating.toUpperCase()),
       );
       const badges = [];
+      if (el.classList.contains('blurred')) badges.push(h('span', { class: 'badge blurtag', title: 'Blurred by a #blur rule', html: icon('cloak', 11) + 'BLUR' }));
       if (p.kind === 'video') badges.push(h('span', { class: 'badge', html: icon('play', 11) + (p.duration ? fmtDur(p.duration) : p.ext.toUpperCase()) }));
       else if (p.kind === 'anim') badges.push(h('span', { class: 'badge' }, 'GIF'));
       else if (p.kind === 'flash') badges.push(h('span', { class: 'badge' }, 'SWF'));

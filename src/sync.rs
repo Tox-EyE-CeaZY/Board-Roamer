@@ -93,7 +93,7 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 fn computer_name() -> String {
-    std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_else(|_| "this computer".into())
+    crate::os::computer_name()
 }
 
 fn doc_path(s: &State) -> PathBuf {
@@ -289,38 +289,5 @@ fn config_request(mut rq: Request) {
 /* ------------------------------------------------------------------ this computer's addresses */
 
 fn addresses() -> Vec<serde_json::Value> {
-    let mut cmd = std::process::Command::new("ipconfig");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
-    let mut found: Vec<(u8, String)> = Vec::new();
-    for line in out.lines() {
-        if !line.contains(':') || !line.to_ascii_lowercase().contains("ipv4") && !line.contains('.') {
-            continue;
-        }
-        let tail = line.rsplit(':').next().unwrap_or("").trim();
-        let parts: Vec<u8> = tail.split('.').filter_map(|p| p.trim().parse().ok()).collect();
-        if parts.len() != 4 || tail.split('.').count() != 4 {
-            continue;
-        }
-        let kind = match (parts[0], parts[1]) {
-            (100, 64..=127) => "tailscale",
-            (192, 168) | (10, _) => "lan",
-            (172, 16..=31) => "lan",
-            _ => continue,
-        };
-        found.push((if kind == "tailscale" { 0 } else { 1 }, format!("{tail}|{kind}")));
-    }
-    found.sort();
-    found.dedup();
-    found
-        .into_iter()
-        .map(|(_, s)| {
-            let (ip, kind) = s.split_once('|').unwrap();
-            serde_json::json!({ "ip": ip, "kind": kind })
-        })
-        .collect()
+    crate::os::addresses().into_iter().map(|(ip, kind)| serde_json::json!({ "ip": ip, "kind": kind })).collect()
 }

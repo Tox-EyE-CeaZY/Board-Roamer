@@ -49,6 +49,7 @@ final class Saver {
             case "json": return "application/json";
             case "xmp": return "text/xml";
             case "swf": return "application/x-shockwave-flash";
+            case "apk": return "application/vnd.android.package-archive";
             default: return "application/octet-stream";
         }
     }

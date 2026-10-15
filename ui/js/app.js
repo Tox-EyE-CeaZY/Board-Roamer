@@ -1,6 +1,7 @@
 import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, on, boards, subs, reading, history as trailStore, tagc } from './store.js';
+import { S, setS, on, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
+import { refreshLib } from './library.js';
 import { getProvider, providerList, Feed, catName } from './providers.js';
 import { initTopo, paintTopo } from './bg.js';
 import { Gallery } from './gallery.js';
@@ -13,6 +14,7 @@ import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
 import { startAutoSync } from './sync.js';
+import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
 import { downloadMany, selBar, openExternal, savePost } from './actions.js';
@@ -44,17 +46,19 @@ const rail = $('#rail');
 const NAV = [['roam', 'Roam', 'roam'], ['boards', 'Boards', 'boards'], ['follows', 'Follows', 'bell'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail']];
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
+const poolBadge = h('b', { class: 'nav-badge', hidden: true });
 
 const markSvg = '<svg class="mark" viewBox="0 0 40 40" width="30" height="30"><rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 3"/><path d="M20 7 24 20 20 33 16 20z" fill="var(--accent)"/><circle cx="20" cy="20" r="2.2" fill="var(--bg)"/></svg>';
 const appbarTitle = h('span', { class: 'ab-title' }, 'Roam');
 const dialMini = h('button', { class: 'dial-mini', 'aria-label': 'Switch source', onclick: () => providerMenu() });
 const tabBadge = h('b', { class: 'nav-badge', hidden: true });
+const poolTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const appbar = h('header', { id: 'appbar' },
   h('a', { class: 'ab-brand', href: '#/roam', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini,
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
-  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, label), id === 'follows' ? tabBadge : null)));
+  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, label), id === 'follows' ? tabBadge : id === 'pools' ? poolTabBadge : null)));
 const fab = h('button', { class: 'fab', hidden: true, 'aria-label': 'Back to top', onclick: () => document.querySelector('#v-roam:not([hidden]) .gal, #v-other:not([hidden]) .gal, #v-other:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' }), html: icon('up', 22) });
 const ptr = h('div', { class: 'ptr', 'aria-hidden': 'true', html: icon('refresh', 20) });
 document.body.append(appbar, tabbar, fab);
@@ -66,12 +70,20 @@ function buildRail() {
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
       h('i', { class: 'nav-ind' }),
-      NAV.map(([id, label, ic], n) => h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : null))),
+      NAV.map(([id, label, ic], n) => h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : null))),
     h('div', { class: 'rail-spacer' }),
     dial,
     h('button', { class: 'ibtn', title: 'Cloak screen (`)', html: icon('cloak', 20), onclick: toggleCloak }),
     h('button', { class: 'ibtn', title: 'Settings (,)', html: icon('settings', 20), onclick: () => openSettings() }),
   );
+}
+
+function paintPoolBadge() {
+  const n = library.unseen();
+  for (const b of [poolBadge, poolTabBadge]) {
+    b.hidden = !n;
+    b.textContent = n > 99 ? '99+' : n;
+  }
 }
 
 function paintFollowBadge() {
@@ -678,6 +690,7 @@ function renderRoutes() {
 }
 on('boards', () => { if (!roam.hidden) renderRoutes(); updateBoardBar(); });
 on('subs', () => { paintFollowBadge(); if (!roam.hidden) renderRoutes(); });
+on('library', paintPoolBadge);
 
 bindContext(routesEl, (e) => {
   const el = e.target.closest('.route');
@@ -813,7 +826,7 @@ function updateBoardFromSearch() {
   const b = boards.get(st.smartId);
   if (!b) return;
   const terms = searchBar.terms.length ? clone(searchBar.terms) : clone(st.terms);
-  boards.update(b.id, { provider: prov.id, terms, filters: clone(st.filters), cover: st.loaded.slice(0, 4).map((p) => p.sample || p.thumb) });
+  boards.update(b.id, { provider: prov.id, terms, filters: clone(st.filters), cover: st.loaded.slice(0, 10).map((p) => p.sample || p.thumb) });
   toast(`Updated “${b.name}”`, { ms: 1800 });
   updateBoardBar();
 }
@@ -835,7 +848,7 @@ async function saveSmart() {
   const def = terms.filter((t) => t.op !== '-').map((t) => pretty(t.t)).slice(0, 3).join(' + ') || 'My search';
   const name = await promptText('Save this search as a live board', def);
   if (!name) return;
-  const b = boards.create(name, 'smart', { provider: prov.id, terms, filters: clone(st.filters), cover: st.loaded.slice(0, 4).map((p) => p.sample || p.thumb) });
+  const b = boards.create(name, 'smart', { provider: prov.id, terms, filters: clone(st.filters), cover: st.loaded.slice(0, 10).map((p) => p.sample || p.thumb) });
   st.smartId = b.id;
   updateBoardBar();
   toast(`Saved “${b.name}”`, { action: { label: 'View boards', run: () => go('#/boards') } });
@@ -1127,6 +1140,10 @@ function boot() {
   buildRail();
   paintDial();
   paintFollowBadge();
+  paintPoolBadge();
+  // saved pools and comics are checked for new pages shortly after start, then every half hour
+  setTimeout(() => library.all().length && refreshLib().catch(() => {}), 7000);
+  setInterval(() => !document.hidden && library.all().length && refreshLib().catch(() => {}), 30 * 60 * 1000);
   st.filters = defaultFilters();
   searchBar.setFilters(st.filters);
   applyGalleryClasses();
@@ -1143,6 +1160,7 @@ function boot() {
   applyPhoneLayout();
   setupTouch();
   startAutoSync();
+  startAutoUpdateCheck((section) => openSettings(section));
   applyRoute();
   // quietly keep followed artists fresh
   setTimeout(() => refreshAll(), 4500);

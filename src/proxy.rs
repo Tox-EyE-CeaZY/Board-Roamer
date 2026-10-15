@@ -30,22 +30,7 @@ type CacheEntry = (Instant, u16, String, Vec<u8>);
 static CACHE: OnceLock<Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
 static SLOTS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
-/// Spawn a child without flashing a console window.
-fn quiet(cmd: &mut std::process::Command) -> &mut std::process::Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    cmd
-}
-
-/// Open a URL in the default browser (no console window, no shell quoting issues).
-pub fn open_url(url: &str) {
-    if url.starts_with("http://") || url.starts_with("https://") {
-        let _ = quiet(std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url])).spawn();
-    }
-}
+use crate::os::{downloads_dir, home, open_url, reveal};
 
 fn hdr(k: &str, v: &str) -> Header {
     Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
@@ -181,11 +166,6 @@ fn sanitize(name: &str) -> String {
     if s.is_empty() { "download".into() } else { s.chars().take(150).collect() }
 }
 
-fn downloads_dir() -> PathBuf {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default();
-    home.join("Downloads").join("Board Roamer")
-}
-
 /// POST /save?u=<file url>&name=<filename>  -> saves to Downloads\Board Roamer, returns {"path":...}
 pub fn save(mut rq: Request, query: &str) {
     let (Some(target), Some(name)) = (param(query, "u"), param(query, "name")) else {
@@ -266,22 +246,17 @@ pub fn save(mut rq: Request, query: &str) {
     reply(rq, 200, "application/json", body.into_bytes());
 }
 
-/// POST /open?u=<http(s) url>  or ?reveal=<path> -> opens in the default browser / Explorer.
+/// POST /open?u=<http(s) url>  or ?reveal=<path> -> opens in the default browser / file manager.
 pub fn open_external(rq: Request, query: &str) {
     if let Some(p) = param(query, "reveal") {
-        let up = std::env::var("USERPROFILE").unwrap_or_default();
-        let p = p.replace("%USERPROFILE%", &up);
-        let path = std::path::Path::new(&p);
-        if path.is_dir() {
-            let _ = quiet(std::process::Command::new("explorer").arg(&p)).spawn();
-        } else if path.exists() {
-            let _ = quiet(std::process::Command::new("explorer").arg(format!("/select,{p}"))).spawn();
-        } else if let Some(parent) = path.parent().filter(|d| d.is_dir()) {
-            let _ = quiet(std::process::Command::new("explorer").arg(parent)).spawn();
-        } else {
+        // "downloads" (or the old %USERPROFILE% spelling) means the app's download folder
+        let path = if p == "downloads" || (p.contains("Board Roamer") && p.contains("Downloads")) {
             let _ = std::fs::create_dir_all(downloads_dir());
-            let _ = quiet(std::process::Command::new("explorer").arg(downloads_dir())).spawn();
-        }
+            downloads_dir()
+        } else {
+            PathBuf::from(p.replace("%USERPROFILE%", &home().to_string_lossy()))
+        };
+        reveal(&path);
         return reply(rq, 200, "application/json", b"{}".to_vec());
     }
     match param(query, "u") {

@@ -80,6 +80,15 @@ export const native = {
       call('http', id, method, url, JSON.stringify(headers || {}), body || '');
     });
   },
+  /** Download the release APK and open Android's installer. Resolves {status: 'installing' | 'permission'}. */
+  installUpdate(url) {
+    return new Promise((resolve, reject) => {
+      const id = ++seq;
+      pending.set(id, { resolve, reject });
+      if (!has('installUpdate')) return (pending.delete(id), reject(new Error('Updating is not available here')));
+      call('installUpdate', id, url);
+    });
+  },
   open: (url) => call('openUrl', url),
   reveal: (uri) => call('reveal', uri || ''),
   share: (text, title) => call('share', text || '', title || ''),

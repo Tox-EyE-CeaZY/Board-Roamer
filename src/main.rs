@@ -1,20 +1,27 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod meta;
+mod os;
 mod proxy;
 mod sync;
+mod updater;
 
 use rust_embed::RustEmbed;
-use std::{env, path::PathBuf, sync::Arc, thread};
+use std::{env, sync::Arc, thread, time::Duration};
 use tao::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
-    platform::windows::WindowBuilderExtWindows,
     window::{Fullscreen, Icon, ResizeDirection, WindowBuilder},
 };
+#[cfg(windows)]
+use tao::platform::windows::WindowBuilderExtWindows;
+#[cfg(target_os = "linux")]
+use tao::platform::unix::WindowExtUnix;
 use tiny_http::{Header, Response, Server};
 use wry::{WebContext, WebViewBuilder};
+#[cfg(target_os = "linux")]
+use wry::WebViewBuilderExtUnix;
 
 #[derive(RustEmbed)]
 #[folder = "ui/"]
@@ -64,6 +71,8 @@ fn handle(rq: tiny_http::Request) {
         "/save" => proxy::save(rq, query),
         "/open" => proxy::open_external(rq, query),
         "/img" => proxy::image(rq, query),
+        "/update/info" => updater::info(rq),
+        "/update/apply" => updater::apply(rq),
         p if p.starts_with("/sync/") => {
             let p = p.to_string();
             sync::local_request(rq, &p)
@@ -78,18 +87,52 @@ fn handle(rq: tiny_http::Request) {
     }
 }
 
-fn data_dir() -> PathBuf {
-    let base = env::var_os("LOCALAPPDATA")
-        .or_else(|| env::var_os("XDG_DATA_HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir);
-    let d = base.join("BoardRoamer");
-    let _ = std::fs::create_dir_all(&d);
-    d
+fn is_running(port: u16) -> bool {
+    ureq::get(&format!("http://127.0.0.1:{port}/ping"))
+        .timeout(Duration::from_millis(600))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .map_or(false, |b| b == "board-roamer")
+}
+
+/// macOS apps need a menu bar for Cmd+C / Cmd+V / Cmd+Q to work inside a web view.
+#[cfg(target_os = "macos")]
+fn install_menu() {
+    use muda::{Menu, PredefinedMenuItem, Submenu};
+    let menu = Menu::new();
+    let app = Submenu::new("Board Roamer", true);
+    let _ = app.append_items(&[
+        &PredefinedMenuItem::about(None, None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::hide(None),
+        &PredefinedMenuItem::hide_others(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::quit(None),
+    ]);
+    let edit = Submenu::new("Edit", true);
+    let _ = edit.append_items(&[
+        &PredefinedMenuItem::undo(None),
+        &PredefinedMenuItem::redo(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::cut(None),
+        &PredefinedMenuItem::copy(None),
+        &PredefinedMenuItem::paste(None),
+        &PredefinedMenuItem::select_all(None),
+    ]);
+    let window = Submenu::new("Window", true);
+    let _ = window.append_items(&[&PredefinedMenuItem::minimize(None), &PredefinedMenuItem::fullscreen(None)]);
+    let _ = menu.append_items(&[&app, &edit, &window]);
+    menu.init_for_nsapp();
+    std::mem::forget(menu);
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.iter().any(|a| a == "--version") {
+        println!("Board Roamer {}", updater::VERSION);
+        return;
+    }
     let browser_mode = args.iter().any(|a| a == "--browser");
     let want_port: u16 = args
         .iter()
@@ -98,14 +141,23 @@ fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(4621);
 
+    // Just updated: the previous copy is still shutting down. Wait for it to let go of the port,
+    // and sweep up the old executable it left behind.
+    if args.iter().any(|a| a == "--after-update") {
+        for _ in 0..60 {
+            if !is_running(want_port) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        if let Ok(exe) = env::current_exe() {
+            let _ = std::fs::remove_file(exe.with_extension("old"));
+        }
+    }
+
     // A stable port keeps the WebView's localStorage origin (your boards, settings) stable.
     // If Board Roamer is already running there, just open another window onto the same server.
-    let already = ureq::get(&format!("http://127.0.0.1:{want_port}/ping"))
-        .timeout(std::time::Duration::from_millis(600))
-        .call()
-        .ok()
-        .and_then(|r| r.into_string().ok())
-        .map_or(false, |b| b == "board-roamer");
+    let already = is_running(want_port);
     let mut port = want_port;
     if !already {
         let mut server = None;
@@ -117,8 +169,8 @@ fn main() {
         }
         let (server, bound) = server.expect("could not bind a local port");
         port = bound;
-        sync::init(data_dir());
         let server = Arc::new(server);
+        sync::init(os::data_dir());
         for _ in 0..8 {
             let s = server.clone();
             thread::spawn(move || {
@@ -131,9 +183,9 @@ fn main() {
     let url = format!("http://127.0.0.1:{port}/");
 
     if browser_mode {
-        println!("Board Roamer running at {url}  (Ctrl+C to stop)");
+        println!("Board Roamer {} running at {url}  (Ctrl+C to stop)", updater::VERSION);
         if !args.iter().any(|a| a == "--no-open") {
-            proxy::open_url(&url);
+            os::open_url(&url);
         }
         loop {
             thread::park();
@@ -142,25 +194,37 @@ fn main() {
 
     let event_loop = EventLoopBuilder::<String>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    #[cfg(target_os = "macos")]
+    install_menu();
     let icon = Icon::from_rgba(include_bytes!("../assets/icon-64.rgba").to_vec(), 64, 64).ok();
-    let window = WindowBuilder::new()
+    // Windows and Linux get our own title bar (ui/js/titlebar.js); macOS keeps its native window frame.
+    #[allow(unused_mut)]
+    let mut wb = WindowBuilder::new()
         .with_title("Board Roamer")
         .with_window_icon(icon)
-        .with_decorations(false) // we draw our own title bar (ui/js/titlebar.js)
-        .with_undecorated_shadow(true)
+        .with_decorations(cfg!(target_os = "macos"))
         .with_inner_size(LogicalSize::new(1480.0, 920.0))
-        .with_min_inner_size(LogicalSize::new(720.0, 520.0))
-        .build(&event_loop)
-        .expect("window");
-    let mut ctx = WebContext::new(Some(data_dir()));
-    let webview = WebViewBuilder::new_with_web_context(&mut ctx)
+        .with_min_inner_size(LogicalSize::new(720.0, 520.0));
+    #[cfg(windows)]
+    {
+        wb = wb.with_undecorated_shadow(true);
+    }
+    let window = wb.build(&event_loop).expect("window");
+    let mut ctx = WebContext::new(Some(os::data_dir()));
+    let builder = WebViewBuilder::new_with_web_context(&mut ctx)
         .with_url(&url)
         .with_background_color((10, 17, 19, 255))
+        .with_initialization_script(&format!("window.__plat='{}';", os::os_name()))
         .with_ipc_handler(move |req| {
             let _ = proxy.send_event(req.body().to_string());
-        })
-        .build(&window)
-        .expect("webview");
+        });
+    #[cfg(not(target_os = "linux"))]
+    let webview = builder.build(&window).expect("webview");
+    #[cfg(target_os = "linux")]
+    let webview = {
+        let vbox = window.default_vbox().expect("window layout");
+        builder.build_gtk(vbox).expect("webview")
+    };
 
     let push_state = |window: &tao::window::Window, webview: &wry::WebView| {
         let js = format!(
