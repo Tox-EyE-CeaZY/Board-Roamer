@@ -4,6 +4,8 @@ import { S, setS, on, emit, boards, subs, library, reading, history as trailStor
 import { refreshLib } from './library.js';
 import { startWatch } from './watch.js';
 import { renderLocal } from './local.js';
+import { MultiFeed } from './multi.js';
+import { editSources } from './sources.js';
 import { getProvider, providerList, Feed, catName, linkToHash } from './providers.js';
 import { initTopo, paintTopo } from './bg.js';
 import { Gallery } from './gallery.js';
@@ -31,7 +33,7 @@ import { M, postMenu, tagMenu } from './menus.js';
 let prov = getProvider(S('provider'));
 const st = {
   terms: [], filters: null, feed: null, loaded: [], total: null, sig: null, loading: null,
-  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null, boardMark: null,
+  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null, boardMark: null, multi: null,
 };
 let boardGal = null; // gallery of the board / pool view currently on screen
 let viewerGal = null;
@@ -214,7 +216,7 @@ function parseHash() {
   return { view: seg[0] || 'roam', id: seg[1], p: new URLSearchParams(qstr) };
 }
 
-function roamHash(terms, filters, provId, post) {
+function roamHash(terms, filters, provId, post, mb) {
   const p = new URLSearchParams();
   p.set('p', provId);
   if (terms.length) p.set('q', termsStr(terms));
@@ -226,8 +228,12 @@ function roamHash(terms, filters, provId, post) {
   if (filters.shape) p.set('sh', filters.shape);
   if (filters.age) p.set('ag', filters.age);
   if (post) p.set('post', post);
+  if (mb) p.set('mb', mb); // a board that reads several sites
   return '#/roam?' + p.toString();
 }
+
+/** What makes one search different from another (a multi-site board counts its sites too). */
+const sigOf = (terms, filters, multi) => JSON.stringify([prov.id, terms, filters, multi ? multi.id + JSON.stringify(multi.sources) : '']);
 
 function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.id } = {}) {
   viewerPushed = false;
@@ -278,7 +284,7 @@ function showView(name) {
 }
 
 const roamHashFor = (terms, filters, provId) => roamHash(terms || [], { ...defaultFilters(), ...(filters || {}) }, provId || prov.id);
-const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf, openSettings });
+const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf, openSettings, editSources: (b) => editSources(b, () => applyRoute()) });
 
 /* ---------- tabs: what each one remembers, and how it comes back */
 let pendingRestore = null;
@@ -293,6 +299,8 @@ function parseHashStr(hash) {
 function tabTitleFor(hash) {
   const { view, id, p } = parseHashStr(hash);
   if (view === 'roam') {
+    const mbName = p.get('mb') && boards.get(p.get('mb'))?.name;
+    if (mbName) return mbName;
     const names = parseTerms(p.get('q') || '').filter((t) => t.op !== '-').slice(0, 3).map((t) => pretty(t.t));
     return names.length ? names.join(', ') : 'Roam';
   }
@@ -407,7 +415,9 @@ function applyRouteCore() {
     if (pid && pid !== prov.id) setProvider(pid, false);
     const terms = parseTerms(p.get('q') || '');
     const filters = parseFilters(p);
-    const sig = JSON.stringify([prov.id, terms, filters]);
+    const mb = p.get('mb') ? boards.get(p.get('mb')) : null;
+    st.multi = mb?.kind === 'smart' && mb.sources?.length ? mb : null;
+    const sig = sigOf(terms, filters, st.multi);
     if (restore?.roam && restore.roam.sig === sig && st.feed !== restore.roam.feed) restoreRoam(restore.roam);
     else if (sig !== st.sig) {
       st.terms = terms;
@@ -524,6 +534,7 @@ const viewer = new Viewer($('#viewer'), {
     }
   },
   onTag: (tag, mode) => tagAction(tag, mode, viewer.post?.provider),
+  onLink: (url) => { const to = linkToHash(url); if (to) { closeViewerQuiet(); setHash(to); } }, // "also on…": open the other copy
   isStarred: (t, pv) => isStarred(t, getProvider(pv || prov.id)),
   onStar: (t, pv) => toggleStar(t, getProvider(pv || prov.id)),
   isFollowing: (t, pv) => isFollowing(t, pv),
@@ -751,8 +762,11 @@ function setFoot(kind, extra) {
 
 async function startSearch() {
   const filters = clone(st.filters);
-  st.sig = JSON.stringify([prov.id, st.terms, filters]);
-  const feed = new Feed(prov, clone(st.terms), filters);
+  st.sig = sigOf(st.terms, filters, st.multi);
+  const multi = st.multi;
+  const feed = multi
+    ? new MultiFeed([{ prov: getProvider(multi.provider), terms: clone(multi.terms) }, ...multi.sources.map((s) => ({ prov: getProvider(s.provider), terms: clone(s.terms) }))], filters)
+    : new Feed(prov, clone(st.terms), filters);
   st.feed = feed;
   st.loaded = [];
   st.total = null;
@@ -773,9 +787,9 @@ async function startSearch() {
   dossierEl.replaceChildren();
   updateStatus();
   setFoot('loading');
-  trailStore.push({ provider: prov.id, terms: clone(st.terms), filters: clone(filters), thumbs: [] });
-  st.trailTs = trailStore.all()[0]?.ts;
-  if (prov.count) prov.count(feed.tags).then((n) => feed === st.feed && ((st.total = n), updateStatus())).catch(() => {});
+  if (!multi) trailStore.push({ provider: prov.id, terms: clone(st.terms), filters: clone(filters), thumbs: [] });
+  st.trailTs = multi ? 0 : trailStore.all()[0]?.ts;
+  if (!multi && prov.count) prov.count(feed.tags).then((n) => feed === st.feed && ((st.total = n), updateStatus())).catch(() => {});
   await loadMore();
   if (feed === st.feed) {
     marks?.forEach((id) => subs.markSeen(id)); // you've now seen what was new
@@ -798,7 +812,7 @@ function loadMore() {
       gal.append(posts);
       if (feed.total != null) st.total = feed.total;
       if (first && posts.length) {
-        trailStore.update(st.trailTs, { thumbs: posts.slice(0, 4).map((p) => p.thumb) });
+        if (st.trailTs) trailStore.update(st.trailTs, { thumbs: posts.slice(0, 4).map((p) => p.thumb) });
         const sb = boards.get(st.smartId);
         if (sb && JSON.stringify(sb.terms) === JSON.stringify(st.terms)) updateCover(st.smartId, posts);
       }
@@ -822,7 +836,7 @@ function updateStatus() {
   status.replaceChildren(...[
     h('span', { class: 'odo' }, fmtNum(st.loaded.length)),
     h('span', { class: 'st-l' }, ' loaded'),
-    total ? h('span', { class: 'st-t' }, ` · ${st.total == null ? '≈' : ''}${fmtNum(total)} on ${prov.name}`) : null,
+    st.multi ? h('span', { class: 'st-t' }, ` · ${1 + st.multi.sources.length} sites`) : total ? h('span', { class: 'st-t' }, ` · ${st.total == null ? '≈' : ''}${fmtNum(total)} on ${prov.name}`) : null,
     gal.hiddenCount ? h('span', { class: 'st-h' }, ` · ${gal.hiddenCount} hidden by blacklist`) : null,
     st.feed?.busy ? h('i', { class: 'spin' }) : null,
   ].filter(Boolean));
@@ -870,6 +884,7 @@ bindContext(routesEl, (e) => {
     { label: 'Run this board', icon: 'compass', run: () => runSmart(b) },
     tabsEnabled() && { label: 'Open in new tab', icon: 'plus', run: () => openTab(roamHashFor(b.terms, b.filters, b.provider), { title: b.name, thumb: (b.cover || [])[0] }) },
     { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) boards.update(b.id, { name: n }); } },
+    { label: 'Sites & tags…', icon: 'link', run: () => editSources(b, () => renderRoutes()) },
     { label: 'Show in Boards', icon: 'boards', run: () => go('#/boards') },
     { sep: true },
     { label: 'Delete board', icon: 'trash', danger: true, run: () => (boards.remove(b.id), toast(`Deleted “${b.name}”`, { ms: 1400 })) },
@@ -1043,7 +1058,8 @@ function runSmart(b) {
   }
   dossierEl.replaceChildren();
   if (b.provider !== prov.id) setProvider(b.provider, false);
-  const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider);
+  const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider, null, b.sources?.length ? b.id : '');
+  st.multi = b.sources?.length ? b : null;
   if (location.hash === next || (parseHash().view === 'roam' && roamHash(st.terms, st.filters, prov.id) === next)) return navigateRoam({ terms: b.terms, filters: { ...defaultFilters(), ...b.filters } });
   setHash(next);
 }

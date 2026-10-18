@@ -132,6 +132,18 @@ function mergeLibrary(a = [], b = [], tomb) {
     .sort((p, q) => num(q.added) - num(p.added) || (libKey(p) < libKey(q) ? -1 : 1));
 }
 
+/** Tag link groups: groups that share any (site, tag) become one. */
+function mergeLinks(a = [], b = []) {
+  const out = [];
+  for (const g of [...a, ...b]) {
+    const hit = out.filter((o) => Object.keys(g).some((k) => o[k] === g[k]));
+    const merged = Object.assign({}, ...hit, g);
+    for (const o of hit) out.splice(out.indexOf(o), 1);
+    out.push(merged);
+  }
+  return out.sort((x, y) => (canon(x) < canon(y) ? -1 : 1));
+}
+
 function mergeFolders(a = [], b = [], tomb) {
   const map = new Map();
   for (const f of [...a, ...b]) {
@@ -172,6 +184,7 @@ export function merge(a, b) {
     subs: mergeSubs(a.subs, b.subs, tomb),
     library: mergeLibrary(a.library, b.library, tomb),
     folders: mergeFolders(a.folders, b.folders, tomb),
+    tagLinks: mergeLinks(a.tagLinks, b.tagLinks),
     trail: mergeTrail(a.trail, b.trail, tomb),
     reading: mergeReading(a.reading, b.reading),
     tomb,

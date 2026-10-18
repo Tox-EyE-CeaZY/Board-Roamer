@@ -280,6 +280,7 @@ export class Gallery {
       else if (p.kind === 'flash') badges.push(h('span', { class: 'badge' }, 'SWF'));
       if (p.pools?.length) badges.push(h('span', { class: 'badge pool' + (p.isComic ? ' comic' : ''), title: p.isComic ? 'Comic page' : 'In a pool', html: icon(p.isComic ? 'book' : 'pool', 11) + (p.isComic ? 'COMIC' : 'POOL') }));
       else if (p.isComic) badges.push(h('span', { class: 'badge pool comic', title: 'Comic page', html: icon('book', 11) + 'COMIC' }));
+      if (p.also?.length) badges.push(h('span', { class: 'badge also', title: 'Same picture on ' + [p.provider, ...p.also.map((a) => a.provider)].join(', '), html: icon('link', 11) + (p.also.length + 1) }));
       if (this.isNew?.(p)) { el.classList.add('fresh'); badges.push(h('span', { class: 'badge fresh', html: icon('sparkle', 11) + 'NEW' })); }
       if (p.children?.length || p.hasChildren) badges.push(h('span', { class: 'badge', title: 'Has child posts' }, '⧉'));
       if (p.parent) badges.push(h('span', { class: 'badge', title: 'Has a parent post' }, '↰'));

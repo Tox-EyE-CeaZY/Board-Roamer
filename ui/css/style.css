@@ -1168,3 +1168,12 @@ html.phone .fgrid { padding: 12px 14px 0; grid-template-columns: repeat(auto-fil
 /* Local: the folder list lives inside the gallery's scroller, so folders and files scroll together */
 .gal > .fgrid { padding: 8px 0 20px; }
 .gal > .fgrid[hidden] { display: none; }
+
+/* boards that read several sites */
+.badge.also { background: color-mix(in oklch, var(--accent) 80%, #000); color: var(--accent-ink); }
+.also-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 16px 2px; }
+.also-row small { font: 600 10px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.srcedit { display: grid; gap: 12px; min-width: min(560px, 82vw); }
+.srcrow { display: grid; gap: 6px; }
+.srcline { display: flex; gap: 8px; align-items: center; }
+.srcline select { flex: none; width: 130px; } .srcline input { flex: 1; min-width: 0; }

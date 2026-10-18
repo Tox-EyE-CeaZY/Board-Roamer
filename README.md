@@ -136,6 +136,11 @@ ui/             embedded frontend (vanilla ES modules, no build step)
 - **Links from the sites**: on Android, links to posts, searches and pools on any supported site offer Board Roamer (Settings → Links
   turns that off, and opens Android's "Open by default" screen where "Open supported links" makes it automatic). On any device,
   pasting such a link into the search box opens it. Derpibooru works without an account; an API key is optional and brings your own filter.
+- **Boards across several sites**: right-click a live board → *Sites & tags…* to give it a search per site (spike on e621 *and* Derpibooru).
+  Each site has its own tags; suggestions come from each site's autocomplete, and pairs you confirm are remembered and synced. Results are merged
+  newest-first and the same picture is shown once (it is matched by the sources the posts list, by links between the posts, or by a picture
+  fingerprint), using the copy from the most generous site unless another is clearly bigger; the tile shows a link badge and the viewer lists
+  where else it is. Derpibooru comics (`comic:` tags) appear on the Pools page and can be read and saved to the library like e621 pools.
 - **Folders** for boards (pin boards and live boards) and for the library's pools and comics: *New folder*, drag a card onto a
   folder or right-click → *Move to folder*. Deleting a folder only moves its contents back out. Folders sync between devices.
 - **Local** (Settings → Local, off by default): a gallery of the pictures and videos in folders you choose, on this device and on

@@ -110,7 +110,7 @@ function card(b, ctx) {
   const stack = coverStack(b);
   const meta = b.kind === 'pins'
     ? h('div', { class: 'bc-meta' }, b.inbox ? h('span', { class: 'quick' }, 'QUICK PIN') : null, `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`, h('span', {}, ago(b.updated)))
-    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), b.newCount ? h('span', { class: 'new', title: `${b.newCount} new since you last looked` }, `${b.newCount >= 8 ? '8+' : b.newCount} new`) : null, h('span', {}, getProvider(b.provider).name));
+    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), b.newCount ? h('span', { class: 'new', title: `${b.newCount} new since you last looked` }, `${b.newCount >= 8 ? '8+' : b.newCount} new`) : null, h('span', {}, b.sources?.length ? `${1 + b.sources.length} sites` : getProvider(b.provider).name));
   const chips = b.kind === 'smart'
     ? h('div', { class: 'bc-tags' }, tagline(b).slice(0, 6).map((t) => h('span', {}, t)), b.terms.length > 6 ? h('span', {}, `+${b.terms.length - 6}`) : null)
     : null;
@@ -211,6 +211,7 @@ export function renderBoards(root, ctx) {
       !b.inbox && { label: 'Colour', icon: 'flame', sub: HUES.map((hue) => ({ label: `Hue ${hue}°`, checked: hue === b.hue, run: () => { boards.update(b.id, { hue }); ctx.refresh(); } })) },
       !b.inbox && { label: 'Duplicate', icon: 'copy', run: dup },
       { label: 'Export this board', icon: 'download', run: () => { download(`board-${b.name.replace(/\W+/g, '-')}.json`, JSON.stringify({ app: 'board-roamer', v: 2, boards: [b] }, null, 1)); toast('Board exported'); } },
+      b.kind === 'smart' && ctx.editSources && { label: 'Sites & tags…', icon: 'link', run: () => ctx.editSources(b) },
       b.kind === 'smart' && { label: 'Copy search as text', icon: 'link', run: () => navigator.clipboard.writeText(b.terms.map((t) => (t.op === '+' ? '' : t.op) + t.t).join(' ')) },
       !b.inbox && { sep: true },
       !b.inbox && { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (await confirmDlg('Delete board?', `“${b.name}” will be removed.`)) { boards.remove(b.id); ctx.refresh(); } } },

@@ -115,6 +115,26 @@ let tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, f: {}, tc: 0, ...load('tomb', {
 const bury = (map, key) => ((tomb[map][key] = Date.now()), save('tomb', tomb));
 export const trailSig = (e) => e.provider + '|' + JSON.stringify(e.terms) + '|' + JSON.stringify(e.filters);
 
+/* ---------- tag links: the same subject under each site's own tag, e.g. {e621: 'spike_(mlp)', derpibooru: 'spike'} ---------- */
+let linkList = load('tagLinks', []);
+export const tagLinks = {
+  all: () => linkList,
+  /** The tag `to` uses for what `tag` means on `from` (keys are providers' credKey), or null. */
+  suggest(from, tag, to) {
+    const g = linkList.find((x) => x[from] === tag);
+    return (g && g[to]) || null;
+  },
+  /** pairs: [{key, tag}] that all mean the same thing. Groups that share a tag are joined. */
+  link(pairs) {
+    const hit = linkList.filter((g) => pairs.some((p) => g[p.key] === p.tag));
+    const merged = Object.assign({}, ...hit);
+    for (const p of pairs) merged[p.key] = p.tag;
+    linkList = [...linkList.filter((g) => !hit.includes(g)), merged];
+    save('tagLinks', linkList);
+    emit('taglinks');
+  },
+};
+
 /* ---------- folders: tidy boards (pin boards and live boards) and library titles (pools, comics) into groups ---------- */
 let folderList = load('folders', []);
 const saveFolders = () => (save('folders', folderList), emit('folders'));
@@ -455,7 +475,7 @@ export const syncData = {
     }
     const cut = Date.now() - TOMB_KEEP;
     for (const m of ['b', 'bp', 's', 't', 'l', 'f']) for (const k of Object.keys(tomb[m])) if (tomb[m][k] < cut) delete tomb[m][k];
-    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, folders: folderList, trail, reading: readList, tomb }));
+    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, folders: folderList, tagLinks: linkList, trail, reading: readList, tomb }));
   },
   /** Replace local state with a merged document. */
   apply(doc) {
@@ -479,6 +499,8 @@ export const syncData = {
     readList = doc.reading && typeof doc.reading === 'object' ? doc.reading : readList;
     tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, f: {}, tc: 0, ...(doc.tomb || {}) };
     folderList = Array.isArray(doc.folders) ? doc.folders : folderList;
+    linkList = Array.isArray(doc.tagLinks) ? doc.tagLinks : linkList;
+    save('tagLinks', linkList);
     save('folders', folderList); emit('folders');
     save('boards', boardList); save('subs', subList); save('library', libList); save('trail', trail); save('reading', readList); save('tomb', tomb);
     emit('boards'); emit('subs'); emit('library'); emit('trail');

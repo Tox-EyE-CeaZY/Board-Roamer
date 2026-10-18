@@ -1139,7 +1139,9 @@ export class Viewer {
     if (this.tab === 'tags') body = this._tagsTab(p, prov);
     else if (this.tab === 'info') body = this._infoTab(p, prov);
     else body = pinContent([p], { after: () => (this._paintToggles(), this.hooks.onPinChange?.()) });
-    this.panel.replaceChildren(h('div', { class: 'pn-grab' }, h('i')), head, score, h('div', { class: 'pn-body' }, body));
+    const also = p.also?.length ? h('div', { class: 'also-row' }, h('small', {}, 'Same picture on'),
+      p.also.map((a) => h('button', { class: 'chipbtn', title: `${a.w}×${a.h}`, onclick: () => this.hooks.onLink?.(a.url) }, a.name, h('i', { html: icon('external', 11) })))) : null;
+    this.panel.replaceChildren(h('div', { class: 'pn-grab' }, h('i')), head, score, also, h('div', { class: 'pn-body' }, body));
   }
 
   _tagsTab(p, prov) {

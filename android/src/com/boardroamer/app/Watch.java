@@ -107,6 +107,7 @@ final class Watch {
             Object j = new JSONTokener(new String(r.body, StandardCharsets.UTF_8)).nextValue();
             String eng = it.optString("eng");
             if ("pool".equals(eng)) return j instanceof JSONObject ? ((JSONObject) j).optLong("post_count", -1) : -1;
+            if ("pmpool".equals(eng)) return j instanceof JSONObject ? ((JSONObject) j).optLong("total", -1) : -1; // Derpibooru comic: the search total
             JSONArray list = null;
             if (j instanceof JSONArray) list = (JSONArray) j;
             else if (j instanceof JSONObject) {

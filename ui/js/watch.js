@@ -45,7 +45,7 @@ function build() {
     for (const f of library.all()) {
       const prov = getProvider(f.p);
       if (!prov.pools) continue;
-      items.push({ key: 'p:' + f.id, kind: 'pool', seen: f.seenCount || 0, auth: auth(prov), url: `${prov.web}/pools/${f.pid}.json`, eng: 'pool' });
+      items.push({ key: 'p:' + f.id, kind: 'pool', seen: f.seenCount || 0, auth: auth(prov), ...(prov.poolCountUrl ? { url: prov.poolCountUrl(f.pid), eng: 'pmpool' } : { url: `${prov.web}/pools/${f.pid}.json`, eng: 'pool' }) });
     }
   }
   const c = (S('creds') || {})[getProvider(S('provider')).credKey] || {};

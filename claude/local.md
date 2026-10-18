@@ -26,3 +26,15 @@ Notes on what the code does, so the next change doesn't have to rediscover it.
   the two fingers and the picture darted sideways.
 - Flashing while swiping: the original is decoded off to the side then swapped in (`_makeMedia`), and on touch only once you zoom;
   originals are not preloaded on touch; the backdrop changes only after its image is decoded (`_setBg`).
+
+## Multi-site boards (`multi.js`, `sources.js`)
+`board.sources = [{provider, terms}]` are the extra sites (the primary is `board.provider/terms`). `#/roam?...&mb=<boardId>` runs a `MultiFeed` (same
+`next()/done` interface as `Feed`). Merge: newest-first by date, each site refilled only when its buffer is empty; other orders take turns.
+Duplicates: source/cross-link keys (`srcKeys`, `postRef`), then a dHash of the thumbnails for same-shape same-artist posts of different sites.
+`better()` picks the shown copy (clearly bigger wins, else `RANK`: e621 first, Derpibooru last); the tile object is promoted in place and gets
+`also`. `tagLinks` (store.js, synced) remembers equivalent tags per site. Seen/new tracking and the 30-minute check use the primary site only.
+Testing in a headless Edge against the real app: it auto-syncs with the PC hub, so anything seeded there lands in the real library.
+
+## Derpibooru comics as pools
+A pool is a `comic:<title>` tag (`pmPoolId`); pages are the images with that tag by id ascending. `pool()`, `poolPosts()`, `poolsSearch()` (tags
+search for Biggest, a walk over the newest comic pages for Recently updated), `poolCovers()` (cover art tag, else a page already seen).

@@ -181,8 +181,8 @@ export function renderLibrary(root, ctx) {
       moveEntry('library', f, (fid) => library.update(f.id, { folder: fid, folderT: Date.now() })),
       { label: 'Check now', icon: 'refresh', run: () => checkLib(f).then(() => toast('Checked', { ms: 1000 })) },
       { sep: true },
-      { label: 'Open on site', icon: 'external', run: () => openExternal(`${prov.web}/pools/${f.pid}`) },
-      { label: 'Copy pool link', icon: 'link', run: () => (copyText(`${prov.web}/pools/${f.pid}`), toast('Link copied', { ms: 1200 })) },
+      { label: 'Open on site', icon: 'external', run: () => openExternal(prov.poolUrl ? prov.poolUrl(f.pid) : `${prov.web}/pools/${f.pid}`) },
+      { label: 'Copy pool link', icon: 'link', run: () => (copyText(prov.poolUrl ? prov.poolUrl(f.pid) : `${prov.web}/pools/${f.pid}`), toast('Link copied', { ms: 1200 })) },
       { sep: true },
       { label: 'Remove from library', icon: 'trash', danger: true, run: async () => { if (await confirmDlg('Remove from library?', `“${f.name}” will no longer be tracked.`, 'Remove')) library.remove(f.id); } },
     ];

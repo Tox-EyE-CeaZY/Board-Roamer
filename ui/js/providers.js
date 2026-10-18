@@ -142,6 +142,14 @@ const PM_RATING = ['safe', 'suggestive', 'questionable', 'explicit', 'semi-grimd
 const PM_CAT = { character: 'character', oc: 'character', origin: 'artist', species: 'species', rating: 'meta', spoiler: 'meta', 'content-official': 'general', 'content-fanmade': 'general' };
 const PM_FIELDS = /^(score|aspect_ratio|width|height|created_at|first_seen_at|faves|comment_count|mime_type|animated|id|uploader|wilson_score|tag_count|source_url|description|upvotes|downvotes|sha512_hash|orig_sha512_hash)([.:])/;
 
+/* Derpibooru has no pools, but comics are tagged `comic:<title>`, and the first page of a chapter carries `cover art`.
+   Each comic tag is treated as a pool: its pages are every image with that tag, in upload order. The pool id is the tag
+   (spaces as underscores, URL-encoded where it has to be), so it can sit in a link and in the library. */
+const pmPoolId = (tag) => encodeURIComponent(String(tag).replace(/ /g, '_')).replace(/%3A/gi, ':');
+const pmPoolTag = (id) => decodeURIComponent(String(id)).replace(/_/g, ' ');
+const pmPoolName = (tag) => String(tag).replace(/^comic:/, '').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+const pmQuote = (t) => (/[,()"]|\|\||&&/.test(t) ? `"${t.replace(/"/g, '\\"')}"` : t);
+
 function normPm(p, prov) {
   if (!p || p.hidden_from_users || p.deletion_reason) return null;
   const rep = p.representations || {};
@@ -166,8 +174,8 @@ function normPm(p, prov) {
     thumb: rep.thumb || rep.small || full, sample: kind === 'image' ? rep.large || rep.medium || full : null, full,
     score: p.score ?? 0, up: p.upvotes ?? 0, down: p.downvotes ?? 0, favs: p.faves ?? 0,
     tags, artists: tags.artist, sources: p.source_urls?.length ? p.source_urls : p.source_url ? [p.source_url] : [], created: p.created_at, desc: p.description || '',
-    parent: null, children: [], pools: [], duration: p.duration || 0, comments: p.comment_count || 0, faved: false, url: `${prov.web}/images/${p.id}`,
-    alts: [], isComic: tags.general.includes('comic'),
+    parent: null, children: [], pools: names.filter((t) => t.startsWith('comic:')).map(pmPoolId), duration: p.duration || 0, comments: p.comment_count || 0, faved: false, url: `${prov.web}/images/${p.id}`,
+    alts: [], isComic: names.includes('comic') || names.some((t) => t.startsWith('comic:')),
   };
 }
 
@@ -350,7 +358,8 @@ const PM_SORT = [['', 'Newest'], ['score', 'Top score'], ['wilson_score', 'Best 
 const PM_SF = { '': 'created_at', score: 'score', wilson_score: 'wilson_score', favcount: 'faves', comment_count: 'comment_count', random: 'random' };
 const pm = {
   engine: 'pm', credKey: 'derpibooru', web: 'https://derpibooru.org', short: 'dp', color: 275, maxTags: 99, pageSize: 50,
-  sorts: PM_SORT, shapes: true, ages: true, media: true, pageNumberCap: 200, fav: false, vote: false, dossier: false, wiki: false,
+  sorts: PM_SORT, shapes: true, ages: true, media: true, pageNumberCap: 200, fav: false, vote: false, dossier: false, wiki: false, pools: true,
+  poolOrders: [['updated_at', 'Recently updated'], ['post_count', 'Biggest']],
   creds() {
     const c = credsFor(this);
     return c.key ? { key: c.key } : { filter_id: 56027 }; // no key: the "Everything" filter, so the in-app rating switches decide what shows
@@ -403,6 +412,106 @@ const pm = {
   async autocomplete(q) {
     const j = await call(this, `${this.web}/api/v1/json/search/tags?${qs({ q: q.replace(/_/g, ' ') + '*', per_page: 14 })}`);
     return (j.tags || []).slice(0, 14).map((t) => ({ name: String(t.name).replace(/ /g, '_'), count: t.images || 0, cat: PM_CAT[t.category] || 'general' }));
+  },
+  /* ---- comics as pools ---- */
+  _images(q, { sf = 'id', sd = 'asc', per = 50, page = 1 } = {}) {
+    return call(this, `${this.web}/api/v1/json/search/images?${qs({ q, sf, sd, per_page: per, page, ...this.creds() })}`);
+  },
+  _pool(tag, extra = {}) {
+    return { id: pmPoolId(tag), name: pmPoolName(tag), desc: '', cat: 'series', ids: [], count: 0, updated: null, created: null, active: true, creator: '', ...extra };
+  },
+  poolUrl(id) {
+    return `${this.web}/search?${qs({ q: pmQuote(pmPoolTag(id)), sf: 'id', sd: 'asc' })}`;
+  },
+  /** For the Android background check: one request whose `total` is the page count. */
+  poolCountUrl(id) {
+    return `${this.web}/api/v1/json/search/images?${qs({ q: pmQuote(pmPoolTag(id)), per_page: 1, ...this.creds() })}`;
+  },
+  async pool(id) {
+    const tag = pmPoolTag(id), q = pmQuote(tag);
+    const [first, last] = await Promise.all([this._images(q, { per: 1 }), this._images(q, { per: 1, sd: 'desc' })]);
+    const f = first.images?.[0];
+    if (!f || !first.total) return null;
+    const a = (f.tags || []).find((t) => t.startsWith('artist:'));
+    return this._pool(tag, { ids: [f.id], count: first.total, created: f.created_at, updated: last.images?.[0]?.created_at || f.created_at, creator: a ? a.slice(7) : '' });
+  },
+  /** Every page, in upload order (which is reading order for nearly every comic). */
+  async poolPosts(pool, onProgress) {
+    const q = pmQuote(pmPoolTag(pool.id)), out = [];
+    for (let page = 1; page <= 40; page++) {
+      const j = await this._images(q, { page });
+      const raw = j.images || [];
+      out.push(...raw.map((p) => normPm(p, this)).filter(Boolean));
+      onProgress?.(out.length, pool.count || j.total || out.length);
+      if (raw.length < 50) break;
+    }
+    return out;
+  },
+  async postsByIds(ids) {
+    const out = [];
+    for (let i = 0; i < ids.length; i += 40) {
+      const j = await this._images(ids.slice(i, i + 40).map((x) => 'id:' + x).join(' || '), { per: 50, sf: 'id' });
+      for (const p of j.images || []) { const n = normPm(p, this); if (n) out.push(n); }
+    }
+    return out;
+  },
+  /**
+   * The comics to browse. "Biggest" is Derpibooru's own list of comic tags (it knows each page count). "Recently updated" walks the
+   * newest comic pages and keeps each comic once, newest first, then asks for their page counts in one go.
+   */
+  async poolsSearch({ q = '', order = 'updated_at', page = 1 } = {}) {
+    const pat = `comic:*${q.trim().replace(/\s+/g, ' ')}*`;
+    if (order === 'post_count') {
+      const j = await call(this, `${this.web}/api/v1/json/search/tags?${qs({ q: pat, per_page: 36, page })}`);
+      const list = (j.tags || []).map((t) => this._pool(t.name, { count: t.images }));
+      list.more = (j.tags || []).length === 36;
+      return list;
+    }
+    if (page === 1) (this._seen = new Set()), (this._ipage = 0);
+    const out = [];
+    let more = true;
+    for (let tries = 0; tries < 4 && more && out.length < 12; tries++) {
+      const j = await this._images(pat, { sf: 'created_at', sd: 'desc', page: ++this._ipage });
+      const raw = j.images || [];
+      for (const img of raw) {
+        for (const t of img.tags || []) {
+          if (!t.startsWith('comic:') || this._seen.has(t)) continue;
+          this._seen.add(t);
+          out.push(this._pool(t, { updated: img.created_at, hint: normPm(img, this) })); // a page we already have: the stand-in cover
+        }
+      }
+      more = raw.length === 50 && this._ipage * 50 < 10000;
+    }
+    if (out.length) {
+      try {
+        const j = await call(this, `${this.web}/api/v1/json/search/tags?${qs({ q: out.map((p) => 'name:' + pmQuote(pmPoolTag(p.id))).join(' || '), per_page: 50 })}`);
+        const counts = new Map((j.tags || []).map((t) => [pmPoolId(t.name), t.images]));
+        for (const p of out) p.count = counts.get(p.id) || 0;
+      } catch { /* the cards just show no count */ }
+    }
+    out.more = more;
+    return out;
+  },
+  /** A cover for each comic in one request: the `cover art` image, else (a few) the first page. Resolves Map(poolId -> post). */
+  async poolCovers(list) {
+    const map = new Map();
+    if (!list.length) return map;
+    const ids = new Set(list.map((p) => p.id));
+    const j = await this._images(`cover art,(${list.map((p) => pmQuote(pmPoolTag(p.id))).join(' || ')})`, { per: 50 });
+    for (const img of j.images || []) {
+      for (const t of img.tags || []) {
+        const id = pmPoolId(t);
+        if (t.startsWith('comic:') && ids.has(id) && !map.has(id)) map.set(id, normPm(img, this));
+      }
+    }
+    for (const p of list.filter((x) => !map.has(x.id) && x.hint)) map.set(p.id, p.hint);
+    for (const p of list.filter((x) => !map.has(x.id)).slice(0, 8)) {
+      try {
+        const f = (await this._images(pmQuote(pmPoolTag(p.id)), { per: 1 })).images?.[0];
+        if (f) map.set(p.id, normPm(f, this));
+      } catch { /* leave it without a cover */ }
+    }
+    return map;
   },
   async tagInfo(name) {
     const want = name.replace(/_/g, ' ');
