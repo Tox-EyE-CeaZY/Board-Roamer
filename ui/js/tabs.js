@@ -9,6 +9,7 @@
  *   newHash()        where a brand new tab starts
  *   snapshot()       capture the screen that is about to be left -> {scroll, thumb, roam?}
  *   show(tab)        navigate to a tab and restore its snapshot
+ *   isMain(hash)     is this one of the section tabs (Settings > Look > Sections in their own tab)? Those stay first.
  */
 import { h, uid } from './util.js';
 import { icon } from './icons.js';
@@ -35,7 +36,14 @@ const shown = () => tabsEnabled() && (mode() === 'always' || tabs.length > 1);
 const kindOf = (hash) => String(hash || '').replace(/^#\/?/, '').split(/[/?]/)[0] || 'roam';
 const cur = () => tabs.find((t) => t.id === activeId);
 
+/** Section tabs stay in front, in the order they were opened; everything you open from them follows. */
+function order() {
+  if (!hooks?.isMain) return;
+  tabs = [...tabs.filter((t) => hooks.isMain(t.hash)), ...tabs.filter((t) => !hooks.isMain(t.hash))];
+}
+
 function persist() {
+  order();
   try { localStorage.setItem(KEY, JSON.stringify({ tabs: tabs.map(({ snap, ...t }) => t), active: activeId })); } catch { /* storage full */ }
 }
 
@@ -217,6 +225,7 @@ export function tabMenu(t) {
 }
 
 function paint() {
+  order();
   const on_ = shown();
   document.documentElement.classList.toggle('has-tabs', on_);
   if (strip) {

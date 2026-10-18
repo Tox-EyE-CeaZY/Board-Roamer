@@ -1315,7 +1315,7 @@ function boot() {
   });
   addEventListener('hashchange', applyRoute);
   if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
-  setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab });
+  setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, isMain: (hash) => tabbed().includes(groupOf(parseHashStr(hash).view)) });
   const lastTab = bootHash();
   if (lastTab && location.hash === '#/roam?p=' + prov.id) history.replaceState(history.state, '', lastTab); // reopen where the last tab was
   on('tab-title', (e) => setTabTitle(e.detail.title));

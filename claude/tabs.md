@@ -55,3 +55,8 @@ platform and publishes the GitHub release the in-app updater reads. Keep `Cargo.
 On Windows and Linux the custom title bar hosts the strip: `initTitlebar()` moves `#tabs` into `.tb-tabs`, to the right of the
 view label, and adds `html.tabs-in-bar`. Dragging the window works on the left block and the filler after the tabs, not on the
 tabs. macOS keeps its native frame and phones have no strip, so there it stays in `.main` / the count button.
+
+## Section tabs stay first
+`tabs.order()` (run from `persist()` and `paint()`) keeps tabs whose route belongs to a ticked section in front, in the order
+they were opened, with everything else after. Content opened from a section tab therefore always lands to the right of them.
+Right-click "Open in new tab" still opens in the background; clicking a card opens the new tab in the foreground.
