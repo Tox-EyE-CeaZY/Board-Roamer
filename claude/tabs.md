@@ -45,3 +45,8 @@ trail entries, pool reading). The side rail has a click handler that calls `rout
 - A roam feed that finishes loading a page after you left its tab stashes it in `feed._stash`; `restoreRoam` merges it back.
 - `tabs.js` persists only `{id, hash, title, thumb}`; snapshots (`snap`) live in memory and are lost on restart.
 - The tab strip is hidden on phones via CSS (`html.phone .tabstrip`); phones use the count button in the app bar.
+- Not run in a live window yet: only syntax-checked with `node --check`. Worth a click-through of the section tabs.
+
+## Releases
+A tag `vX.Y.Z` pushed to origin runs `.github/workflows/build.yml`, which sets the version from the tag, builds every
+platform and publishes the GitHub release the in-app updater reads. Keep `Cargo.toml` in step with the tag.
