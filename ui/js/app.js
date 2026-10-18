@@ -14,7 +14,7 @@ import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
 import { startAutoSync } from './sync.js';
-import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focus as focusTab } from './tabs.js';
+import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focusMain, mainActive } from './tabs.js';
 import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
@@ -226,30 +226,32 @@ function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.
     st.filters = clone(filters);
     return startSearch();
   }
-  setHash(next, true);
+  setHash(next);
 }
 
-/* Sections that live in their own tab (Settings > Look > Tabs). Computers only. */
-const groupOf = (view) => NAV_OF[view] || view;
-const tabbed = () => (!isPhone() && tabsEnabled() ? S('tabSections') || [] : []);
-const sectionHash = (g) => (hash) => groupOf(parseHashStr(hash).view) === g;
+/* The Main tab (Settings > Look > Pinned Main tab, computers only): the first tab is where you move between Roam, Boards,
+   Follows, Pools and Trail. Anything you open from one of those pages (an artist, a board, a pool) gets a tab of its own. */
+const mainOn = () => !isPhone() && tabsEnabled() && S('mainTab') !== false;
+const PAGES = ['roam', 'boards', 'follows', 'pools', 'trail'];
 
-/** Send a route to the right tab when sections have their own. Returns true when it did. `fresh`: a result to open, not a place to go. */
-function routeToTab(hash, fresh) {
-  const own = tabbed();
-  if (!own.length) return false;
-  const here = groupOf(parseHash().view);
-  const to = groupOf(parseHashStr(hash).view);
-  if (to === here && !fresh) return false;
-  if (own.includes(to)) return focusTab(sectionHash(to), hash), true;
-  if (!own.includes(here)) return false;
-  if (fresh) return openTab(hash, { background: false }), true; // a card opened from a section tab gets a tab of its own
-  focusTab((x) => !own.includes(groupOf(parseHashStr(x).view)), hash);
+function routeToTab(hash) {
+  if (!mainOn()) return false;
+  const to = parseHashStr(hash).view;
+  const inMain = mainActive();
+  if (PAGES.includes(to) && !/[?&]q=/.test(hash)) { // a page: Main is where those live
+    if (inMain) return false;
+    focusMain();
+    if (location.hash !== hash) location.hash = hash;
+    return true;
+  }
+  if (!inMain) return false; // already in a tab of its own: keep navigating there
+  if (to === 'roam' && parseHash().view === 'roam') return false; // searching from Main's Roam page
+  openTab(hash, { background: false });
   return true;
 }
 
-function setHash(hash, fresh) {
-  if (!routeToTab(hash, fresh)) location.hash = hash;
+function setHash(hash) {
+  if (!routeToTab(hash)) location.hash = hash;
 }
 
 const go = (hash) => setHash(hash);
@@ -581,7 +583,7 @@ function tagAction(tag, mode, provId) {
   const filters = mode === 'only' ? { ...st.filters, order: st.filters.order === 'random' ? '' : st.filters.order } : st.filters;
   const next = roamHash(terms, filters, vp);
   if (location.hash === next) return navigateRoam({ terms, filters, provider: vp });
-  setHash(next, true);
+  setHash(next);
 }
 
 /* ---------- menus need to reach back into the app */
@@ -1006,13 +1008,13 @@ function runSmart(b) {
   if (b.provider !== prov.id) setProvider(b.provider, false);
   const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider);
   if (location.hash === next || (parseHash().view === 'roam' && roamHash(st.terms, st.filters, prov.id) === next)) return navigateRoam({ terms: b.terms, filters: { ...defaultFilters(), ...b.filters } });
-  setHash(next, true);
+  setHash(next);
 }
 
 function runEntry(e) {
   st.smartId = null;
   if (e.provider !== prov.id) setProvider(e.provider, false);
-  setHash(roamHash(e.terms, { ...defaultFilters(), ...e.filters }, e.provider), true);
+  setHash(roamHash(e.terms, { ...defaultFilters(), ...e.filters }, e.provider));
 }
 
 /* ================================================================== provider / theme */
@@ -1315,7 +1317,7 @@ function boot() {
   });
   addEventListener('hashchange', applyRoute);
   if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
-  setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, isMain: (hash) => tabbed().includes(groupOf(parseHashStr(hash).view)) });
+  setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, mainOn });
   const lastTab = bootHash();
   if (lastTab && location.hash === '#/roam?p=' + prov.id) history.replaceState(history.state, '', lastTab); // reopen where the last tab was
   on('tab-title', (e) => setTabTitle(e.detail.title));

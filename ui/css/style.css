@@ -753,6 +753,7 @@ html.fullscreen #titlebar { display: none; }
 .tabs-in-bar .tb-tabs .tab-i { margin-top: 5px; flex: 0 1 190px; min-width: 96px; }
 .tabs-in-bar .tb-tabs .tab-i.on { background: var(--bg3); }
 .tabs-in-bar .tb-tabs .tab-new { margin-top: 5px; }
+.tabs-in-bar.has-tabs .tb-ctx { display: none; } /* the first tab already says where you are */
 .tb-mark { color: var(--accent); flex: none; }
 .tb-name { font: 800 10.5px var(--f-mono); letter-spacing: .34em; color: var(--ink); }
 .tb-name i { font-style: normal; color: var(--accent); margin: 0 .15em; }

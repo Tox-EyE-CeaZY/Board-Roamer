@@ -9,7 +9,7 @@
  *   newHash()        where a brand new tab starts
  *   snapshot()       capture the screen that is about to be left -> {scroll, thumb, roam?}
  *   show(tab)        navigate to a tab and restore its snapshot
- *   isMain(hash)     is this one of the section tabs (Settings > Look > Sections in their own tab)? Those stay first.
+ *   mainOn()         is the first tab a pinned Main tab (not closable or movable; content you open goes after it)?
  */
 import { h, uid } from './util.js';
 import { icon } from './icons.js';
@@ -36,14 +36,10 @@ const shown = () => tabsEnabled() && (mode() === 'always' || tabs.length > 1);
 const kindOf = (hash) => String(hash || '').replace(/^#\/?/, '').split(/[/?]/)[0] || 'roam';
 const cur = () => tabs.find((t) => t.id === activeId);
 
-/** Section tabs stay in front, in the order they were opened; everything you open from them follows. */
-function order() {
-  if (!hooks?.isMain) return;
-  tabs = [...tabs.filter((t) => hooks.isMain(t.hash)), ...tabs.filter((t) => !hooks.isMain(t.hash))];
-}
+const pinned = () => !!hooks?.mainOn?.() && tabs.length > 0;
+const isMain = (t) => pinned() && t === tabs[0];
 
 function persist() {
-  order();
   try { localStorage.setItem(KEY, JSON.stringify({ tabs: tabs.map(({ snap, ...t }) => t), active: activeId })); } catch { /* storage full */ }
 }
 
@@ -110,12 +106,12 @@ export function open(hash, { background = true, title = '', thumb = '' } = {}) {
   toast(`Opened “${t.title || 'a page'}” in a new tab`, { ms: 3000, action: { label: 'Switch', run: () => switchTo(t.id) } });
 }
 
-/** Go to the first tab whose route matches, or open one (in the foreground) if there is none. */
-export function focus(match, hash, { title = '' } = {}) {
+export const mainActive = () => !pinned() || tabs[0]?.id === activeId;
+
+/** Switch to the Main tab. */
+export function focusMain() {
   ensure();
-  const t = tabs.find((x) => match(x.hash));
-  if (t) return switchTo(t.id);
-  open(hash, { background: false, title });
+  if (tabs[0]) switchTo(tabs[0].id);
 }
 
 export const newTab = () => open(hooks.newHash(), { background: false });
@@ -155,7 +151,7 @@ export function close(id) {
 }
 
 const closeMany = (keep) => {
-  const ids = tabs.filter((t) => !keep(t)).map((t) => t.id);
+  const ids = tabs.filter((t) => !keep(t) && !isMain(t)).map((t) => t.id);
   ids.filter((id) => id !== activeId).forEach(close);
   if (ids.includes(activeId) && tabs.length > 1) close(activeId);
 };
@@ -173,10 +169,10 @@ const move = (dir) => {
 
 /* ------------------------------------------------------------------ the bar (computers) */
 function tabEl(t) {
-  const el = h('div', { class: 'tab-i' + (t.id === activeId ? ' on' : ''), role: 'tab', 'aria-selected': t.id === activeId, 'data-id': t.id, draggable: 'true', title: t.title || 'New tab' },
+  const el = h('div', { class: 'tab-i' + (t.id === activeId ? ' on' : ''), role: 'tab', 'aria-selected': t.id === activeId, 'data-id': t.id, draggable: !isMain(t), title: t.title || 'New tab' },
     h('i', { class: 'ti-ic', html: icon(VIEW_ICON[kindOf(t.hash)] || 'roam', 14) }),
     h('span', { class: 'ti-t' }, t.title || 'New tab'),
-    h('button', { class: 'ti-x', 'aria-label': 'Close tab', title: 'Close tab (Ctrl+W)', html: icon('close', 12), onclick: (e) => (e.stopPropagation(), close(t.id)) }));
+    isMain(t) ? null : h('button', { class: 'ti-x', 'aria-label': 'Close tab', title: 'Close tab (Ctrl+W)', html: icon('close', 12), onclick: (e) => (e.stopPropagation(), close(t.id)) }));
   el.addEventListener('click', () => switchTo(t.id));
   el.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault()); // no autoscroll on middle-click
   el.addEventListener('auxclick', (e) => e.button === 1 && (e.preventDefault(), close(t.id)));
@@ -216,7 +212,7 @@ export function tabMenu(t) {
     { label: 'New tab', icon: 'plus', run: () => newTab() },
     { label: 'Duplicate', icon: 'copy', run: () => open(t.hash) },
     { sep: true },
-    tabs.length > 1 && { label: 'Close', icon: 'close', run: () => close(t.id) },
+    tabs.length > 1 && !isMain(t) && { label: 'Close', icon: 'close', run: () => close(t.id) },
     tabs.length > 1 && { label: 'Close other tabs', icon: 'close', run: () => closeMany((x) => x.id === t.id) },
     i < tabs.length - 1 && { label: 'Close tabs to the right', icon: 'close', run: () => closeMany((x) => tabs.indexOf(x) <= i) },
     closed.length > 0 && { sep: true },
@@ -225,7 +221,6 @@ export function tabMenu(t) {
 }
 
 function paint() {
-  order();
   const on_ = shown();
   document.documentElement.classList.toggle('has-tabs', on_);
   if (strip) {
@@ -247,7 +242,7 @@ function openSwitcher() {
       const el = h('div', { class: 'ts-card' + (t.id === activeId ? ' on' : ''), role: 'button', tabindex: 0 },
         t.thumb ? h('img', { src: t.thumb, alt: '', draggable: 'false' }) : h('i', { class: 'ts-ph', html: icon(VIEW_ICON[kindOf(t.hash)] || 'roam', 30) }),
         h('b', {}, t.title || 'New tab'),
-        tabs.length > 1 ? h('button', { class: 'ts-x', 'aria-label': 'Close tab', html: icon('close', 15), onclick: (e) => { e.stopPropagation(); close(t.id); draw(); } }) : null);
+        tabs.length > 1 && !isMain(t) ? h('button', { class: 'ts-x', 'aria-label': 'Close tab', html: icon('close', 15), onclick: (e) => { e.stopPropagation(); close(t.id); draw(); } }) : null);
       el.addEventListener('click', () => { closePopover(); switchTo(t.id); });
       return el;
     };
@@ -267,7 +262,7 @@ function keys() {
     const k = e.key.toLowerCase();
     if (k === 't' && !e.shiftKey) { e.preventDefault(); newTab(); }
     else if (k === 't' && e.shiftKey) { e.preventDefault(); reopenClosed(); }
-    else if (k === 'w' && tabs.length > 1) { e.preventDefault(); close(activeId); }
+    else if (k === 'w' && tabs.length > 1 && !isMain(cur())) { e.preventDefault(); close(activeId); }
     else if (e.key === 'Tab' || e.key === 'PageDown' || e.key === 'PageUp') {
       if (tabs.length < 2) return;
       e.preventDefault();
@@ -283,7 +278,7 @@ export function setupTabs(stripEl, h_) {
   strip.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
   keys();
   on('settings', (e) => {
-    if (e.detail.key !== 'tabs') return;
+    if (e.detail.key !== 'tabs' && e.detail.key !== 'mainTab') return;
     if (!tabsEnabled() && tabs.length > 1) { // turning tabs off keeps just the one you are on
       tabs = tabs.filter((t) => t.id === activeId);
       persist();

@@ -65,7 +65,7 @@ export const DEFAULTS = {
   readerCover: true, // first page stands alone in two-page mode
   tabs: 'auto', // off | auto (the tab bar appears once there is a second tab) | always
   restoreTabs: true, // reopen the tabs from last time
-  tabSections: [], // sections (boards, follows, pools, trail) that live in their own tab; computers only
+  mainTab: true, // computers: the first tab is a pinned Main tab; what you open from it gets its own tab
   followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
   autoUpdate: true, // look for a newer version on GitHub now and then
   poolsTab: 'browse', // browse | library

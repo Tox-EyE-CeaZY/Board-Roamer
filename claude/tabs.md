@@ -19,20 +19,20 @@ next change doesn't have to rediscover it.
 | --- | --- | --- |
 | `tabs` | `off` / `auto` / `always` | auto shows the bar once a second tab exists |
 | `restoreTabs` | bool | reopen last session's tabs |
-| `tabSections` | array of `boards` `follows` `pools` `trail` | those sections get a tab of their own. Ignored on phones and when tabs are off |
+| `mainTab` | bool | pinned Main tab, see below |
 | `followsFresh` | minutes (2 / 10 / 30) | how old a follow's last check may be before Follows re-checks it on view |
 
-## Sections in their own tab – how routing works
-Everything that navigates goes through `setHash(hash, fresh)` in `app.js` (`go()`, `navigateRoam()`, `runSmart`,
-trail entries, pool reading). The side rail has a click handler that calls `routeToTab`. `routeToTab`:
-1. Not a computer, tabs off or `tabSections` empty -> plain `location.hash = ...`.
-2. Target is a tab-owned section and you are not already in it -> `focusTab` (switch to the existing tab, else open one).
-   Boards and a single board count as one group (`NAV_OF`: board->boards, pool->pools).
-3. You are in a tab-owned section and the target is something else:
-   - `fresh` (an artist card, a board run, a trail entry: a result) -> opens a **new** tab so the section tab stays put.
-   - otherwise (rail click on Roam, number keys) -> switch to a tab that is not section-owned, or open one.
+## The pinned Main tab (replaces the earlier per-section tabs)
+Setting `mainTab` (default on, computers only, needs tabs on). The first tab is Main: it cannot be closed or dragged, nothing can be
+put in front of it, and in the title bar it takes the place of the view label (`.tb-ctx` is hidden once the strip shows).
+Routing lives in `routeToTab()` in `app.js`; everything navigates through `setHash()`:
+- A **page** (`#/roam`, `#/boards`, `#/follows`, `#/pools`, `#/trail`, no search): handled in Main. From a content tab, rail clicks and
+  number keys switch to Main and navigate it there.
+- **Content** (a board, a pool, a search) opened while Main is on Boards / Follows / Pools / Trail: opens in a new foreground tab,
+  so Main never becomes a back-button trail. Right-click "Open in new tab" opens in the background instead.
+- Main on **Roam** searches in place (typing a search is not "opening content"). A tab that is not Main navigates itself.
 
-`tabs.focus(match, hash)` is the helper that finds the tab by predicate over its hash.
+`tabs.js` exports `mainActive()` and `focusMain()` for this; the app tells it whether Main is on with the `mainOn` hook.
 
 ## Keeping Follows current
 - `refreshAll()` only re-checks follows older than `followsFresh` minutes, one at a time (the proxy paces them).
@@ -55,8 +55,3 @@ platform and publishes the GitHub release the in-app updater reads. Keep `Cargo.
 On Windows and Linux the custom title bar hosts the strip: `initTitlebar()` moves `#tabs` into `.tb-tabs`, to the right of the
 view label, and adds `html.tabs-in-bar`. Dragging the window works on the left block and the filler after the tabs, not on the
 tabs. macOS keeps its native frame and phones have no strip, so there it stays in `.main` / the count button.
-
-## Section tabs stay first
-`tabs.order()` (run from `persist()` and `paint()`) keeps tabs whose route belongs to a ticked section in front, in the order
-they were opened, with everything else after. Content opened from a section tab therefore always lands to the right of them.
-Right-click "Open in new tab" still opens in the background; clicking a card opens the new tab in the foreground.
