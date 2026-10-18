@@ -125,6 +125,14 @@ ui/             embedded frontend (vanilla ES modules, no build step)
 
 - **Library**: save pools and comics (Add to library on a pool, or right-click one). The Pools tab flags new pages,
   like Follows does for artists, and remembers where you stopped reading.
+- **Tabs** (optional): right-click or long-press anything and choose *Open in new tab*, middle-click or Ctrl+click a section or
+  card, or press Ctrl+T. The tab bar appears once there is a second tab (on a phone, a count button opens a card switcher).
+  Each tab keeps its own search, results and scroll position. Ctrl+W closes, Ctrl+Tab switches, Ctrl+Shift+T reopens.
+  Settings → Look → Tabs can turn the bar off or keep it always visible.
+  On a computer, Settings → Look → *Sections in their own tab* keeps Boards, Follows, Pools or Trail in a tab of their own
+  (artists and boards you open from them start new tabs), and *Follows freshness* sets how soon Follows re-checks for new posts when you look at it.
+  On a computer, Settings → Look → *Sections in their own tab* keeps Boards, Follows, Pools or Trail in a tab of their own
+  (artists and boards you open from them start new tabs); *Follows freshness* sets how soon Follows re-checks for new posts.
 - **#blur**: add `#blur` to a blacklist line (`wolf solo #blur`) to blur matching posts instead of hiding them. They stay
   blurred, in the gallery and the viewer, until you tap reveal, even when blacklisting is set to Hide or Off.
 - **Sync**: Settings → Sync on the computer turns on sharing and shows an address and a pairing code. Enter them in the

@@ -120,7 +120,7 @@ export function renderLibrary(root, ctx) {
       h('span', {}, `${fmtNum(f.count)} pages`),
       f.err ? h('span', { class: 'bad', title: f.err }, 'couldn’t check') : f.updated ? h('span', {}, ago(f.updated)) : null);
     const status = rd && rd.i > 0 ? h('div', { class: 'lib-read' }, rd.i >= rd.total - 1 && !n ? 'Finished' : `Page ${rd.i + 1} of ${rd.total}`) : null;
-    const el = h('article', { class: 'pcard lcard' + (n ? ' has-new' : ''), tabindex: 0, 'data-id': f.id, onclick: go, onkeydown: (e) => e.key === 'Enter' && go() },
+    const el = h('article', { class: 'pcard lcard' + (n ? ' has-new' : ''), tabindex: 0, 'data-id': f.id, 'data-hash': `#/pool/${f.pid}?p=${prov.id}`, onclick: go, onkeydown: (e) => e.key === 'Enter' && go() },
       cover, h('div', { class: 'pc-info' }, h('h3', {}, f.name), meta, status));
     return el;
   };
@@ -151,6 +151,7 @@ export function renderLibrary(root, ctx) {
       { header: f.name },
       f.kind === 'comic' && { label: rdOf(f) ? 'Continue reading' : 'Read', icon: 'book', run: () => ctx.readPool(f.pid, null, prov.id) },
       { label: 'Open', icon: 'pool', run: () => ctx.go(`#/pool/${f.pid}?p=${prov.id}`) },
+      ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(`#/pool/${f.pid}?p=${prov.id}`, f.name, f.cover) },
       library.newPages(f) && { label: 'Mark seen', icon: 'check', run: () => library.markSeen(f.id) },
       { label: 'Check now', icon: 'refresh', run: () => checkLib(f).then(() => toast('Checked', { ms: 1000 })) },
       { sep: true },

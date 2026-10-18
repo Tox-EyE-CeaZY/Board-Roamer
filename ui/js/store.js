@@ -63,6 +63,10 @@ export const DEFAULTS = {
   readerRtl: false,
   readerFit: 'page', // page | width | height | orig
   readerCover: true, // first page stands alone in two-page mode
+  tabs: 'auto', // off | auto (the tab bar appears once there is a second tab) | always
+  restoreTabs: true, // reopen the tabs from last time
+  tabSections: [], // sections (boards, follows, pools, trail) that live in their own tab; computers only
+  followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
   autoUpdate: true, // look for a newer version on GitHub now and then
   poolsTab: 'browse', // browse | library
   libSort: 'updates',

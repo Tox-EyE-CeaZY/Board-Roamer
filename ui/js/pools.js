@@ -1,6 +1,6 @@
 import { h, ago, pretty, fmtNum, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, reading, library, on } from './store.js';
+import { S, setS, reading, library, on, emit } from './store.js';
 import { toggleLibrary, renderLibrary } from './library.js';
 import { getProvider } from './providers.js';
 import { Gallery } from './gallery.js';
@@ -79,6 +79,7 @@ export async function renderPoolView(root, id, ctx) {
   }
   if (!root.isConnected || root.querySelector('.gal') !== scroller) return null; // user navigated away
   const { pool, posts, kind } = data;
+  emit('tab-title', { title: pool.name }); // the tab takes the pool's name
   const rkey = poolKey(prov, id);
   const prog = reading.get(rkey);
   const gal = new Gallery(scroller, {
@@ -219,7 +220,7 @@ export function renderPools(root, ctx) {
   if (recent.length) {
     shelf.hidden = false;
     shelf.append(h('h3', {}, 'Continue reading'), h('div', { class: 'shelf-row' }, recent.map(([k, v]) =>
-      h('button', { class: 'shelf-card', title: v.name, 'data-key': k, onclick: () => ctx.readPool(v.pool, null, v.prov) },
+      h('button', { class: 'shelf-card', title: v.name, 'data-key': k, 'data-hash': `#/pool/${v.pool}?p=${v.prov}`, onclick: () => ctx.readPool(v.pool, null, v.prov) },
         h('div', { class: 'sc-img' }, v.cover ? h('img', { src: v.cover, alt: '', draggable: 'false' }) : null, h('i', { class: 'sc-bar' }, h('b', { style: `width:${Math.min(100, ((v.i + 1) / (v.total || 1)) * 100)}%` }))),
         h('span', {}, v.name), h('small', {}, `page ${v.i + 1} of ${v.total}`)))));
   }
@@ -236,6 +237,7 @@ export function renderPools(root, ctx) {
       { header: v.name },
       { label: `Continue · page ${v.i + 1} of ${v.total}`, icon: 'book', run: () => ctx.readPool(v.pool, null, v.prov) },
       { label: 'Browse this pool', icon: 'pool', run: () => ctx.go(`#/pool/${v.pool}?p=${v.prov}`) },
+      ctx.tabsOn?.() && { label: 'Browse in new tab', icon: 'plus', run: () => ctx.openTab(`#/pool/${v.pool}?p=${v.prov}`, v.name, v.cover) },
       { label: 'Start over', icon: 'refresh', run: () => ctx.go(`#/pool/${v.pool}?p=${v.prov}&read=0`) },
       { sep: true },
       { label: inLib() ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => toggleLibrary(pv, { pool: { id: v.pool, name: v.name, count: v.total, updated: null, cat: 'collection' }, kind: v.kind || 'comic', cover: v.cover }) },
@@ -248,7 +250,7 @@ export function renderPools(root, ctx) {
     const libBtn = h('button', { class: 'lib-add', 'aria-label': 'Add to library', onclick: (e) => { e.stopPropagation(); addToLib(el); } });
     const cover = h('div', { class: 'pc-cover' }, h('i', { class: 'pc-ph', html: icon('pool', 30) }), h('div', { class: 'lib-act' }, libBtn));
     const badge = h('span', { class: 'kind kind-' + (pool.cat === 'series' ? 'series' : 'collection'), html: icon('pool', 12) + (pool.cat === 'series' ? 'SERIES' : 'COLLECTION') });
-    const el = h('article', { class: 'pcard', tabindex: 0, 'data-id': pool.id, onclick: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`), onkeydown: (e) => e.key === 'Enter' && ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
+    const el = h('article', { class: 'pcard', tabindex: 0, 'data-id': pool.id, 'data-hash': `#/pool/${pool.id}?p=${prov.id}`, onclick: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`), onkeydown: (e) => e.key === 'Enter' && ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
       cover, h('div', { class: 'pc-info' }, h('h3', {}, pool.name), h('div', { class: 'pc-meta' }, badge, h('span', {}, `${fmtNum(pool.count)} pages`), h('span', {}, ago(pool.updated)))));
     el._pool = pool;
     el._cover = cover;
@@ -340,6 +342,7 @@ export function renderPools(root, ctx) {
     return [
       { header: pool.name },
       { label: 'Open pool', icon: 'pool', run: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
+      ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(`#/pool/${pool.id}?p=${prov.id}`, pool.name, (st.covers.get(pool.ids[0]) || {}).sample || (st.covers.get(pool.ids[0]) || {}).thumb) },
       el._comic && { label: 'Read', icon: 'book', run: () => ctx.readPool(pool.id, pool.ids[0], prov.id) },
       { label: library.find(prov.credKey, pool.id) ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => addToLib(el) },
       { sep: true },

@@ -1106,3 +1106,23 @@ html.touch .sync-addr, html.touch .sync-code { min-height: 48px; }
 .pgrid > .empty-state, .pgrid > .pools-note { grid-column: 1 / -1; justify-self: center; text-align: center; width: min(520px, 100%); margin-inline: auto; }
 .pgrid > .empty-state { display: grid; justify-items: center; }
 .pgrid > .empty-state p { max-width: 42ch; margin-inline: auto; }
+
+/* ---------- tabs (computers) ---------- */
+.tabstrip { flex: none; display: flex; align-items: stretch; gap: 2px; height: 38px; padding: 0 12px; background: var(--bg2); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabstrip::-webkit-scrollbar { display: none; }
+.tab-i { position: relative; flex: 0 1 200px; min-width: 112px; display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 0 6px 0 12px; color: var(--dim); font: 600 11.5px var(--f-mono); letter-spacing: .02em; cursor: pointer; user-select: none;
+  border-top: 2px solid transparent; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); transition: background .15s, color .15s; }
+@media (hover: hover) { .tab-i:hover { background: var(--bg3); color: var(--ink); } }
+.tab-i.on { background: var(--bg); color: var(--ink); border-top-color: var(--accent); }
+.ti-ic { flex: none; display: grid; place-items: center; opacity: .8; }
+.ti-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ti-x { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; opacity: 0; transition: opacity .12s, background .12s; }
+.tab-i.on .ti-x, .tab-i:focus-within .ti-x { opacity: .75; }
+@media (hover: hover) { .tab-i:hover .ti-x { opacity: .85; } .ti-x:hover { opacity: 1 !important; background: oklch(1 0 0 / .14); } }
+.tab-i.drop-l { box-shadow: inset 3px 0 0 var(--accent); }
+.tab-i.drop-r { box-shadow: inset -3px 0 0 var(--accent); }
+.tab-new { flex: none; width: 32px; margin-top: 6px; display: grid; place-items: center; color: var(--dim); transition: color .15s, background .15s; }
+@media (hover: hover) { .tab-new:hover { color: var(--accent); background: var(--bg3); } }
+.tabs-btn { display: none; }
+
+.f-chips { display: flex; flex-wrap: wrap; gap: 6px; }

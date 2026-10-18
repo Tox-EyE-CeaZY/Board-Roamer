@@ -14,6 +14,7 @@ import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
 import { startAutoSync } from './sync.js';
+import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focus as focusTab } from './tabs.js';
 import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
@@ -54,7 +55,7 @@ const dialMini = h('button', { class: 'dial-mini', 'aria-label': 'Switch source'
 const tabBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const appbar = h('header', { id: 'appbar' },
-  h('a', { class: 'ab-brand', href: '#/roam', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini,
+  h('a', { class: 'ab-brand', href: '#/roam', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
@@ -225,10 +226,33 @@ function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.
     st.filters = clone(filters);
     return startSearch();
   }
-  location.hash = next;
+  setHash(next, true);
 }
 
-const go = (hash) => (location.hash = hash);
+/* Sections that live in their own tab (Settings > Look > Tabs). Computers only. */
+const groupOf = (view) => NAV_OF[view] || view;
+const tabbed = () => (!isPhone() && tabsEnabled() ? S('tabSections') || [] : []);
+const sectionHash = (g) => (hash) => groupOf(parseHashStr(hash).view) === g;
+
+/** Send a route to the right tab when sections have their own. Returns true when it did. `fresh`: a result to open, not a place to go. */
+function routeToTab(hash, fresh) {
+  const own = tabbed();
+  if (!own.length) return false;
+  const here = groupOf(parseHash().view);
+  const to = groupOf(parseHashStr(hash).view);
+  if (to === here && !fresh) return false;
+  if (own.includes(to)) return focusTab(sectionHash(to), hash), true;
+  if (!own.includes(here)) return false;
+  if (fresh) return openTab(hash, { background: false }), true; // a card opened from a section tab gets a tab of its own
+  focusTab((x) => !own.includes(groupOf(parseHashStr(x).view)), hash);
+  return true;
+}
+
+function setHash(hash, fresh) {
+  if (!routeToTab(hash, fresh)) location.hash = hash;
+}
+
+const go = (hash) => setHash(hash);
 
 function showView(name) {
   const isRoam = name === 'roam';
@@ -239,9 +263,116 @@ function showView(name) {
   if (isRoam) requestAnimationFrame(() => gal.render());
 }
 
-const viewCtx = () => ({ go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf });
+const roamHashFor = (terms, filters, provId) => roamHash(terms || [], { ...defaultFilters(), ...(filters || {}) }, provId || prov.id);
+const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf });
+
+/* ---------- tabs: what each one remembers, and how it comes back */
+let pendingRestore = null;
+
+function parseHashStr(hash) {
+  const raw = String(hash || '').replace(/^#/, '') || '/roam';
+  const [path, qstr = ''] = raw.split('?');
+  const seg = path.split('/').filter(Boolean);
+  return { view: seg[0] || 'roam', id: seg[1], p: new URLSearchParams(qstr) };
+}
+
+function tabTitleFor(hash) {
+  const { view, id, p } = parseHashStr(hash);
+  if (view === 'roam') {
+    const names = parseTerms(p.get('q') || '').filter((t) => t.op !== '-').slice(0, 3).map((t) => pretty(t.t));
+    return names.length ? names.join(', ') : 'Roam';
+  }
+  if (view === 'board') return boards.get(id)?.name || 'Board';
+  return { boards: 'Boards', follows: 'Follows', pools: 'Pools', trail: 'Trail', pool: 'Pool' }[view] || 'Roam';
+}
+
+/** The element whose scroll position belongs to what is on screen. */
+function scrollEl() {
+  const v = parseHash().view;
+  return v === 'roam' ? scroller : (v === 'board' || v === 'pool') && boardGal ? boardGal.scroller : other;
+}
+
+function snapshotView() {
+  const { view, id } = parseHash();
+  const snap = { scroll: scrollEl()?.scrollTop || 0, thumb: '' };
+  if (view === 'roam') {
+    snap.roam = { sig: st.sig, terms: st.terms, filters: st.filters, feed: st.feed, loaded: st.loaded, total: st.total, smartId: st.smartId };
+    snap.thumb = st.loaded[0]?.thumb || '';
+  } else if (view === 'board') snap.thumb = boards.get(id)?.posts?.[0]?.thumb || '';
+  return snap;
+}
+
+/** Put a roam tab back exactly as it was: same results, same position, and more pages still load from where they stopped. */
+function restoreRoam(r) {
+  st.terms = r.terms;
+  st.filters = r.filters;
+  st.sig = r.sig;
+  st.feed = r.feed;
+  if (r.feed._stash?.length) { r.loaded.push(...r.feed._stash); r.feed._stash = []; }
+  st.loaded = r.loaded;
+  st.total = r.total;
+  st.loading = null;
+  st.smartId = r.smartId;
+  st.isNew = null;
+  st.followMarks = null;
+  gal.setSelectMode(false);
+  gal.isNew = null;
+  searchBar.setTerms(st.terms);
+  searchBar.setFilters(st.filters);
+  paintDial();
+  renderRoutes();
+  updateBoardBar();
+  dossierEl.replaceChildren();
+  renderDossier();
+  gal.setItems(st.loaded);
+  updateStatus();
+  setFoot(st.feed.done ? (st.loaded.length ? 'end' : 'empty') : 'none');
+  requestAnimationFrame(() => gal.render());
+}
+
+/** The content may still be arriving (pages render async): keep trying for a moment. */
+function restoreScroll(top) {
+  if (!top) return;
+  let tries = 0;
+  const step = () => {
+    const el = scrollEl();
+    if (!el) return;
+    if (el.scrollHeight - el.clientHeight >= top - 2 || tries++ > 14) el.scrollTop = top;
+    else setTimeout(step, 110);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(step));
+}
+
+function showTab(tab) {
+  pendingRestore = tab.snap || null;
+  if (viewer.isOpen) closeViewerQuiet();
+  if (reader.isOpen) closeReaderQuiet();
+  history.replaceState({ n: 0 }, '', tab.hash); // each tab starts its own Back trail
+  navDepth = 0;
+  const top = tab.snap?.scroll;
+  applyRoute();
+  restoreScroll(top);
+}
+
+function noteTabRoute() {
+  const { view, id } = parseHash();
+  const [path, q = ''] = location.hash.slice(1).split('?');
+  const sp = new URLSearchParams(q);
+  sp.delete('post');
+  sp.delete('read');
+  const hash = '#' + (path || '/roam') + (sp.toString() ? '?' + sp.toString() : '');
+  const live = view === 'roam' ? boards.get(st.smartId) : null;
+  tabNoteRoute({ hash, title: live ? live.name : tabTitleFor(hash), thumb: view === 'roam' ? st.loaded[0]?.thumb : view === 'board' ? boards.get(id)?.posts?.[0]?.thumb : '' });
+}
 
 function applyRoute() {
+  applyRouteCore();
+  noteTabRoute();
+}
+
+function applyRouteCore() {
+  const restore = pendingRestore;
+  pendingRestore = null;
   const { view, id, p } = parseHash();
   setActiveNav(view);
   closePopover();
@@ -256,7 +387,8 @@ function applyRoute() {
     const terms = parseTerms(p.get('q') || '');
     const filters = parseFilters(p);
     const sig = JSON.stringify([prov.id, terms, filters]);
-    if (sig !== st.sig) {
+    if (restore?.roam && restore.roam.sig === sig && st.feed !== restore.roam.feed) restoreRoam(restore.roam);
+    else if (sig !== st.sig) {
       st.terms = terms;
       st.filters = filters;
       startSearch();
@@ -449,11 +581,14 @@ function tagAction(tag, mode, provId) {
   const filters = mode === 'only' ? { ...st.filters, order: st.filters.order === 'random' ? '' : st.filters.order } : st.filters;
   const next = roamHash(terms, filters, vp);
   if (location.hash === next) return navigateRoam({ terms, filters, provider: vp });
-  location.hash = next;
+  setHash(next, true);
 }
 
 /* ---------- menus need to reach back into the app */
 Object.assign(M, {
+  openTab: (hash, title, thumb) => openTab(hash, { title, thumb }),
+  tabsOn: () => tabsEnabled(),
+  roamHash: roamHashFor,
   tagAction: (t, m, pv) => tagAction(t, m, pv),
   toggleStar: (t, pv) => toggleStar(t, pv),
   toggleFollow: (t, pv) => toggleFollow(t, pv),
@@ -528,7 +663,7 @@ function readPool(id, postId, provId) {
   if (viewer.isOpen) closeViewerQuiet();
   readerPushed = true;
   const q = postId ? 'p' + postId : 'resume';
-  location.hash = `#/pool/${id}?p=${pv}&read=${q}`;
+  setHash(`#/pool/${id}?p=${pv}&read=${q}`);
 }
 
 async function handleRead(read, id, provId) {
@@ -624,7 +759,7 @@ function loadMore() {
     try {
       const first = !st.loaded.length;
       const posts = await feed.next();
-      if (feed !== st.feed) return;
+      if (feed !== st.feed) return void (feed._stash ||= []).push(...posts); // the tab was left meanwhile: keep the page for when it is back
       st.loaded.push(...posts);
       gal.append(posts);
       if (feed.total != null) st.total = feed.total;
@@ -699,6 +834,7 @@ bindContext(routesEl, (e) => {
   if (b) return [
     { header: b.name },
     { label: 'Run this board', icon: 'compass', run: () => runSmart(b) },
+    tabsEnabled() && { label: 'Open in new tab', icon: 'plus', run: () => openTab(roamHashFor(b.terms, b.filters, b.provider), { title: b.name, thumb: (b.cover || [])[0] }) },
     { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) boards.update(b.id, { name: n }); } },
     { label: 'Show in Boards', icon: 'boards', run: () => go('#/boards') },
     { sep: true },
@@ -870,13 +1006,13 @@ function runSmart(b) {
   if (b.provider !== prov.id) setProvider(b.provider, false);
   const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider);
   if (location.hash === next || (parseHash().view === 'roam' && roamHash(st.terms, st.filters, prov.id) === next)) return navigateRoam({ terms: b.terms, filters: { ...defaultFilters(), ...b.filters } });
-  location.hash = next;
+  setHash(next, true);
 }
 
 function runEntry(e) {
   st.smartId = null;
   if (e.provider !== prov.id) setProvider(e.provider, false);
-  location.hash = roamHash(e.terms, { ...defaultFilters(), ...e.filters }, e.provider);
+  setHash(roamHash(e.terms, { ...defaultFilters(), ...e.filters }, e.provider), true);
 }
 
 /* ================================================================== provider / theme */
@@ -999,6 +1135,25 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 /* ================================================================== global keys */
+/* the side rail: sections that have their own tab are focused or opened rather than navigated to */
+rail.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a.nav-i');
+  if (a && !e.ctrlKey && !e.metaKey && routeToTab(a.getAttribute('href'))) e.preventDefault();
+});
+
+/* middle-click (or Ctrl/Cmd+click) a section, card or link to open it in a new tab */
+const routeOf = (t) => { const el = t.closest?.('a[href^="#/"],[data-hash]'); return el && (el.dataset.hash || el.getAttribute('href')); };
+document.addEventListener('mousedown', (e) => { if (e.button === 1 && tabsEnabled() && routeOf(e.target)) e.preventDefault(); });
+document.addEventListener('auxclick', (e) => {
+  const hash = e.button === 1 && tabsEnabled() && routeOf(e.target);
+  if (hash) (e.preventDefault(), openTab(hash));
+});
+document.addEventListener('click', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || !tabsEnabled()) return;
+  const hash = routeOf(e.target);
+  if (hash) (e.preventDefault(), e.stopPropagation(), openTab(hash));
+}, true);
+
 addEventListener('keydown', (e) => {
   if (e.key === '`' || (e.key === 'F9')) return (e.preventDefault(), toggleCloak());
   if (!cloak.hidden) return;
@@ -1160,6 +1315,10 @@ function boot() {
   });
   addEventListener('hashchange', applyRoute);
   if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
+  setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab });
+  const lastTab = bootHash();
+  if (lastTab && location.hash === '#/roam?p=' + prov.id) history.replaceState(history.state, '', lastTab); // reopen where the last tab was
+  on('tab-title', (e) => setTabTitle(e.detail.title));
   onLayout(() => applyPhoneLayout());
   applyPhoneLayout();
   setupTouch();

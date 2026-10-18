@@ -7,7 +7,7 @@ import { openExternal } from './actions.js';
 import { showMenu, bindContext } from './ctxmenu.js';
 import { isPhone } from './platform.js';
 
-const STALE = 20 * 60 * 1000;
+const staleMs = () => (S('followsFresh') || 20) * 60 * 1000;
 let running = false;
 
 /* ================================================================== checking for new posts */
@@ -39,7 +39,7 @@ export async function checkSub(f) {
 /** Check followed artists one by one (the proxy paces the requests). Only stale ones unless forced. */
 export async function refreshAll({ force = false, only = null } = {}) {
   if (running) return;
-  const list = (only || subs.all()).filter((f) => force || !f.checked || Date.now() - f.checked > STALE);
+  const list = (only || subs.all()).filter((f) => force || !f.checked || Date.now() - f.checked > staleMs());
   if (!list.length) return;
   running = true;
   let done = 0;
@@ -165,7 +165,7 @@ export function renderFollows(root, ctx) {
   const card = (f) => {
     const prov = getProvider(f.p);
     const thumbs = (f.thumbs || []).slice(0, 4);
-    const el = h('article', { class: 'fcard' + (f.newCount ? ' has-new' : '') + (f.err ? ' errd' : '') + (st.sel.has(f.id) ? ' sel' : ''), tabindex: 0, 'data-id': f.id, style: `--ph:${prov.color}` },
+    const el = h('article', { 'data-hash': ctx.roamHash([{ t: f.t, op: '+' }], {}, prov.id), class: 'fcard' + (f.newCount ? ' has-new' : '') + (f.err ? ' errd' : '') + (st.sel.has(f.id) ? ' sel' : ''), tabindex: 0, 'data-id': f.id, style: `--ph:${prov.color}` },
       h('div', { class: 'fc-thumbs' }, thumbs.length ? thumbs.map((s) => h('img', { src: s, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') })) : h('i', { class: 'fc-empty', html: icon('user', 26) })),
       f.newCount ? h('span', { class: 'fc-new', title: `${f.newCount} new since you last looked`, html: icon('sparkle', 12) + (f.newCount >= 8 ? '8+' : f.newCount) + ' new' }) : null,
       h('div', { class: 'fc-body' },
@@ -232,6 +232,7 @@ export function renderFollows(root, ctx) {
     return [
       { header: pretty(f.t) },
       { label: 'Open', icon: 'eye', run: () => ctx.openFollow(f) },
+      ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(el.dataset.hash, pretty(f.t), f.thumbs?.[0]) },
       f.newCount && { label: 'Mark seen', icon: 'check', run: () => subs.markSeen(f.id) },
       { label: 'Check now', icon: 'refresh', run: () => checkSub(f).then(() => toast('Checked', { ms: 1000 })) },
       { sep: true },
@@ -257,4 +258,7 @@ export function renderFollows(root, ctx) {
     })];
   paint();
   refreshAll(); // stale ones, quietly
+  // a Follows tab left open in the background: catch up as soon as you come back to the window
+  const onFocus = () => (alive() ? refreshAll() : removeEventListener('focus', onFocus));
+  addEventListener('focus', onFocus);
 }

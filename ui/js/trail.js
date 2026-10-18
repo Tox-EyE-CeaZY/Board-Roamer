@@ -36,7 +36,7 @@ export function renderTrail(root, ctx) {
       const prov = getProvider(e.provider);
       const f = e.filters || {};
       const bits = [f.order && `sort ${f.order}`, f.score > 0 && `score ≥${f.score}`, f.age && `last ${f.age}`, f.media, f.shape].filter(Boolean);
-      frag.push(h('div', { class: 'tr-node', 'data-ts': e.ts, style: `--ph:${prov.color}` },
+      frag.push(h('div', { class: 'tr-node', 'data-ts': e.ts, 'data-hash': ctx.roamHash(e.terms, e.filters, e.provider), style: `--ph:${prov.color}` },
         h('i', { class: 'tr-pin' }),
         h('div', { class: 'tr-card cut', tabindex: 0, onclick: () => ctx.runEntry(e), onkeydown: (ev) => ev.key === 'Enter' && ctx.runEntry(e) },
           h('div', { class: 'tr-top' },
@@ -69,6 +69,7 @@ export function renderTrail(root, ctx) {
     return [
       { header: text || 'everything' },
       { label: 'Search again', icon: 'compass', run: () => ctx.runEntry(e) },
+      ctx.tabsOn?.() && { label: 'Search in new tab', icon: 'plus', run: () => ctx.openTab(el.dataset.hash, text || 'Roam', e.thumbs?.[0]) },
       { label: 'Save as live board', icon: 'save', run: () => ctx.saveSmart(e) },
       { sep: true },
       { label: 'Copy search as text', icon: 'copy', run: () => navigator.clipboard.writeText(text) },

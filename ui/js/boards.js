@@ -82,6 +82,7 @@ function card(b, ctx) {
       h('button', { title: 'Delete', html: icon('trash', 15), onclick: async (e) => { e.stopPropagation(); if (await confirmDlg('Delete board?', `“${b.name}” and its ${b.kind === 'pins' ? b.posts.length + ' pins' : 'saved search'} will be removed.`)) { boards.remove(b.id); ctx.refresh(); } } }),
     ),
   );
+  el.dataset.hash = b.kind === 'smart' ? ctx.roamHash(b.terms, b.filters, b.provider) : `#/board/${b.id}`;
   const open = () => (b.kind === 'smart' ? ctx.runSmart(b) : ctx.go(`#/board/${b.id}`));
   el.addEventListener('click', open);
   el.addEventListener('keydown', (e) => e.key === 'Enter' && open());
@@ -144,6 +145,7 @@ export function renderBoards(root, ctx) {
     return [
       { header: b.name },
       { label: b.kind === 'smart' ? 'Run this search' : 'Open board', icon: b.kind === 'smart' ? 'compass' : 'boards', run: () => (b.kind === 'smart' ? ctx.runSmart(b) : ctx.go('#/board/' + b.id)) },
+      ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(el.dataset.hash, b.name, b.kind === 'pins' ? b.posts[0]?.thumb : (b.cover || [])[0]) },
       b.kind === 'pins' && b.posts.length && { label: 'Slideshow', icon: 'play', run: () => ctx.go('#/board/' + b.id) },
       { sep: true },
       !b.inbox && { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) { boards.update(b.id, { name: n }); ctx.refresh(); } } },

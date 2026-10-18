@@ -38,6 +38,17 @@ export function openSettings(section) {
     const i = h('input', { type: 'range', min, max, step, value: S(key), oninput: () => { setS(key, +i.value); out.textContent = fmt(+i.value); } });
     return h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), out), i);
   };
+  const sectionTabs = () => {
+    const row = h('div', { class: 'f-chips' });
+    const paint = () => row.replaceChildren(...[['boards', 'Boards'], ['follows', 'Follows'], ['pools', 'Pools'], ['trail', 'Trail']].map(([id, label]) =>
+      h('button', { class: 'btn' + ((S('tabSections') || []).includes(id) ? ' primary' : ''), onclick: () => {
+        const cur = S('tabSections') || [];
+        setS('tabSections', cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+        paint();
+      } }, label)));
+    paint();
+    return h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'Sections in their own tab'), h('small', {}, 'Picking Follows (say) keeps it in a tab of its own: opening it switches there, and artists you open from it start new tabs. Needs tabs on')), row);
+  };
   const seg = (label, key, opts, hint) => h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), hint ? h('small', {}, hint) : null), segmented(opts, S(key), (v) => setS(key, v)));
 
   /* --- source */
@@ -227,7 +238,10 @@ export function openSettings(section) {
     sec('source', 'Source', provBox, credBox,
       h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'User-Agent'), h('small', {}, 'e621 asks for a descriptive one')),
         h('input', { class: 'input', value: S('ua'), placeholder: 'BoardRoamer/0.1 (by yourname on e621)', spellcheck: 'false', oninput: (e) => setS('ua', e.target.value.trim()) }))),
-    sec('look', 'Look', themeRow, slider('Accent hue', 'hue', 0, 360, 1, (v) => v + '°'), toggle('Topographic backdrop', 'topo'), toggle('Film grain', 'grain')),
+    sec('look', 'Look', themeRow, slider('Accent hue', 'hue', 0, 360, 1, (v) => v + '°'), toggle('Topographic backdrop', 'topo'), toggle('Film grain', 'grain'),
+      seg('Tabs', 'tabs', [['off', 'Off'], ['auto', 'Auto'], ['always', 'Always']], 'Auto shows the tab bar once you open a second tab: right-click or long-press anything and choose Open in new tab, middle-click a section, or press Ctrl+T'),
+      toggle('Reopen my tabs when the app starts', 'restoreTabs'),
+      ...(isPhone() ? [] : [sectionTabs(), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')])),
     sec('gallery', 'Gallery',
       seg('Layout', 'layout', [['masonry', 'Masonry'], ['rows', 'Rows'], ['grid', 'Grid']]),
       slider('Tile size', 'density', 130, 520, 10, (v) => v + 'px'), slider('Gap', 'gap', 0, 28, 1, (v) => v + 'px'),
@@ -276,7 +290,7 @@ export function openSettings(section) {
 
 /* ------------------------------------------------------------------ shortcuts sheet */
 const SHORTCUTS = [
-  ['Everywhere', [['/', 'Focus the search'], ['1 – 5', 'Roam · Boards · Follows · Pools · Trail'], [',', 'Settings'], ['`', 'Cloak the screen (panic)'], ['?', 'This sheet'], ['Right-click', 'Menu for whatever is under the pointer']]],
+  ['Everywhere', [['/', 'Focus the search'], ['1 – 5', 'Roam · Boards · Follows · Pools · Trail'], [',', 'Settings'], ['Ctrl+T', 'New tab'], ['Ctrl+W', 'Close tab'], ['Ctrl+Tab', 'Next tab (Ctrl+Shift+Tab: previous)'], ['Ctrl+Shift+T', 'Reopen closed tab'], ['Middle-click', 'Open a section or card in a new tab'], ['`', 'Cloak the screen (panic)'], ['?', 'This sheet'], ['Right-click', 'Menu for whatever is under the pointer']]],
   ['Gallery', [['Click', 'Open in viewer'], ['Arrows + Enter', 'Move and open'], ['Ctrl / Shift click', 'Select (range)'], ['Middle click', 'Open on site'], ['S', 'Toggle selection mode'], ['Esc', 'Leave selection']]],
   ['Viewer', [['← → / A D / J K', 'Previous / next'], ['PgUp / PgDn', 'Previous / next page in the pool'], ['Home / End', 'First / last'], ['Scroll / + −', 'Zoom (smooth)'], ['Z / double-click', 'Fit ⇄ 100%'], ['0', 'Reset view'], ['R', 'Rotate'], ['F', 'True fullscreen'], ['P', 'Slideshow']]],
   ['Viewer actions', [['B', 'Pin to a board'], ['V', 'Favorite'], ['U', 'Upvote'], ['S', 'Save to Downloads'], ['C', 'Copy link'], ['O', 'Open on site'], ['I', 'Info panel'], ['T', 'Filmstrip']]],

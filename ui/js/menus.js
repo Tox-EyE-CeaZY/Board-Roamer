@@ -11,6 +11,9 @@ import { isAndroid, native } from './platform.js';
  */
 export const M = {
   tagAction: () => {}, // (tag, 'only'|'add'|'exclude', provId)
+  openTab: () => {}, // (hash)
+  tabsOn: () => false,
+  roamHash: () => '', // (terms, filters, provId) -> route for a search
   toggleStar: () => {},
   toggleFollow: () => {},
   isStarred: () => false,
@@ -120,6 +123,7 @@ export function tagMenu(tag, cat, provId) {
   return [
     { header: pretty(tag) },
     { label: 'Search only this', icon: 'search', run: () => M.tagAction(tag, 'only', provId) },
+    M.tabsOn() && { label: 'Search in new tab', icon: 'plus', run: () => M.openTab(M.roamHash([{ t: tag, op: '+' }], {}, provId), pretty(tag)) },
     { label: 'Add to search', icon: 'plus', run: () => M.tagAction(tag, 'add', provId) },
     { label: 'Exclude from search', icon: 'minus', run: () => M.tagAction(tag, 'exclude', provId) },
     !meta && { sep: true },
