@@ -18,7 +18,7 @@ import { toast, popover, closePopover } from './ui.js';
 import { showMenu } from './ctxmenu.js';
 
 const KEY = 'br1:tabs';
-const VIEW_ICON = { roam: 'roam', boards: 'boards', board: 'pin', follows: 'bell', pools: 'book', pool: 'pool', trail: 'trail' };
+const VIEW_ICON = { roam: 'roam', boards: 'boards', board: 'pin', follows: 'bell', pools: 'book', pool: 'pool', trail: 'trail', local: 'folder' };
 
 let tabs = [];
 let activeId = null;

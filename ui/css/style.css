@@ -228,7 +228,10 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 .dial small { font: 600 8.5px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); max-width: 62px; overflow: hidden; text-overflow: ellipsis; }
 .dial.adult small::after { content: ' 18+'; color: var(--hot); }
 .rail .dial-ring { display: none; }
-@media (max-height: 900px) { .brand-name { display: none; } .nav { --ih: 66px; } .ni-t { display: none; } .nav-i { gap: 0; } }
+/* six sections need more room than five did: compact earlier, compact more on short windows (tablets), and scroll as a last resort */
+@media (max-height: 1080px) { .brand-name { display: none; } .nav { --ih: 66px; } .ni-t { display: none; } .nav-i { gap: 0; } }
+@media (max-height: 800px) { .nav { --ih: 54px; } .nav { gap: 4px; } .nav-ind { top: calc(var(--i, 0) * (var(--ih) + 4px)); } .brand { margin-bottom: 8px; } .dial small { display: none; } .dial { margin-bottom: 6px; } }
+.rail { overflow-y: auto; scrollbar-width: none; } .rail::-webkit-scrollbar { display: none; }
 
 /* ------------------------------------------------------------ search strip */
 .strip { position: relative; z-index: 6; display: flex; align-items: flex-start; gap: 10px; padding: 18px 22px 10px; }
@@ -1136,3 +1139,32 @@ html.touch .sync-addr, html.touch .sync-code { min-height: 48px; }
 .tabs-btn { display: none; }
 
 .f-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* folders (boards and library) */
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 14px 30px 4px; }
+.fldr { display: grid; gap: 10px; padding: 14px 16px; background: var(--bg2); border-left: 4px solid var(--accent); cursor: pointer; outline: 0; transition: transform .25s var(--spring), background .2s; }
+.fldr:focus-visible { background: var(--bg3); }
+@media (hover: hover) { .fldr:hover { transform: translateY(-3px); background: var(--bg3); } }
+.fldr.drop { outline: 2px dashed var(--accent); background: var(--bg3); }
+.fl-top { display: flex; align-items: center; gap: 10px; color: var(--accent); min-width: 0; }
+.fl-top h3 { margin: 0; font: 700 16px/1.15 var(--f-display); color: var(--text, inherit); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-thumbs { display: flex; gap: 4px; height: 54px; }
+.fl-thumbs img { height: 100%; aspect-ratio: 1; object-fit: cover; background: var(--bg3); }
+.fl-meta { font: 500 11px var(--f-mono); color: var(--faint); }
+.pgrid > .fldr { align-self: start; }
+.fback { display: inline-flex; align-items: center; gap: 6px; }
+html.phone .fgrid { padding: 12px 14px 0; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+
+.nav-i[hidden], .tab[hidden] { display: none !important; }
+.lroots { display: grid; gap: 6px; }
+.lroot { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg2); }
+.lroot b { font-weight: 700; } .lroot small { color: var(--faint); font: 500 11px var(--f-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.lpick { display: grid; gap: 8px; min-width: min(460px, 80vw); }
+.lpick-path { font: 500 12px var(--f-mono); color: var(--dim); word-break: break-all; }
+.lpick-list { display: grid; gap: 2px; max-height: 46vh; overflow: auto; }
+.lpick-list button { text-align: left; padding: 8px 10px; background: var(--bg2); color: inherit; display: flex; gap: 8px; align-items: center; }
+@media (hover: hover) { .lpick-list button:hover { background: var(--bg3); } }
+
+/* Local: the folder list lives inside the gallery's scroller, so folders and files scroll together */
+.gal > .fgrid { padding: 8px 0 20px; }
+.gal > .fgrid[hidden] { display: none; }

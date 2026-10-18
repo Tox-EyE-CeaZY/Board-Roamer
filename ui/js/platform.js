@@ -95,6 +95,11 @@ export const native = {
   notify: (title, body) => call('notify', title, body),
   /** Hand the background job its watch list (JSON), see watch.js. */
   setWatch: (json) => call('setWatch', json),
+  /** Local files on the phone: is access to files allowed, ask for it, and tell the shell how to reach the desktop and other devices. */
+  localAccess: () => (has('localAccess') ? !!call('localAccess') : true),
+  requestLocalAccess: () => call('requestLocalAccess'),
+  setHub: (url, code) => call('setHub', url || '', code || ''),
+  setRemotes: (json) => call('setRemotes', json),
   open: (url) => call('openUrl', url),
   reveal: (uri) => call('reveal', uri || ''),
   share: (text, title) => call('share', text || '', title || ''),

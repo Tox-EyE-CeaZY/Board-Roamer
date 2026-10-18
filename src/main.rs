@@ -1,6 +1,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod appcfg;
+mod local;
 mod meta;
 mod os;
 mod proxy;
@@ -78,6 +79,14 @@ fn handle(rq: tiny_http::Request) {
         "/open" => proxy::open_external(rq, query),
         "/img" => proxy::image(rq, query),
         "/notify" => proxy::notify(rq),
+        p if p.starts_with("/local/") => {
+            let p = p.to_string();
+            local::local_request(rq, &p, query)
+        }
+        p if p.starts_with("/remote/") => {
+            let p = p.to_string();
+            local::remote(rq, &p, query)
+        }
         "/update/info" => updater::info(rq),
         "/update/apply" => updater::apply(rq),
         p if p.starts_with("/app/") => {
@@ -207,6 +216,7 @@ fn main() {
         let server = Arc::new(server);
         sync::init(os::data_dir());
         appcfg::init(os::data_dir());
+        local::init(os::data_dir());
         for _ in 0..8 {
             let s = server.clone();
             thread::spawn(move || {

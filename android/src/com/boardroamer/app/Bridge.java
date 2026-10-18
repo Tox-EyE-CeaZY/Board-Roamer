@@ -226,6 +226,30 @@ final class Bridge {
         if (Build.VERSION.SDK_INT >= 33 && !notifyAllowed()) a.runOnUiThread(() -> a.requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 7));
     }
 
+    /** Local files: has the user allowed Android's "All files access"? */
+    @JavascriptInterface
+    public boolean localAccess() { return Local.access(); }
+
+    /** Open Android's "All files access" screen for this app. */
+    @JavascriptInterface
+    public void requestLocalAccess() {
+        a.runOnUiThread(() -> {
+            try {
+                a.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + a.getPackageName())));
+            } catch (Throwable e) {
+                a.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            }
+        });
+    }
+
+    /** The desktop's address and the pairing code, so this phone can reach it (and tell it where this phone's folders are). */
+    @JavascriptInterface
+    public void setHub(String url, String code) { Local.setHub(url, code); }
+
+    /** Other devices that share their folders: {hub, code, devices: {name: "http://ip:port"}}. */
+    @JavascriptInterface
+    public void setRemotes(String json) { Local.setRemotes(json); }
+
     /** Post a notification (text only, see Notifier). */
     @JavascriptInterface
     public void notify(String title, String body) { Notifier.post(a, title, body); }

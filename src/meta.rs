@@ -517,6 +517,110 @@ pub fn write_sidecar(path: &Path, m: &Value) -> bool {
     fs::write(p, xmp(m, usize::MAX)).is_ok()
 }
 
+/* ------------------------------------------------------------------ reading it back (the Local gallery) */
+fn unesc(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+}
+
+fn between<'a>(s: &'a str, a: &str, b: &str) -> Option<&'a str> {
+    let i = s.find(a)? + a.len();
+    let j = s[i..].find(b)? + i;
+    Some(&s[i..j])
+}
+
+fn li_items(s: &str, tag: &str) -> Vec<String> {
+    let Some(block) = between(s, &format!("<{tag}>"), &format!("</{tag}>")) else { return vec![] };
+    block.split("<rdf:li").skip(1).filter_map(|x| x.split_once('>').and_then(|(_, r)| r.split("</rdf:li>").next()).map(unesc)).filter(|x| !x.is_empty()).collect()
+}
+
+/// What Board Roamer (or any XMP-aware tool) wrote into a file: tags, artists and where it came from. Compact, for listings.
+fn compact(full: &Value) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    for k in ["site", "siteId", "id", "url", "md5", "rating", "score", "posted", "fullUrl"] {
+        if let Some(v) = full.get(k).filter(|v| !v.is_null()) {
+            out.insert(k.into(), v.clone());
+        }
+    }
+    for k in ["artists", "sources"] {
+        out.insert(k.into(), Value::Array(list(full, k).into_iter().map(Value::String).collect()));
+    }
+    out.insert("tags".into(), Value::Array(list(full, "tags").into_iter().map(Value::String).collect()));
+    if let Some(c) = full.get("tagsByCategory").filter(|v| v.is_object()) {
+        out.insert("byCat".into(), c.clone());
+    }
+    out
+}
+
+/// WebM / Matroska keep the record as a SimpleTag named BOARDROAMER_JSON: [name][0x4487 size value].
+fn mkv_record(buf: &[u8]) -> Option<Value> {
+    let name = b"BOARDROAMER_JSON";
+    let at = buf.windows(name.len()).position(|w| w == name)? + name.len();
+    let rest = buf.get(at..)?;
+    if rest.len() < 3 || rest[0] != 0x44 || rest[1] != 0x87 {
+        return None;
+    }
+    let w = vint_width(rest[2]);
+    let mut size = (rest[2] as usize) & (0xFFusize >> w);
+    for i in 1..w {
+        size = (size << 8) | *rest.get(2 + i)? as usize;
+    }
+    let start = 2 + w;
+    serde_json::from_slice(rest.get(start..start + size)?).ok()
+}
+
+fn parse_xmp(x: &str) -> Option<Value> {
+    let mut out = serde_json::Map::new();
+    if let Some(full) = between(x, "<br:json>", "</br:json>").and_then(|j| serde_json::from_str::<Value>(&unesc(j)).ok()) {
+        out = compact(&full);
+    } else {
+        let mut tags = li_items(x, "dc:subject");
+        if tags.is_empty() {
+            tags = between(x, "<br:tagString>", "</br:tagString>").map(|t| unesc(t).split_whitespace().map(String::from).collect()).unwrap_or_default();
+        }
+        for (k, el) in [("site", "br:site"), ("siteId", "br:siteId"), ("id", "br:postId"), ("url", "br:postUrl"), ("md5", "br:md5"), ("rating", "br:rating")] {
+            if let Some(v) = between(x, &format!("<{el}>"), &format!("</{el}>")) {
+                out.insert(k.into(), Value::String(unesc(v)));
+            }
+        }
+        out.insert("artists".into(), Value::Array(li_items(x, "dc:creator").into_iter().map(Value::String).collect()));
+        out.insert("sources".into(), Value::Array(li_items(x, "br:sources").into_iter().map(Value::String).collect()));
+        out.insert("tags".into(), Value::Array(tags.into_iter().map(Value::String).collect()));
+    }
+    let has = out.get("tags").and_then(|t| t.as_array()).map_or(false, |t| !t.is_empty()) || out.contains_key("siteId");
+    has.then(|| Value::Object(out))
+}
+
+/// Read the XMP packet out of a file's head (images, WebM) or tail (MP4/MOV), or from a `.xmp` sidecar beside it.
+pub fn read(path: &Path, ext: &str) -> Option<Value> {
+    let mut f = fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let tail = matches!(ext, "mp4" | "m4v" | "mov" | "webm" | "mkv"); // appended at the end of video files
+    let (head, tailn) = (96 * 1024u64, 160 * 1024u64);
+    let mut buf = Vec::new();
+    if len <= head + tailn {
+        f.read_to_end(&mut buf).ok()?;
+    } else if tail {
+        f.seek(SeekFrom::Start(len - tailn)).ok()?;
+        f.take(tailn).read_to_end(&mut buf).ok()?;
+    } else {
+        f.take(head).read_to_end(&mut buf).ok()?;
+    }
+    if matches!(ext, "webm" | "mkv") {
+        if let Some(m) = mkv_record(&buf).map(|r| compact(&r)).filter(|m| m.get("tags").map_or(false, |t| t.as_array().map_or(false, |a| !a.is_empty())) || m.contains_key("siteId")) {
+            return Some(Value::Object(m));
+        }
+    }
+    let find = |h: &[u8], n: &[u8]| h.windows(n.len()).position(|w| w == n);
+    let packet = find(&buf, b"<x:xmpmeta").and_then(|i| find(&buf[i..], b"</x:xmpmeta>").map(|j| String::from_utf8_lossy(&buf[i..i + j + 12]).into_owned()));
+    if let Some(x) = packet.and_then(|x| parse_xmp(&x)) {
+        return Some(x);
+    }
+    let mut side = path.as_os_str().to_owned();
+    side.push(".xmp");
+    let sc = fs::read(side).ok().filter(|b| b.len() < (1 << 20))?;
+    parse_xmp(&String::from_utf8_lossy(&sc))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +634,22 @@ mod tests {
         assert!(o.windows(10).any(|w| w == b"dc:subject"));
         assert_eq!(&o[..2], &[0xFF, 0xD8]);
         assert!(o.ends_with(&[0xFF, 0xD9]));
+    }
+    #[test]
+    fn mkv_roundtrip() {
+        let mut m = sample();
+        m["tagsByCategory"] = serde_json::json!({"general":["wolf","solo"],"artist":["a_b"]});
+        let bytes = mkv_tags(&m);
+        let r = compact(&mkv_record(&bytes).unwrap());
+        assert_eq!(r["tags"][0], "wolf");
+        assert_eq!(r["byCat"]["artist"][0], "a_b");
+        assert_eq!(r["siteId"], "e621");
+    }
+    #[test]
+    fn xmp_roundtrip() {
+        let r = parse_xmp(&xmp(&sample(), usize::MAX)).unwrap();
+        assert_eq!(r["tags"][2], "t<&>");
+        assert_eq!(r["id"], 123);
     }
     #[test]
     fn png_has_crc() {

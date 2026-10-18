@@ -22,6 +22,7 @@ export const syncConfig = () => ({ ...cfg });
 export function setSyncConfig(patch) {
   cfg = { ...cfg, ...patch };
   persist();
+  if (isAndroid()) native.setHub(cfg.url, cfg.code); // the shell reaches the desktop for Local files and announces this phone
   report();
   schedule();
 }
@@ -78,6 +79,13 @@ export async function ping() {
   const info = JSON.parse(r.text);
   if (info.app !== 'board-roamer-sync') throw new Error('That address is not a Board Roamer desktop');
   return info;
+}
+
+/** Phone: which devices share their folders (the desktop itself and other phones), with the addresses to reach them. */
+export async function hubDevices() {
+  const r = await rpc('GET', '/sync/devices');
+  check(r, 'Listing devices');
+  return JSON.parse(r.text);
 }
 
 /* ------------------------------------------------------------------ the sync itself */
@@ -173,6 +181,7 @@ async function tick() {
 export async function startAutoSync() {
   if (started) return;
   started = true;
+  if (isAndroid()) native.setHub(cfg.url, cfg.code);
   if (!isAndroid()) {
     try { hostOn = (await (await fetch('/sync/config')).json()).enabled; } catch { hostOn = false; }
   }

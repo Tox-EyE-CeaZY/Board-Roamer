@@ -218,10 +218,21 @@ export class Viewer {
 
   /* ============================================================ showing a post */
   _clearMedia() {
+    this._upgrade = null;
     this.player?.destroy();
     this.player = null;
     this.media?.remove();
     this.media = null;
+  }
+
+  /** Swap the backdrop only when the new picture is decoded; changing it earlier flashes the whole screen on a phone. */
+  _setBg(url) {
+    this._bgWant = url;
+    if (!url) return void (this.bg.style.backgroundImage = 'none');
+    const apply = () => { if (this._bgWant === url) this.bg.style.backgroundImage = `url("${url}")`; };
+    const im = new Image();
+    im.src = url;
+    im.decode ? im.decode().then(apply, apply) : (im.onload = apply);
   }
 
   async show(dir, fromRect, fromX = 0) {
@@ -237,7 +248,7 @@ export class Viewer {
     this.counter.textContent = this._counterText();
     this.hooks.onNavigate?.(post, this.i);
     const blurred = isBlurred(post) && !this._unblur.has(postKey(post));
-    this.bg.style.backgroundImage = blurred ? 'none' : `url("${post.thumb}")`;
+    this._setBg(blurred ? '' : post.thumb);
     const artist = post.artists.length ? post.artists.slice(0, 3).map(pretty).join(', ') : 'unknown artist';
     this.title.replaceChildren(h('b', {}, artist), h('span', {}, `#${post.id} · ${post.provider}`));
     this._paintToggles();
@@ -331,16 +342,37 @@ export class Viewer {
     // animated GIFs go straight to the real file: a static "sample" would swap in noticeably later
     const first = post.kind === 'anim' ? post.full : post.sample || post.full;
     const img = h('img', { class: 'media', alt: '', draggable: 'false', src: first });
-    const wantFull = S('fullOriginal') && post.full !== first;
-    if (wantFull) {
-      this.ring.hidden = false;
-      const big = new Image();
-      big.onload = () => {
-        if (this.media === img) img.src = post.full;
+    // until the picture itself has loaded, show the thumbnail (already in memory from the gallery) instead of a blank box
+    if (post.thumb && post.thumb !== first) {
+      img.style.cssText = `background:url("${post.thumb}") center/100% 100% no-repeat`;
+      img.addEventListener('load', () => (img.style.background = ''), { once: true });
+    }
+    // The full-size original is only a sharper copy. Swapping it in by changing `src` blanks the picture while a
+    // multi-megapixel image decodes (the screen flashes), so it is decoded off to the side first and then swapped in one go.
+    // On a touch screen it waits until you actually zoom in: at fit size it looks the same and costs a huge GPU layer.
+    this._upgrade = null;
+    if (S('fullOriginal') && post.full !== first && post.kind !== 'anim') {
+      let started = false;
+      const upgrade = async () => {
+        if (started || this.media !== img) return;
+        started = true;
+        this.ring.hidden = false;
+        try {
+          const next = img.cloneNode(false); // same size, position and transform as the one on screen
+          next.style.background = '';
+          next.src = post.full;
+          await next.decode();
+          if (this.media === img && img.isConnected) {
+            img.replaceWith(next);
+            this.media = next;
+            this._paint();
+          }
+        } catch { /* keep the sample: the original would not load */ }
         this.ring.hidden = true;
       };
-      big.onerror = () => (this.ring.hidden = true);
-      big.src = post.full;
+      this._upgrade = upgrade;
+      if (isTouch()) this.ring.hidden = true;
+      else upgrade();
     } else this.ring.hidden = true;
     img.addEventListener('load', () => {
       if (!post.w && img.naturalWidth) { post.w = img.naturalWidth; post.h = img.naturalHeight; this._relayoutMedia(); }
@@ -420,7 +452,7 @@ export class Viewer {
     m.style.transform = `translate(${this.tx + this.swx}px,${this.ty + this.swy}px) rotate(${this.rot}deg) scale(${this.sc * k})`;
     this.stage.classList.toggle('zoomed', this.tsc > this.fit * 1.02);
     this.zoomTag.textContent = this.mode === 'fit' ? 'FIT' : Math.round(this.tsc * 100) + '%';
-    this.zoomTag.hidden = this.isVideo;
+    this.zoomTag.hidden = false;
   }
 
   /** Ease the current values toward the targets: scroll-wheel notches become a glide, not steps. */
@@ -448,7 +480,7 @@ export class Viewer {
   }
 
   zoomAt(factor, cx, cy) {
-    if (this.isVideo) return;
+    if (this._upgrade && factor > 1) this._upgrade(); // zooming in: now the original is worth having
     const next = clamp(this.tsc * factor, this.fit * 0.4, 24);
     const k = next / this.tsc;
     this.ttx = cx - (cx - this.ttx) * k;
@@ -466,7 +498,7 @@ export class Viewer {
   }
 
   _wheel(e) {
-    if (e.target.closest('.vw-panel') || this.isVideo) return;
+    if (e.target.closest('.vw-panel,.pc')) return;
     e.preventDefault();
     if (S('wheel') === 'nav' && !e.ctrlKey) {
       const now = performance.now();
@@ -485,6 +517,7 @@ export class Viewer {
   _dbl(e) {
     if (this.isVideo) {
       if (e.target.closest('.pc')) return;
+      if (this.mode !== 'fit') return this.resetView(); // zoomed in: a double-click goes back to fit; otherwise it is fullscreen
       return this.fullscreen();
     }
     if (!e.target.closest('.media')) return;
@@ -495,7 +528,6 @@ export class Viewer {
   }
 
   cycleZoom() {
-    if (this.isVideo) return;
     if (this.mode === 'fit') this.zoomAt(this.fit < 1 ? 1 / this.tsc : 2, 0, 0);
     else this.resetView();
   }
@@ -581,6 +613,12 @@ export class Viewer {
     const d = this._drag;
     this.pointers.delete(e.pointerId);
     this._pinch = 0;
+    if (this.pointers.size === 1 && d) {
+      // One finger of a pinch lifted. The drag record still starts where the *other* finger first landed, so the finger that
+      // stays down would pan the picture by the distance between the two (it darts sideways). Restart it from where it is now.
+      const [rest] = this.pointers.values();
+      Object.assign(d, { x: rest.x, y: rest.y, lx: rest.x, ly: rest.y, lt: performance.now(), vx: 0, vy: 0, tx: this.ttx, ty: this.tty, moved: false, axis: 'pinch' });
+    }
     this.stage.classList.remove('panning');
     if (d?.touch) {
       this._lastTouch = performance.now();
@@ -811,7 +849,7 @@ export class Viewer {
         const im = new Image();
         im.src = p.kind === 'anim' ? p.full : p.sample || p.full;
         im.decode?.().catch(() => {});
-        if (o === 1 && S('fullOriginal') && p.full !== (p.sample || p.full) && p.kind !== 'anim') {
+        if (o === 1 && !isTouch() && S('fullOriginal') && p.full !== (p.sample || p.full) && p.kind !== 'anim') {
           const big = new Image();
           big.src = p.full;
         }
@@ -1071,7 +1109,7 @@ export class Viewer {
       pl && { label: 'Speed', icon: 'speed', sub: [0.25, 0.5, 1, 1.5, 2].map((x) => ({ label: x + '×', checked: pl.v.playbackRate === x, run: () => pl.setSpeed(x) })) },
       pl && { label: pl.v.muted ? 'Unmute' : 'Mute', icon: pl.v.muted ? 'sound' : 'mute', kbd: 'M', run: () => pl.toggleMute() },
       pl && { sep: true },
-      !pl && p.kind !== 'flash' && { label: this.mode === 'fit' ? 'Zoom to 100%' : 'Fit to window', icon: 'zoomIn', kbd: 'Z', run: () => this.cycleZoom() },
+      p.kind !== 'flash' && { label: this.mode === 'fit' ? 'Zoom to 100%' : 'Fit to window', icon: 'zoomIn', kbd: 'Z', run: () => this.cycleZoom() },
       !pl && p.kind !== 'flash' && { label: 'Rotate', icon: 'rotate', kbd: 'R', run: () => this.rotate() },
       { label: isFullscreen() ? 'Exit fullscreen' : 'Fullscreen', icon: 'fullscreen', kbd: 'F', run: () => this.fullscreen() },
       { label: this.playing ? 'Stop slideshow' : 'Start slideshow', icon: this.playing ? 'pause' : 'play', kbd: 'P', run: () => this.toggleSlideshow() },

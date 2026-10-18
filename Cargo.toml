@@ -1,6 +1,6 @@
 [package]
 name = "board-roamer"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2021"
 description = "A stylish multi-booru board viewer (e621 first)"
 
@@ -15,6 +15,7 @@ percent-encoding = "2"
 base64 = "0.22"
 sha2 = "0.10"
 tray-icon = "0.21"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = "0.17"

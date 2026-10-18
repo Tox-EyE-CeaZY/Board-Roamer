@@ -133,6 +133,14 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   boards and pools you open from it get their own tabs (Settings → Look → *Pinned Main tab*). *Follows freshness* sets how soon
   Follows re-checks for new posts. Each tab keeps its own Back trail: pressing Back (or the mouse's back button) at the start
   of a tab closes it and returns you to the tab you opened it from.
+- **Folders** for boards (pin boards and live boards) and for the library's pools and comics: *New folder*, drag a card onto a
+  folder or right-click → *Move to folder*. Deleting a folder only moves its contents back out. Folders sync between devices.
+- **Local** (Settings → Local, off by default): a gallery of the pictures and videos in folders you choose, on this device and on
+  the other devices you sync with. Subfolders show up like boards; files open in the normal viewer; you can tag them (tags stay
+  in Board Roamer, never in the file) and the tags Board Roamer embedded in its own downloads are read back. Read-only.
+  *Let my other devices browse these folders* shares them over your sync connection (same pairing code). On Android it needs
+  "All files access" and keeps sharing alive with the app closed (a quiet "Sharing with your devices" notification). Mac:
+  normal folders work, a Photos library is not a folder and cannot be browsed.
 - **Notifications** (Settings → Notifications, off by default): a system notification when a check finds new posts from your
   follows, new posts on a live board, or new pages in a saved pool. Text only, never a picture, and generic by default
   (“New posts from your follows”, “Your boards have new updates”). You can opt in to naming followed artists. They only appear

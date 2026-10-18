@@ -6,6 +6,7 @@ import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs } from './store.js'
 import { providerList, getProvider, call } from './providers.js';
 import { segmented, toast, confirmDlg, dialog } from './ui.js';
 import { sendTest } from './notify.js';
+import { devices } from './local.js';
 import { reveal, openExternal } from './actions.js';
 import { checkForUpdate, installUpdate, onUpdate, appInfo } from './updates.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
@@ -40,6 +41,51 @@ export function openSettings(section) {
     return h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), out), i);
   };
   const seg = (label, key, opts, hint) => h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), hint ? h('small', {}, hint) : null), segmented(opts, S(key), (v) => setS(key, v)));
+
+  /* --- local files */
+  const localBox = h('div', { class: 'st-local' });
+  const localApi = async (patch = {}) => {
+    const q = new URLSearchParams();
+    if (patch.share != null) q.set('share', patch.share ? '1' : '0');
+    if (patch.add) (q.set('add', patch.add.path), patch.add.name && q.set('name', patch.add.name));
+    if (patch.remove) q.set('remove', patch.remove);
+    return (await fetch('/local/config' + (q.toString() ? '?' + q : ''))).json();
+  };
+  const pickFolder = async () => {
+    const view = { path: '' };
+    const body = h('div', { class: 'lpick' });
+    const draw = async (path) => {
+      const j = await (await fetch('/local/dirs?path=' + encodeURIComponent(path))).json().catch(() => ({}));
+      if (j.error) return toast(j.error, { kind: 'err' });
+      view.path = j.path || '';
+      const entry = (label, p, ic = 'folder') => h('button', { onclick: () => draw(p) }, h('i', { html: icon(ic, 15) }), h('span', {}, label));
+      body.replaceChildren(
+        h('div', { class: 'lpick-path' }, view.path || 'Choose a place to start'),
+        h('div', { class: 'lpick-list' },
+          view.path ? entry('Up one level', j.parent || '', 'up') : null,
+          ...(j.places || []).map((pl) => entry(pl.name, pl.path)),
+          ...(j.dirs || []).map((d) => entry(d.name, d.path))));
+    };
+    await draw('');
+    const pick = await dialog({ title: 'Choose a folder', body, actions: [{ label: 'Cancel', value: null }, { label: 'Use this folder', value: true, cls: 'primary' }] });
+    return pick && view.path ? view.path : null;
+  };
+  const paintLocal = async () => {
+    const c = await localApi().catch(() => null);
+    if (!c) return localBox.replaceChildren(h('div', { class: 'st-note' }, 'Local files need the desktop or Android app.'));
+    const needsAccess = isAndroid() && !native.localAccess();
+    localBox.replaceChildren(
+      needsAccess ? h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Allow access to files'), h('small', {}, 'Android needs your OK to read folders outside the app. Grant “All files access”, then come back')),
+        h('button', { class: 'btn primary', onclick: () => { native.requestLocalAccess(); toast('Turn on access, then return here', { ms: 3200 }); } }, 'Allow')) : null,
+      h('div', { class: 'lroots' }, c.roots.length ? c.roots.map((r) => h('div', { class: 'lroot' }, h('i', { html: icon('folder', 16) }), h('b', {}, r.name), h('small', {}, r.ok ? r.path : r.path + ' (missing)'),
+        h('button', { class: 'ibtn', title: 'Stop using this folder', html: icon('close', 15), onclick: async () => { await localApi({ remove: r.id }); paintLocal(); } }))) : [h('div', { class: 'st-note' }, 'No folders yet. Add your Pictures folder, or any folder, or the whole storage. Subfolders show up like boards.')]),
+      h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Add a folder'), h('small', {}, 'Folders inside it appear as boards of their own')),
+        h('button', { class: 'btn', html: icon('plus', 16) + '<span>Choose…</span>', onclick: async () => { const p = await pickFolder(); if (p) { await localApi({ add: { path: p } }); paintLocal(); } } })),
+      c.quick.length ? h('div', { class: 'f-chips' }, c.quick.filter((q) => !c.roots.some((r) => r.path === q.path)).map((q) => h('button', { class: 'chip', onclick: async () => { await localApi({ add: { path: q.path, name: q.name } }); paintLocal(); } }, '+ ' + q.name))) : null,
+      h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Let my other devices browse these folders'), h('small', {}, 'Needs sync set up (it uses the same pairing code). Read-only, and only while Board Roamer is open here')),
+        (() => { const b = h('button', { class: 'tgl' + (c.share ? ' on' : ''), role: 'switch', onclick: async () => { const n = await localApi({ share: !b.classList.contains('on') }); b.classList.toggle('on', n.share); } }, h('i')); return b; })()));
+  };
+  paintLocal();
 
   /* --- source */
   const provBox = h('div', { class: 'prov-list' });
@@ -251,6 +297,9 @@ export function openSettings(section) {
       toggle('Show artist names', 'notifyNames', 'Off: “New posts from your follows”. On: “New posts from {artist}”. Boards and pools never name themselves'),
       h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Try it'), h('small', {}, isAndroid() ? 'On the lock screen, only “New activity” is shown' : 'Sends a notification now. Checks run about every 30 minutes while the app is open')),
         h('button', { class: 'btn', onclick: () => (isAndroid() && !native.notifyAllowed() ? (native.requestNotify(), toast('Allow notifications first', { ms: 2400 })) : sendTest()) }, 'Send a test'))),
+    sec('local', 'Local',
+      toggle('Local files', 'localOn', 'A gallery of the pictures and videos in folders you choose, on this device and on the other devices you sync with. Nothing is copied or changed, and tags stay in Board Roamer'),
+      localBox),
     sec('gallery', 'Gallery',
       seg('Layout', 'layout', [['masonry', 'Masonry'], ['rows', 'Rows'], ['grid', 'Grid']]),
       slider('Tile size', 'density', 130, 520, 10, (v) => v + 'px'), slider('Gap', 'gap', 0, 28, 1, (v) => v + 'px'),

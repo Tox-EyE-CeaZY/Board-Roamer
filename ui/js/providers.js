@@ -394,7 +394,10 @@ export const providers = {
   safebooru: { id: 'safebooru', name: 'Safebooru', sub: 'anime art, safe-only', adult: false, ...gbBase('safebooru', 'https://safebooru.org') },
 };
 providers.e926.credKey = 'e621';
-export const providerList = Object.values(providers);
+// Local files (ui/js/local.js) are shown with the same gallery and viewer, so they need a provider of their own. It cannot be searched.
+providers.local = { id: 'local', engine: 'local', internal: true, credKey: 'local', name: 'Local', sub: 'files on your devices', adult: false, web: '', short: 'lo', color: 200, maxTags: 99, pageSize: 60,
+  sorts: [], shapes: false, ages: false, media: false, fav: false, vote: false, dossier: false, wiki: false, pools: false, filterTags: () => [], async page() { return []; } };
+export const providerList = Object.values(providers).filter((p) => !p.internal);
 export const getProvider = (id) => providers[id] || providers.e621;
 
 /* ------------------------------------------------------------------ query building */

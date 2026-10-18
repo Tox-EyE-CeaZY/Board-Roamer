@@ -4,7 +4,8 @@
  */
 import { h, ago, fmtNum, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, library, reading, on, emit } from './store.js';
+import { S, setS, library, reading, on, emit, folders } from './store.js';
+import { newFolder, moveEntry, folderCard, draggableItem, folderMenu } from './folders.js';
 import { getProvider } from './providers.js';
 import { toast, confirmDlg } from './ui.js';
 import { openExternal } from './actions.js';
@@ -75,6 +76,8 @@ export async function refreshLib({ force = false } = {}) {
 /* ------------------------------------------------------------------ the screen */
 const SORTS = [['updates', 'Updates first'], ['read', 'Recently read'], ['added', 'Recently saved'], ['name', 'A–Z']];
 
+let openFolder = null; // which library folder is showing (remembered while you move around)
+
 export function renderLibrary(root, ctx) {
   const st = { q: '' };
   const grid = h('div', { class: 'pgrid lib-grid' });
@@ -94,7 +97,8 @@ export function renderLibrary(root, ctx) {
   } });
   const paintSort = () => (sortBtn.querySelector('span').textContent = (SORTS.find(([v]) => v === S('libSort')) || SORTS[0])[1]);
   paintSort();
-  const bar = h('div', { class: 'pools-ctl' + (isPhone() ? ' compact' : '') }, sortBtn, filterIn, h('div', { class: 'spacer' }), !isPhone() && refreshBtn, !isPhone() && seenBtn);
+  const newFolderBtn = h('button', { class: 'btn', title: 'New folder', html: icon('folder', 16) + (isPhone() ? '' : '<span>New folder</span>'), onclick: async () => { if (await newFolder('library')) paint(); } });
+  const bar = h('div', { class: 'pools-ctl' + (isPhone() ? ' compact' : '') }, sortBtn, filterIn, h('div', { class: 'spacer' }), newFolderBtn, !isPhone() && refreshBtn, !isPhone() && seenBtn);
   root.replaceChildren(h('div', { class: 'lib-head' }, sub), progress, bar, grid);
 
   const sortKey = (f) => {
@@ -143,11 +147,27 @@ export function renderLibrary(root, ctx) {
         h('button', { class: 'btn primary', onclick: () => { setS('poolsTab', 'browse'); ctx.refresh(); } }, 'Browse pools')));
       return;
     }
-    const list = all.filter((f) => !st.q || f.name.toLowerCase().includes(st.q)).sort((a, b) => { const x = sortKey(a), y = sortKey(b); return typeof x === 'string' ? x.localeCompare(y) : x - y; });
-    grid.replaceChildren(...(list.length ? list.map(card) : [h('div', { class: 'empty-state' }, h('h2', {}, 'No match'), h('p', {}, 'Nothing in your library matches that filter.'))]));
+    if (openFolder && !folders.get(openFolder)) openFolder = null;
+    const here = (f) => (st.q ? true : openFolder ? f.folder === openFolder : !f.folder || !folders.get(f.folder)); // searching looks everywhere
+    const tiles = [];
+    if (openFolder) {
+      const back = h('button', { class: 'btn fback', html: icon('left', 16) + `<span>Library · ${folders.get(openFolder).name}</span>`, onclick: () => { openFolder = null; paint(); },
+        ondragover: (e) => e.preventDefault(), ondrop: (e) => { const id = e.dataTransfer.getData('text/x-br-item'); if (id) (library.update(id, { folder: null, folderT: Date.now() })) ; } });
+      tiles.push(h('div', { style: 'grid-column:1/-1' }, back));
+    } else if (!st.q) {
+      for (const fo of folders.all('library')) {
+        const inside = all.filter((x) => x.folder === fo.id);
+        tiles.push(folderCard(fo, { count: inside.length, noun: 'title', covers: inside.map((x) => x.cover).filter(Boolean), onOpen: () => { openFolder = fo.id; paint(); }, onDrop: (id) => library.update(id, { folder: fo.id, folderT: Date.now() }) }));
+      }
+    }
+    const list = all.filter(here).filter((f) => !st.q || f.name.toLowerCase().includes(st.q)).sort((a, b) => { const x = sortKey(a), y = sortKey(b); return typeof x === 'string' ? x.localeCompare(y) : x - y; });
+    grid.replaceChildren(...tiles, ...(list.length ? list.map(card) : tiles.length && !st.q && !openFolder ? [] : [h('div', { class: 'empty-state' }, h('h2', {}, st.q ? 'No match' : 'Nothing here yet'), h('p', {}, st.q ? 'Nothing in your library matches that filter.' : 'Right-click a title and choose Move to folder.'))]));
+    grid.querySelectorAll('.lcard').forEach((el) => draggableItem(el, el.dataset.id));
   }
 
   bindContext(grid, (e) => {
+    const fl = e.target.closest('.fldr');
+    if (fl && folders.get(fl.dataset.folder)) return folderMenu(folders.get(fl.dataset.folder), paint);
     const el = e.target.closest('.lcard');
     const f = el && library.get(el.dataset.id);
     if (!f) return null;
@@ -158,6 +178,7 @@ export function renderLibrary(root, ctx) {
       { label: 'Open', icon: 'pool', run: () => ctx.go(`#/pool/${f.pid}?p=${prov.id}`) },
       ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(`#/pool/${f.pid}?p=${prov.id}`, f.name, f.cover) },
       library.newPages(f) && { label: 'Mark seen', icon: 'check', run: () => library.markSeen(f.id) },
+      moveEntry('library', f, (fid) => library.update(f.id, { folder: fid, folderT: Date.now() })),
       { label: 'Check now', icon: 'refresh', run: () => checkLib(f).then(() => toast('Checked', { ms: 1000 })) },
       { sep: true },
       { label: 'Open on site', icon: 'external', run: () => openExternal(`${prov.web}/pools/${f.pid}`) },
@@ -170,7 +191,7 @@ export function renderLibrary(root, ctx) {
 
   const alive = () => root.isConnected && root.contains(grid);
   const repaint = debounce(() => alive() && paint(), 160);
-  const offs = [on('library', () => (alive() ? repaint() : offs.forEach((o) => o()))),
+  const offs = [on('library', () => (alive() ? repaint() : offs.forEach((o) => o()))), on('folders', () => alive() && repaint()),
     on('lib-progress', (e) => {
       if (!alive()) return;
       const { running: r, done, total } = e.detail;

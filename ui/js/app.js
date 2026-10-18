@@ -1,8 +1,9 @@
 import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, on, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
+import { S, setS, on, emit, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
 import { refreshLib } from './library.js';
 import { startWatch } from './watch.js';
+import { renderLocal } from './local.js';
 import { getProvider, providerList, Feed, catName } from './providers.js';
 import { initTopo, paintTopo } from './bg.js';
 import { Gallery } from './gallery.js';
@@ -37,6 +38,7 @@ let viewerGal = null;
 let viewerPushed = false;
 let readerPushed = false;
 let suppressClose = false;
+let curLocal = null; // hash of the Local folder that is rendered
 let curPool = null; // {id, provId} of the pool view that is rendered
 let navDepth = 0; // how many in-app screens are stacked behind this one (for the Back button)
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -45,7 +47,7 @@ const fSig = (f = {}) => JSON.stringify({ o: f.order || '', s: f.score || 0, r: 
 
 /* ================================================================== shell */
 const rail = $('#rail');
-const NAV = [['roam', 'Roam', 'roam'], ['boards', 'Boards', 'boards'], ['follows', 'Follows', 'bell'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail']];
+const NAV = [['roam', 'Roam', 'roam'], ['boards', 'Boards', 'boards'], ['follows', 'Follows', 'bell'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolBadge = h('b', { class: 'nav-badge', hidden: true });
@@ -88,6 +90,14 @@ function paintPoolBadge() {
   }
 }
 
+/** The Local section only shows once it is turned on (Settings > Local). */
+function paintLocalNav() {
+  const onn = !!S('localOn');
+  document.querySelectorAll('[data-view="local"]').forEach((a) => (a.hidden = !onn));
+  tabbar.style.setProperty('--tabs', onn ? 6 : 5);
+  setActiveNav(parseHash().view);
+}
+
 function paintFollowBadge() {
   const n = subs.unseen();
   for (const b of [followBadge, tabBadge]) {
@@ -115,13 +125,13 @@ function providerMenu() {
 const NAV_OF = { board: 'boards', pool: 'pools' };
 function setActiveNav(view) {
   const key = NAV_OF[view] || view;
-  const items = [...rail.querySelectorAll('.nav-i')];
+  const items = [...rail.querySelectorAll('.nav-i')].filter((a) => !a.hidden);
   items.forEach((a) => a.classList.toggle('on', a.dataset.view === key));
   const i = items.findIndex((a) => a.dataset.view === key);
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
   tabbar.style.setProperty('--i', Math.max(0, i));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));
-  appbarTitle.textContent = { roam: 'Roam', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail' }[view] || 'Roam';
+  appbarTitle.textContent = { roam: 'Roam', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local' }[view] || 'Roam';
 }
 
 /* ================================================================== roam view */
@@ -233,7 +243,7 @@ function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.
 /* The Main tab (Settings > Look > Pinned Main tab, computers only): the first tab is where you move between Roam, Boards,
    Follows, Pools and Trail. Anything you open from one of those pages (an artist, a board, a pool) gets a tab of its own. */
 const mainOn = () => !isPhone() && tabsEnabled() && S('mainTab') !== false;
-const PAGES = ['roam', 'boards', 'follows', 'pools', 'trail'];
+const PAGES = ['roam', 'boards', 'follows', 'pools', 'trail', 'local'];
 
 function routeToTab(hash) {
   if (!mainOn()) return false;
@@ -267,7 +277,7 @@ function showView(name) {
 }
 
 const roamHashFor = (terms, filters, provId) => roamHash(terms || [], { ...defaultFilters(), ...(filters || {}) }, provId || prov.id);
-const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf });
+const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf, openSettings });
 
 /* ---------- tabs: what each one remembers, and how it comes back */
 let pendingRestore = null;
@@ -286,6 +296,7 @@ function tabTitleFor(hash) {
     return names.length ? names.join(', ') : 'Roam';
   }
   if (view === 'board') return boards.get(id)?.name || 'Board';
+  if (view === 'local') return (p.get('d') || '').split('/').pop() || 'Local';
   return { boards: 'Boards', follows: 'Follows', pools: 'Pools', trail: 'Trail', pool: 'Pool' }[view] || 'Roam';
 }
 
@@ -381,6 +392,7 @@ function applyRouteCore() {
   closePopover();
   closeMenu();
   if (view !== 'pool') curPool = null;
+  if (view !== 'local') curLocal = null;
   if (view === 'roam') {
     boardGal = null;
     handleRead(null);
@@ -428,6 +440,12 @@ function applyRouteCore() {
     const g = renderBoard(other, id, ctx);
     boardGal = g;
     if (g) requestAnimationFrame(() => handlePost(p.get('post'), g));
+  } else if (view === 'local') {
+    const key = location.hash.split('?post=')[0].split('&post=')[0];
+    if (boardGal && curLocal === key) return handlePost(p.get('post'), boardGal); // only the viewer changed
+    curLocal = key;
+    boardGal = renderLocal(other, ctx, { devId: id ? decodeURIComponent(id) : '', rootId: p.get('r') || '', rel: p.get('d') || '' });
+    return handlePost(p.get('post'), boardGal);
   } else if (view === 'trail') (boardGal = null), renderTrail(other, ctx);
   else if (view === 'follows') (boardGal = null), renderFollows(other, ctx);
   else if (view === 'pools') (boardGal = null), renderPools(other, ctx);
@@ -571,6 +589,10 @@ const toggleFollow = (tag, pv) => follow(tag, pv || prov.id);
 function tagAction(tag, mode, provId) {
   if (!tag) return;
   const vp = provId || viewer.post?.provider || prov.id;
+  if (vp === 'local') { // a tag on a local file filters that folder; it is not a booru search
+    if (viewer.isOpen) closeViewerQuiet();
+    return emit('local-filter', { tag });
+  }
   if (viewer.isOpen) closeViewerQuiet();
   if (reader.isOpen) closeReaderQuiet();
   viewerPushed = false;
@@ -1309,6 +1331,8 @@ function boot() {
   applyTheme();
   initTopo();
   buildRail();
+  paintLocalNav();
+  on('settings', (e) => e.detail.key === 'localOn' && paintLocalNav());
   paintDial();
   paintFollowBadge();
   paintPoolBadge();

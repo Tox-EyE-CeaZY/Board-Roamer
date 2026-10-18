@@ -51,6 +51,11 @@ export class Gallery {
     return this.items.length;
   }
 
+  /** Height of whatever sits above the tiles inside the same scroller (Local's folders). 0 everywhere else. */
+  _off() {
+    return Math.max(0, this.canvas.offsetTop - 4);
+  }
+
   clear() {
     this.items = [];
     this.rects = [];
@@ -186,10 +191,10 @@ export class Gallery {
   }
 
   relayout() {
-    const anchor = this.height ? this.scroller.scrollTop / this.height : 0;
+    const anchor = this.height ? Math.max(0, this.scroller.scrollTop - this._off()) / this.height : 0;
     this._reset();
     this._layout(0);
-    this.scroller.scrollTop = anchor * this.height;
+    this.scroller.scrollTop = anchor * this.height + this._off();
     this.render();
   }
 
@@ -216,7 +221,7 @@ export class Gallery {
   }
 
   render() {
-    const s = this.scroller, top = s.scrollTop, bot = top + s.clientHeight, buf = 700;
+    const s = this.scroller, off = this._off(), top = Math.max(0, s.scrollTop - off), bot = s.scrollTop + s.clientHeight - off, buf = 700;
     const need = new Set();
     for (let i = 0; i < this.rects.length; i++) {
       const r = this.rects[i];
@@ -378,7 +383,7 @@ export class Gallery {
     if (!this.items.length) return;
     if (this.focusI == null || !this.rects[this.focusI]) {
       // start from the first tile that is visible
-      const top = this.scroller.scrollTop;
+      const top = Math.max(0, this.scroller.scrollTop - this._off());
       this.focusI = Math.max(0, this.rects.findIndex((r) => r.y + r.h > top + 10));
       return this._paintFocus();
     }
@@ -403,8 +408,9 @@ export class Gallery {
     this.live.forEach((el) => el.classList.remove('kf'));
     this.scrollTo(this.focusI, false);
     const r = this.rects[this.focusI], s = this.scroller;
-    if (r.y < s.scrollTop + 8) s.scrollTop = Math.max(0, r.y - 24);
-    else if (r.y + r.h > s.scrollTop + s.clientHeight - 8) s.scrollTop = r.y + r.h - s.clientHeight + 90;
+    const off = this._off();
+    if (r.y + off < s.scrollTop + 8) s.scrollTop = Math.max(0, r.y + off - 24);
+    else if (r.y + off + r.h > s.scrollTop + s.clientHeight - 8) s.scrollTop = r.y + off + r.h - s.clientHeight + 90;
     this.render();
     this.live.get(this.focusI)?.classList.add('kf');
   }
@@ -432,8 +438,9 @@ export class Gallery {
     const r = this.rects[itemIndex];
     if (!r) return;
     const s = this.scroller;
-    const y = center ? r.y - (s.clientHeight - r.h) / 2 : r.y;
-    const inView = r.y > s.scrollTop && r.y + r.h < s.scrollTop + s.clientHeight;
+    const off = this._off();
+    const y = off + (center ? r.y - (s.clientHeight - r.h) / 2 : r.y);
+    const inView = r.y + off > s.scrollTop && r.y + off + r.h < s.scrollTop + s.clientHeight;
     if (!inView) s.scrollTop = Math.max(0, y);
     this.render();
   }

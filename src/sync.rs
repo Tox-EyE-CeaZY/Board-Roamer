@@ -21,6 +21,15 @@ const FIRST_PORT: u16 = 4622;
 const MAX_BODY: u64 = 64 * 1024 * 1024;
 const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/// A device that has talked to this hub. Phones also say where their own folder server listens (if they share).
+#[derive(Default, Clone)]
+struct Dev {
+    last: u64,
+    addr: Option<String>,
+    port: u16,
+    share: bool,
+}
+
 struct State {
     dir: PathBuf,
     enabled: bool,
@@ -28,7 +37,7 @@ struct State {
     port: u16,
     rev: u64,
     server: Option<Arc<Server>>,
-    devices: HashMap<String, u64>,
+    devices: HashMap<String, Dev>,
     fails: Vec<Instant>,
     /// The desktop's logins, held in memory only, for ONE new device to collect when it first connects.
     creds: Option<Vec<u8>>,
@@ -169,7 +178,8 @@ fn net_request(rq: Request) {
     if path == "/ping" {
         return reply(rq, 200, "text/plain", b"board-roamer-sync".to_vec(), None);
     }
-    if path != "/sync/doc" && path != "/sync/info" && path != "/sync/creds" {
+    let local = matches!(path.as_str(), "/local/list" | "/local/file" | "/local/thumb");
+    if !local && !matches!(path.as_str(), "/sync/doc" | "/sync/info" | "/sync/creds" | "/sync/device" | "/sync/devices") {
         return json(rq, 404, serde_json::json!({ "error": "not found" }), None);
     }
     {
@@ -189,11 +199,60 @@ fn net_request(rq: Request) {
         return json(rq, 401, serde_json::json!({ "error": "wrong pairing code" }), None);
     }
     let name = header_val(&rq, "x-device").unwrap_or_else(|| "a device".into());
-    st().devices.insert(name.chars().take(40).collect(), now_secs());
+    let name: String = name.chars().take(40).collect();
+    st().devices.entry(name.clone()).or_default().last = now_secs();
     if path == "/sync/creds" {
         return creds_claim(rq);
     }
+    if path == "/sync/device" {
+        return device_announce(rq, name);
+    }
+    if path == "/sync/devices" {
+        return device_list(rq);
+    }
+    if local {
+        if !crate::local::sharing() {
+            return json(rq, 403, serde_json::json!({ "error": "this computer is not sharing its folders" }), None);
+        }
+        let query = url.split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
+        return crate::local::serve(rq, &path, &query);
+    }
     doc_request(rq, &path);
+}
+
+/// A phone says where its own folder server listens, and whether it shares.
+fn device_announce(mut rq: Request, name: String) {
+    let ip = rq.remote_addr().map(|a| a.ip().to_string());
+    let mut body = String::new();
+    let _ = rq.as_reader().take(1024).read_to_string(&mut body);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+    {
+        let mut s = st();
+        let d = s.devices.entry(name).or_default();
+        d.addr = ip;
+        d.port = v["port"].as_u64().unwrap_or(0) as u16;
+        d.share = v["share"].as_bool().unwrap_or(false) && d.port > 0;
+    }
+    json(rq, 200, serde_json::json!({ "ok": true }), None);
+}
+
+/// Everyone who shares folders, for a phone that wants to browse them. The computer itself is listed as `hostShare`.
+fn device_list(rq: Request) {
+    let s = st();
+    let devices: Vec<_> = s.devices.iter().filter(|(_, d)| d.share && d.addr.is_some()).map(|(n, d)| serde_json::json!({ "name": n, "addr": d.addr, "port": d.port })).collect();
+    let v = serde_json::json!({ "host": computer_name(), "hostShare": crate::local::sharing(), "devices": devices });
+    drop(s);
+    json(rq, 200, v, None);
+}
+
+/// Where to reach a sharing device by name (for the computer's own window), and the code to prove we are paired.
+pub fn device_target(name: &str) -> Option<(String, String)> {
+    let s = st();
+    let d = s.devices.get(name)?;
+    if !(d.share && d.port > 0) {
+        return None;
+    }
+    Some((format!("http://{}:{}", d.addr.clone()?, d.port), s.token.clone()))
 }
 
 /// A new device asks for the logins. They are handed over once, then forgotten.
@@ -316,7 +375,7 @@ fn config_request(mut rq: Request) {
     }
     let s = st();
     let now = now_secs();
-    let devices: Vec<_> = s.devices.iter().map(|(n, t)| serde_json::json!({ "name": n, "ago": now.saturating_sub(*t) })).collect();
+    let devices: Vec<_> = s.devices.iter().map(|(n, d)| serde_json::json!({ "name": n, "ago": now.saturating_sub(d.last), "share": d.share })).collect();
     let v = serde_json::json!({
         "enabled": s.enabled, "token": s.token, "port": s.port, "host": computer_name(),
         "rev": s.rev, "addrs": addresses(), "devices": devices, "credsArmed": s.creds.is_some(),

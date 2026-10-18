@@ -67,6 +67,8 @@ export const DEFAULTS = {
   restoreTabs: true, // reopen the tabs from last time
   mainTab: true, // computers: the first tab is a pinned Main tab; what you open from it gets its own tab
   followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
+  localOn: false, // the Local section: browse pictures and videos in folders you choose, on this and your other devices
+  localSort: 'new',
   notify: false, // system notifications when something new turns up (text only, never pictures)
   notifyFollows: true,
   notifyBoards: true,
@@ -108,9 +110,38 @@ export function snapshot(p) {
 
 /* ---------- tombstones: what was deleted here, so a sync can tell "deleted" from "never had it" ---------- */
 const TOMB_KEEP = 120 * 86400_000;
-let tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, tc: 0, ...load('tomb', {}) };
+let tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, f: {}, tc: 0, ...load('tomb', {}) };
 const bury = (map, key) => ((tomb[map][key] = Date.now()), save('tomb', tomb));
 export const trailSig = (e) => e.provider + '|' + JSON.stringify(e.terms) + '|' + JSON.stringify(e.filters);
+
+/* ---------- folders: tidy boards (pin boards and live boards) and library titles (pools, comics) into groups ---------- */
+let folderList = load('folders', []);
+const saveFolders = () => (save('folders', folderList), emit('folders'));
+export const folders = {
+  all: (kind) => folderList.filter((f) => f.kind === kind).sort((a, b) => a.name.localeCompare(b.name)),
+  get: (id) => folderList.find((f) => f.id === id),
+  create(name, kind) {
+    const f = { id: uid(), kind, name: name.trim() || 'New folder', created: Date.now(), updated: Date.now() };
+    folderList.push(f);
+    saveFolders();
+    return f;
+  },
+  rename(id, name) {
+    const f = folders.get(id);
+    if (f && name.trim()) (Object.assign(f, { name: name.trim(), updated: Date.now() }), saveFolders());
+  },
+  /** What is inside goes back to the top level; nothing is deleted. */
+  remove(id) {
+    const f = folders.get(id);
+    if (!f) return;
+    bury('f', id);
+    folderList = folderList.filter((x) => x.id !== id);
+    save('folders', folderList);
+    if (f.kind === 'boards') boardList.filter((b) => b.folder === id).forEach((b) => boards.update(b.id, { folder: null }));
+    else libList.filter((l) => l.folder === id).forEach((l) => library.update(l.id, { folder: null, folderT: Date.now() }));
+    emit('folders');
+  },
+};
 
 /* ---------- boards ---------- */
 let boardList = load('boards', []);
@@ -345,6 +376,18 @@ export const history = {
   },
 };
 
+/* ---------- local files: the tags you gave them. Kept here, never written into the files. Per device, not synced. ---------- */
+let localMetaMap = load('localMeta', {});
+export const localMeta = {
+  tags: (key) => localMetaMap[key]?.tags || [],
+  setTags(key, tags) {
+    if (tags.length) localMetaMap[key] = { tags };
+    else delete localMetaMap[key];
+    save('localMeta', localMetaMap);
+    emit('localmeta');
+  },
+};
+
 /* ---------- tag knowledge (category + count), remembered between sessions ---------- */
 let tagStore = load('tags', {});
 let tagDirty = 0;
@@ -410,8 +453,8 @@ export const syncData = {
       else if (JSON.stringify(settings[k]) !== JSON.stringify(DEFAULTS[k])) (cfg[k] = settings[k], cfgT[k] = 1); // customised before sync existed
     }
     const cut = Date.now() - TOMB_KEEP;
-    for (const m of ['b', 'bp', 's', 't', 'l']) for (const k of Object.keys(tomb[m])) if (tomb[m][k] < cut) delete tomb[m][k];
-    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, trail, reading: readList, tomb }));
+    for (const m of ['b', 'bp', 's', 't', 'l', 'f']) for (const k of Object.keys(tomb[m])) if (tomb[m][k] < cut) delete tomb[m][k];
+    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, folders: folderList, trail, reading: readList, tomb }));
   },
   /** Replace local state with a merged document. */
   apply(doc) {
@@ -433,7 +476,9 @@ export const syncData = {
     libList = Array.isArray(doc.library) ? doc.library : libList;
     trail = Array.isArray(doc.trail) ? doc.trail : trail;
     readList = doc.reading && typeof doc.reading === 'object' ? doc.reading : readList;
-    tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, tc: 0, ...(doc.tomb || {}) };
+    tomb = { b: {}, bp: {}, s: {}, t: {}, l: {}, f: {}, tc: 0, ...(doc.tomb || {}) };
+    folderList = Array.isArray(doc.folders) ? doc.folders : folderList;
+    save('folders', folderList); emit('folders');
     save('boards', boardList); save('subs', subList); save('library', libList); save('trail', trail); save('reading', readList); save('tomb', tomb);
     emit('boards'); emit('subs'); emit('library'); emit('trail');
     for (const k of changed) emit('settings', { key: k, value: settings[k] });

@@ -66,6 +66,7 @@ public class MainActivity extends Activity {
         w.setBackgroundDrawable(new ColorDrawable(0xFF0A1113));
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         setBars("#0a1113", true);
+        Local.init(this);
         web = new WebView(this);
         web.setBackgroundColor(0xFF0A1113);
         setContentView(web);
@@ -232,6 +233,7 @@ public class MainActivity extends Activity {
         if (!HOST.equals(u.getHost())) return null; // CDN images/video etc. load directly
         String path = u.getPath();
         if (path == null || path.equals("/")) path = "/index.html";
+        if (path.startsWith("/local/") || path.startsWith("/remote/")) return Local.intercept(u, r.getMethod(), r.getRequestHeaders());
         switch (path) {
             case "/proxy": return proxy(r, u);
             case "/img": return image(u);

@@ -1,6 +1,7 @@
 import { h, ago, fmtNum, pretty, download, pickFile, hash01, clamp } from './util.js';
 import { icon } from './icons.js';
-import { boards, postKey, S, exportAll, importAll, tagc, emit } from './store.js';
+import { boards, postKey, S, exportAll, importAll, tagc, emit, folders } from './store.js';
+import { newFolder, moveEntry, folderCard, draggableItem, folderMenu } from './folders.js';
 import { getProvider, Feed } from './providers.js';
 import { announce } from './notify.js';
 import { Gallery } from './gallery.js';
@@ -151,12 +152,17 @@ async function newBoard(ctx) {
 }
 
 export function renderBoards(root, ctx) {
-  const list = boards.all();
+  const open = folders.get(new URLSearchParams(location.hash.split('?')[1] || '').get('f'));
+  const inFolder = (b) => (open ? b.folder === open.id : !b.folder || !folders.get(b.folder));
+  const list = boards.all().filter(inFolder);
   const pinBoards = list.filter((b) => b.kind === 'pins').sort((a, c) => (c.inbox ? 1 : 0) - (a.inbox ? 1 : 0) || c.updated - a.updated);
   const live = list.filter((b) => b.kind === 'smart');
   const head = h('div', { class: 'vhead' },
-    h('div', {}, h('h1', {}, 'Boards'), h('p', {}, `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}`)),
+    h('div', {}, h('h1', {}, open ? open.name : 'Boards'), h('p', {}, `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}`)),
     h('div', { class: 'vhead-act' },
+      open ? h('button', { class: 'btn fback', title: 'Back to all boards. Drop a board here to take it out of the folder', html: icon('left', 16) + '<span>All boards</span>', onclick: () => ctx.go('#/boards'),
+        ondragover: (e) => e.preventDefault(), ondrop: (e) => { const id = e.dataTransfer.getData('text/x-br-item'); if (id) (boards.update(id, { folder: null }), ctx.refresh()); } }) : null,
+      h('button', { class: 'btn', html: icon('folder', 16) + '<span>New folder</span>', onclick: async () => { const f = await newFolder('boards'); if (f) ctx.refresh(); } }),
       h('button', { class: 'btn', html: icon('download', 16) + '<span>Export</span>', onclick: () => { download('board-roamer-backup.json', exportAll()); toast('Backup saved via your browser download'); } }),
       h('button', { class: 'btn', html: icon('folder', 16) + '<span>Import</span>', onclick: async () => { const f = await pickFile('.json'); if (!f) return; try { importAll(await f.text()); toast('Imported'); ctx.refresh(); } catch (e) { toast('Import failed: ' + e.message, { kind: 'err' }); } } }),
       h('button', { class: 'btn primary', html: icon('plus', 16) + '<span>New board</span>', onclick: () => newBoard(ctx) }),
@@ -166,12 +172,25 @@ export function renderBoards(root, ctx) {
     h('div', { class: 'bsec' }, h('h3', {}, title), h('span', {}, hint)),
     items.length ? h('div', { class: 'bgrid' }, items.map((b) => card(b, ctx))) : empty,
   ];
+  const folderTiles = open ? [] : folders.all('boards').map((f) => {
+    const inside = boards.all().filter((x) => x.folder === f.id);
+    return folderCard(f, {
+      count: inside.length, noun: 'board',
+      covers: inside.map((x) => (x.kind === 'pins' ? x.posts[0]?.thumb : (x.cover || [])[0])).filter(Boolean),
+      onOpen: () => ctx.go('#/boards?f=' + f.id),
+      onDrop: (id) => { boards.update(id, { folder: f.id }); ctx.refresh(); },
+    });
+  });
   const grid = h('div', { class: 'bwrap' },
+    ...(folderTiles.length ? [h('div', { class: 'bsec' }, h('h3', {}, 'Folders'), h('span', {}, 'drag a board onto a folder, or right-click it and choose Move to folder')), h('div', { class: 'fgrid' }, folderTiles)] : []),
     ...section('Pins', 'one tap on any pin button drops a post into the first board; right-click or long-press to choose another', pinBoards, null),
     ...section('Live boards', 'saved searches that refresh themselves', live,
       h('div', { class: 'bhint' }, h('i', { html: icon('compass', 22) }), h('p', {}, 'None yet. Search for something and press the save button (next to the search bar) to keep it here.'))));
   root.replaceChildren(head, grid);
+  grid.querySelectorAll('.bcard').forEach((el) => !el.classList.contains('inbox') && draggableItem(el, el.dataset.id));
   bindContext(grid, (e) => {
+    const fl = e.target.closest('.fldr');
+    if (fl && folders.get(fl.dataset.folder)) return folderMenu(folders.get(fl.dataset.folder), ctx.refresh);
     const el = e.target.closest('.bcard');
     if (!el) return null;
     const b = boards.get(el.dataset.id);
@@ -188,6 +207,7 @@ export function renderBoards(root, ctx) {
       b.kind === 'pins' && b.posts.length && { label: 'Slideshow', icon: 'play', run: () => ctx.go('#/board/' + b.id) },
       { sep: true },
       !b.inbox && { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) { boards.update(b.id, { name: n }); ctx.refresh(); } } },
+      !b.inbox && moveEntry('boards', b, (fid) => { boards.update(b.id, { folder: fid }); ctx.refresh(); }),
       !b.inbox && { label: 'Colour', icon: 'flame', sub: HUES.map((hue) => ({ label: `Hue ${hue}°`, checked: hue === b.hue, run: () => { boards.update(b.id, { hue }); ctx.refresh(); } })) },
       !b.inbox && { label: 'Duplicate', icon: 'copy', run: dup },
       { label: 'Export this board', icon: 'download', run: () => { download(`board-${b.name.replace(/\W+/g, '-')}.json`, JSON.stringify({ app: 'board-roamer', v: 2, boards: [b] }, null, 1)); toast('Board exported'); } },

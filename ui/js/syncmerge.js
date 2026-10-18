@@ -7,6 +7,7 @@
  *   follows    matched by site + tag; "seen" only moves forward; the fresher check supplies thumbnails and counts
  *   trail      one entry per search, newest wins; clearing or removing an entry sticks
  *   reading    the most recent page per comic wins
+ *   folders    one list, newest rename wins; which folder a title or board is in travels with the title / board
  *   deletions  remembered as tombstones for 120 days, and a later edit beats an earlier deletion
  */
 const postKey = (p) => `${p.provider}:${p.id}`;
@@ -28,7 +29,7 @@ const maxMap = (a = {}, b = {}) => {
 };
 
 function mergeTomb(a = {}, b = {}) {
-  return { b: maxMap(a.b, b.b), bp: maxMap(a.bp, b.bp), s: maxMap(a.s, b.s), t: maxMap(a.t, b.t), l: maxMap(a.l, b.l), tc: Math.max(num(a.tc), num(b.tc)) };
+  return { b: maxMap(a.b, b.b), bp: maxMap(a.bp, b.bp), s: maxMap(a.s, b.s), t: maxMap(a.t, b.t), l: maxMap(a.l, b.l), f: maxMap(a.f, b.f), tc: Math.max(num(a.tc), num(b.tc)) };
 }
 
 function mergeSettings(a, b) {
@@ -121,11 +122,23 @@ function mergeLibrary(a = [], b = [], tomb) {
     m.updated = when(o.updated) >= when(f.updated) ? o.updated : f.updated;
     m.checked = Math.max(num(o.checked), num(f.checked));
     if (!m.cover) m.cover = o.cover || f.cover || '';
+    const pf = num(o.folderT) >= num(f.folderT) ? o : f; // the folder you chose last wins
+    m.folder = pf.folder || null;
+    m.folderT = Math.max(num(o.folderT), num(f.folderT));
     map.set(k, m);
   }
   return [...map.values()]
     .filter((f) => !tomb.l[libKey(f)] || num(f.added) > num(tomb.l[libKey(f)]))
     .sort((p, q) => num(q.added) - num(p.added) || (libKey(p) < libKey(q) ? -1 : 1));
+}
+
+function mergeFolders(a = [], b = [], tomb) {
+  const map = new Map();
+  for (const f of [...a, ...b]) {
+    const o = map.get(f.id);
+    if (!o || num(f.updated) > num(o.updated) || (num(f.updated) === num(o.updated) && canon(f) > canon(o))) map.set(f.id, f);
+  }
+  return [...map.values()].filter((f) => num(tomb.f[f.id]) < num(f.updated) || !tomb.f[f.id]).sort((p, q) => num(p.created) - num(q.created) || (p.id < q.id ? -1 : 1));
 }
 
 function mergeTrail(a = [], b = [], tomb) {
@@ -158,6 +171,7 @@ export function merge(a, b) {
     boards: mergeBoards(a.boards, b.boards, tomb),
     subs: mergeSubs(a.subs, b.subs, tomb),
     library: mergeLibrary(a.library, b.library, tomb),
+    folders: mergeFolders(a.folders, b.folders, tomb),
     trail: mergeTrail(a.trail, b.trail, tomb),
     reading: mergeReading(a.reading, b.reading),
     tomb,
