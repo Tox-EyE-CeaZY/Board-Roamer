@@ -10,6 +10,7 @@ import { toast, confirmDlg } from './ui.js';
 import { openExternal } from './actions.js';
 import { showMenu, bindContext } from './ctxmenu.js';
 import { isPhone } from './platform.js';
+import { announce } from './notify.js';
 
 const STALE = 30 * 60 * 1000;
 let running = false;
@@ -35,6 +36,7 @@ export function toggleLibrary(prov, info) {
 
 /* ------------------------------------------------------------------ checking for new pages */
 export async function checkLib(f) {
+  const had = library.newPages(f); // library.update changes f in place, so remember it now
   try {
     const pool = await provOf(f).pool(f.pid);
     if (!pool) throw new Error('This pool no longer exists');
@@ -46,8 +48,10 @@ export async function checkLib(f) {
       } catch { /* the cover can wait */ }
     }
     library.update(f.id, patch);
+    return patch.count - f.seenCount > had;
   } catch (e) {
     library.update(f.id, { checked: Date.now(), err: e.message });
+    return false;
   }
 }
 
@@ -56,14 +60,15 @@ export async function refreshLib({ force = false } = {}) {
   const list = library.all().filter((f) => force || !f.checked || Date.now() - f.checked > STALE);
   if (!list.length) return;
   running = true;
-  let done = 0;
+  let done = 0, fresh = 0;
   emit('lib-progress', { running: true, done, total: list.length });
   for (const f of list) {
     const cur = library.get(f.id);
-    if (cur) await checkLib(cur);
+    if (cur && (await checkLib(cur))) fresh++;
     emit('lib-progress', { running: true, done: ++done, total: list.length });
   }
   running = false;
+  if (fresh) announce('pools');
   emit('lib-progress', { running: false, done, total: list.length });
 }
 

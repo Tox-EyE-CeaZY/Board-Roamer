@@ -2,9 +2,10 @@ import { h, download, pickFile, copyText, ago } from './util.js';
 import { RELEASES_URL } from './version.js';
 import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
 import { icon } from './icons.js';
-import { S, setS, exportAll, importAll, wipe, DEFAULTS } from './store.js';
+import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
-import { segmented, toast, confirmDlg } from './ui.js';
+import { segmented, toast, confirmDlg, dialog } from './ui.js';
+import { sendTest } from './notify.js';
 import { reveal, openExternal } from './actions.js';
 import { checkForUpdate, installUpdate, onUpdate, appInfo } from './updates.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
@@ -29,8 +30,8 @@ export function openSettings(section) {
   if (panel) return closeSettings();
   const body = h('div', { class: 'st-body' });
   const sec = (id, title, ...kids) => h('section', { class: 'st-sec', id: 'st-' + id }, h('h3', {}, title), kids);
-  const toggle = (label, key, hint) => {
-    const b = h('button', { class: 'tgl' + (S(key) ? ' on' : ''), role: 'switch', onclick: () => { setS(key, !S(key)); b.classList.toggle('on', S(key)); } }, h('i'));
+  const toggle = (label, key, hint, after) => {
+    const b = h('button', { class: 'tgl' + (S(key) ? ' on' : ''), role: 'switch', onclick: () => { setS(key, !S(key)); b.classList.toggle('on', S(key)); after?.(S(key)); } }, h('i'));
     return h('div', { class: 'st-row' }, h('div', {}, h('b', {}, label), hint ? h('small', {}, hint) : null), b);
   };
   const slider = (label, key, min, max, step, fmt = (v) => v) => {
@@ -231,6 +232,25 @@ export function openSettings(section) {
       seg('Tabs', 'tabs', [['off', 'Off'], ['auto', 'Auto'], ['always', 'Always']], 'Auto shows the tab bar once you open a second tab: right-click or long-press anything and choose Open in new tab, middle-click a section, or press Ctrl+T'),
       toggle('Reopen my tabs when the app starts', 'restoreTabs'),
       ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Roam, Boards, Follows, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')])),
+    sec('notifications', 'Notifications',
+      toggle('Notify me about new content', 'notify', 'A system notification when a check finds something new while the app is in the background. Words only, never a picture', async (on) => {
+        if (!on) return;
+        if (isAndroid() && !native.notifyAllowed()) { native.requestNotify(); toast('Allow notifications in the prompt, then press the test button', { ms: 3600 }); }
+        if (S('notifyNames') || subs.all().length === 0) return;
+        const names = await dialog({
+          title: 'Name artists in notifications?',
+          body: [h('p', { class: 'dlg-text' }, 'Notifications can say “New posts from your follows”, or name who posted: “New posts from {artist}”.'),
+            h('p', { class: 'dlg-text' }, 'Names can show on a lock screen or in a screen share. You can change this any time here.')],
+          actions: [{ label: 'Keep it generic', value: false }, { label: 'Show names', value: true, cls: 'primary' }],
+        });
+        if (names) setS('notifyNames', true);
+      }),
+      toggle('Follows', 'notifyFollows', 'New posts from artists you follow'),
+      toggle('Live boards', 'notifyBoards', 'New posts matching a live board’s search'),
+      toggle('Pools', 'notifyPools', 'New pages in saved pools and comics'),
+      toggle('Show artist names', 'notifyNames', 'Off: “New posts from your follows”. On: “New posts from {artist}”. Boards and pools never name themselves'),
+      h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Try it'), h('small', {}, isAndroid() ? 'On the lock screen, only “New activity” is shown' : 'Sends a notification now. Checks run about every 30 minutes while the app is open')),
+        h('button', { class: 'btn', onclick: () => (isAndroid() && !native.notifyAllowed() ? (native.requestNotify(), toast('Allow notifications first', { ms: 2400 })) : sendTest()) }, 'Send a test'))),
     sec('gallery', 'Gallery',
       seg('Layout', 'layout', [['masonry', 'Masonry'], ['rows', 'Rows'], ['grid', 'Grid']]),
       slider('Tile size', 'density', 130, 520, 10, (v) => v + 'px'), slider('Gap', 'gap', 0, 28, 1, (v) => v + 'px'),
@@ -270,7 +290,7 @@ export function openSettings(section) {
   paintCreds();
   panel = h('aside', { class: 'settings' },
     h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
+    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
     body);
   document.body.append(panel);
   requestAnimationFrame(() => panel?.classList.add('in'));

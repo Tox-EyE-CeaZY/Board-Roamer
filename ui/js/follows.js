@@ -6,12 +6,14 @@ import { toast, segmented, confirmDlg } from './ui.js';
 import { openExternal } from './actions.js';
 import { showMenu, bindContext } from './ctxmenu.js';
 import { isPhone } from './platform.js';
+import { announce } from './notify.js';
 
 const staleMs = () => (S('followsFresh') || 20) * 60 * 1000;
 let running = false;
 
 /* ================================================================== checking for new posts */
 export async function checkSub(f) {
+  const had = f.newCount || 0; // subs.update changes f in place, so remember it now
   const prov = getProvider(f.p);
   const ratings = S('filters').ratings;
   const feed = new Feed(prov, [{ t: f.t, op: '+' }], { order: '', score: 0, ratings, media: '', shape: '', age: '' });
@@ -31,8 +33,10 @@ export async function checkSub(f) {
       } catch {}
     }
     subs.update(f.id, patch);
+    return patch.newCount > had; // more than last time: worth a notification
   } catch (e) {
     subs.update(f.id, { checked: Date.now(), err: e.message });
+    return false;
   }
 }
 
@@ -43,13 +47,15 @@ export async function refreshAll({ force = false, only = null } = {}) {
   if (!list.length) return;
   running = true;
   let done = 0;
+  const fresh = [];
   emit('subs-progress', { running: true, done, total: list.length });
   for (const f of list) {
     if (!subs.get(f.id)) continue;
-    await checkSub(subs.get(f.id));
+    if (await checkSub(subs.get(f.id))) fresh.push(f.t);
     emit('subs-progress', { running: true, done: ++done, total: list.length });
   }
   running = false;
+  if (fresh.length) announce('follows', fresh);
   emit('subs-progress', { running: false, done, total: list.length });
 }
 export const isRefreshing = () => running;

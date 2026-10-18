@@ -2,19 +2,20 @@ import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
 import { S, setS, on, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
 import { refreshLib } from './library.js';
+import { startWatch } from './watch.js';
 import { getProvider, providerList, Feed, catName } from './providers.js';
 import { initTopo, paintTopo } from './bg.js';
 import { Gallery } from './gallery.js';
 import { SearchBar } from './search.js';
 import { Viewer } from './viewer.js';
 import { ComicReader } from './reader.js';
-import { renderBoards, renderBoard, updateCover } from './boards.js';
+import { renderBoards, renderBoard, updateCover, refreshBoards } from './boards.js';
 import { renderTrail } from './trail.js';
 import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
 import { startAutoSync } from './sync.js';
-import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focusMain, mainActive } from './tabs.js';
+import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focusMain, mainActive, activeTabId, canBackOut, backOut } from './tabs.js';
 import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
@@ -29,7 +30,7 @@ import { M, postMenu, tagMenu } from './menus.js';
 let prov = getProvider(S('provider'));
 const st = {
   terms: [], filters: null, feed: null, loaded: [], total: null, sig: null, loading: null,
-  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null,
+  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null, boardMark: null,
 };
 let boardGal = null; // gallery of the board / pool view currently on screen
 let viewerGal = null;
@@ -349,7 +350,7 @@ function showTab(tab) {
   pendingRestore = tab.snap || null;
   if (viewer.isOpen) closeViewerQuiet();
   if (reader.isOpen) closeReaderQuiet();
-  history.replaceState({ n: 0 }, '', tab.hash); // each tab starts its own Back trail
+  history.replaceState({ n: 0, t: tab.id }, '', tab.hash); // each tab starts its own Back trail
   navDepth = 0;
   const top = tab.snap?.scroll;
   applyRoute();
@@ -546,7 +547,7 @@ function openViewer(g, viewIndex, tileEl, slideshow = false, poolOpts = null) {
   const { p } = parseHash();
   p.set('post', list[viewIndex].id);
   const [path] = location.hash.slice(1).split('?');
-  history.pushState({ n: ++navDepth }, '', '#' + path + '?' + p.toString());
+  history.pushState({ n: ++navDepth, t: activeTabId() }, '', '#' + path + '?' + p.toString());
   viewerPushed = true;
   viewer.open(list, viewIndex, rect);
   poolRoot(g, poolOpts);
@@ -732,8 +733,10 @@ async function startSearch() {
   gal.clear();
   gal.isNew = st.isNew; // "NEW" markers when this feed was opened from Follows
   const marks = st.followMarks;
+  const boardMark = st.boardMark;
   st.isNew = null;
   st.followMarks = null;
+  st.boardMark = null;
   searchBar.setTerms(st.terms);
   searchBar.setFilters(filters);
   paintDial();
@@ -748,6 +751,7 @@ async function startSearch() {
   await loadMore();
   if (feed === st.feed) {
     marks?.forEach((id) => subs.markSeen(id)); // you've now seen what was new
+    if (boardMark) boards.markSeen(boardMark);
     renderDossier(); // artist/wiki lookups wait until the posts are on screen
   }
 }
@@ -822,7 +826,7 @@ function renderRoutes() {
     chips.push(h('button', { class: 'route follow', title: 'Everything from the artists you follow', html: icon('bell', 14) + `<span>Following · ${mine.length}${fresh ? ` · ${fresh} new` : ''}</span>`, onclick: () => feedOf(mine) }));
   }
   const smart = boards.all().filter((b) => b.kind === 'smart').slice(0, 8).map((b) =>
-    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}</span>` }));
+    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: b.newCount ? `Live board · ${b.newCount} new` : 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}${b.newCount ? ` · ${b.newCount >= 8 ? '8+' : b.newCount} new` : ''}</span>` }));
   routesEl.replaceChildren(...chips, ...(smart.length ? [h('i', { class: 'route-sep' })] : []), ...smart);
 }
 on('boards', () => { if (!roam.hidden) renderRoutes(); updateBoardBar(); });
@@ -1004,6 +1008,11 @@ async function saveSmartFromEntry(e) {
 
 function runSmart(b) {
   st.smartId = b.id;
+  if (b.newCount) { // light up what is new, and clear the mark once the results are on screen
+    const before = b.seenId;
+    st.isNew = (post) => post.id > before;
+    st.boardMark = b.id;
+  }
   dossierEl.replaceChildren();
   if (b.provider !== prov.id) setProvider(b.provider, false);
   const next = roamHash(b.terms, { ...defaultFilters(), ...b.filters }, b.provider);
@@ -1257,6 +1266,7 @@ function setupTouch() {
     if (g?.selectMode) return g.setSelectMode(false), selBtn.classList.remove('on'), true;
     if (document.activeElement?.matches?.('input,textarea')) return document.activeElement.blur(), true;
     if (navDepth > 0) return history.back(), true;
+    if (canBackOut()) return backOut(), true;
     return false;
   });
 
@@ -1305,6 +1315,9 @@ function boot() {
   // saved pools and comics are checked for new pages shortly after start, then every half hour
   setTimeout(() => library.all().length && refreshLib().catch(() => {}), 7000);
   setInterval(() => !document.hidden && library.all().length && refreshLib().catch(() => {}), 30 * 60 * 1000);
+  startWatch();
+  setTimeout(() => refreshBoards().catch(() => {}), 9000);
+  setInterval(() => refreshBoards().catch(() => {}), 30 * 60 * 1000);
   st.filters = defaultFilters();
   searchBar.setFilters(st.filters);
   applyGalleryClasses();
@@ -1312,10 +1325,15 @@ function boot() {
   history.replaceState({ n: 0 }, '');
   addEventListener('hashchange', () => {
     const st = history.state;
-    if (st && typeof st.n === 'number') navDepth = st.n; // back / forward
-    else history.replaceState({ n: ++navDepth }, ''); // a fresh push
+    if (st && typeof st.n === 'number') { // back / forward
+      if (st.t && activeTabId() && st.t !== activeTabId()) { // that entry belongs to another tab: this tab's trail ran out
+        if (canBackOut()) return backOut();
+        history.replaceState({ n: 0, t: activeTabId() }, '');
+        navDepth = 0;
+      } else navDepth = st.n;
+    } else history.replaceState({ n: ++navDepth, t: activeTabId() }, ''); // a fresh push
+    applyRoute();
   });
-  addEventListener('hashchange', applyRoute);
   if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
   setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, mainOn });
   const lastTab = bootHash();
@@ -1327,6 +1345,7 @@ function boot() {
   startAutoSync();
   startAutoUpdateCheck((section) => openSettings(section));
   applyRoute();
+  history.replaceState({ n: 0, t: activeTabId() }, '');
   // quietly keep followed artists fresh
   setTimeout(() => refreshAll(), 4500);
   setInterval(() => refreshAll(), 30 * 60 * 1000);

@@ -67,6 +67,11 @@ export const DEFAULTS = {
   restoreTabs: true, // reopen the tabs from last time
   mainTab: true, // computers: the first tab is a pinned Main tab; what you open from it gets its own tab
   followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
+  notify: false, // system notifications when something new turns up (text only, never pictures)
+  notifyFollows: true,
+  notifyBoards: true,
+  notifyPools: true,
+  notifyNames: false, // say which followed artists posted, instead of just "your follows"
   autoUpdate: true, // look for a newer version on GitHub now and then
   poolsTab: 'browse', // browse | library
   libSort: 'updates',
@@ -182,6 +187,24 @@ export const boards = {
     boardList = list;
     saveBoards();
   },
+  /** Change bookkeeping on a board (new-content marks) without counting it as an edit. */
+  patch(id, patch) {
+    const b = boards.get(id);
+    if (!b) return;
+    Object.assign(b, patch);
+    saveBoards();
+  },
+  /** A live board has seen everything up to its latest post. */
+  markSeen(id) {
+    const b = boards.get(id);
+    if (b && (b.newCount || b.seenId < b.latestId)) boards.patch(id, { seenId: b.latestId, newCount: 0 });
+  },
+  markAllSeen() {
+    boardList.forEach((b) => b.kind === 'smart' && ((b.seenId = b.latestId || 0), (b.newCount = 0)));
+    saveBoards();
+  },
+  /** How many live boards have posts you have not seen. */
+  unseen: () => boardList.reduce((n, b) => n + (b.kind === 'smart' && b.newCount ? 1 : 0), 0),
 };
 
 /* ---------- follows (artist subscriptions) ---------- */

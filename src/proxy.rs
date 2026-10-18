@@ -268,6 +268,20 @@ pub fn open_external(rq: Request, query: &str) {
     }
 }
 
+/// POST /notify  {"title":..,"body":..} -> a system notification. Text only; length-capped.
+pub fn notify(mut rq: Request) {
+    let mut raw = Vec::new();
+    let _ = rq.as_reader().take(4096).read_to_end(&mut raw);
+    let v: serde_json::Value = serde_json::from_slice(&raw).unwrap_or_default();
+    let cap = |k: &str, n: usize| v.get(k).and_then(|x| x.as_str()).unwrap_or("").chars().take(n).collect::<String>();
+    let (title, body) = (cap("title", 80), cap("body", 200));
+    if title.is_empty() && body.is_empty() {
+        return err(rq, 400, "nothing to say");
+    }
+    crate::os::notify(&title, &body);
+    reply(rq, 200, "application/json", b"{}".to_vec());
+}
+
 #[allow(dead_code)]
 pub fn enc(s: &str) -> String {
     utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()

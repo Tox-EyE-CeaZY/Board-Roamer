@@ -51,6 +51,24 @@ Routing lives in `routeToTab()` in `app.js`; everything navigates through `setHa
 A tag `vX.Y.Z` pushed to origin runs `.github/workflows/build.yml`, which sets the version from the tag, builds every
 platform and publishes the GitHub release the in-app updater reads. Keep `Cargo.toml` in step with the tag.
 
+## Back history is per tab
+The WebView has one history stack for every tab, so history entries are stamped `{ n, t: tabId }` (`n` = depth, for the Android
+Back button). `hashchange` in `app.js` compares `history.state.t` with `activeTabId()`: an entry from another tab means this tab's
+trail ran out, so `backOut()` closes the tab and shows the one in `tab.from` (the tab it was opened from). Main never closes; it
+just restamps the entry. Android's system Back does the same when `navDepth` is 0 (`canBackOut()`).
+
+## Notifications (`notify.js`)
+`announce(kind, names)` is called at the end of `refreshAll` (follows), `refreshBoards` (live boards, `boards.js`) and `refreshLib`
+(pools) when a check found *more* new items than before. Settings: `notify`, `notifyFollows/Boards/Pools`, `notifyNames`. It skips
+when the window is focused, batches kinds arriving within 2.5 s, and sends only generic text (artist names only with
+`notifyNames`). Desktop: `POST /notify` -> `os::notify` (PowerShell toast with its own app id / `osascript` / `notify-send`).
+Android: `AndroidBridge.notify` (private lock-screen version, `POST_NOTIFICATIONS` asked at runtime).
+Android also works with the app closed, with no Firebase: `watch.js` sends a watch list (the exact request per follow / live
+board / pool plus what is already seen) through `AndroidBridge.setWatch`; `Watch.java` stores it and schedules a persisted 30-minute
+`JobScheduler` job (`WatchJob`), which asks the sites via `Net.api`, remembers what it already announced, and posts through
+`Notifier`. It stays quiet while the app is on screen (`Watch.visible`), and `announce()` is a no-op on Android so nothing doubles.
+Doze/battery savers can delay the job; it is not instant. Live boards store `seenId/latestId/newCount/checked`.
+
 ## Where the strip lives
 On Windows and Linux the custom title bar hosts the strip: `initTitlebar()` moves `#tabs` into `.tb-tabs`, to the right of the
 view label, and adds `html.tabs-in-bar`. Dragging the window works on the left block and the filler after the tabs, not on the

@@ -1,7 +1,8 @@
 import { h, ago, fmtNum, pretty, download, pickFile, hash01, clamp } from './util.js';
 import { icon } from './icons.js';
-import { boards, postKey, S, exportAll, importAll, tagc } from './store.js';
-import { getProvider } from './providers.js';
+import { boards, postKey, S, exportAll, importAll, tagc, emit } from './store.js';
+import { getProvider, Feed } from './providers.js';
+import { announce } from './notify.js';
 import { Gallery } from './gallery.js';
 import { toast, promptText, confirmDlg, popover, segmented } from './ui.js';
 import { downloadMany, selBar, openExternal } from './actions.js';
@@ -10,6 +11,44 @@ import { pinPopover, quickPin } from './pins.js';
 import { dialog } from './ui.js';
 
 const HUES = [128, 35, 200, 330, 85, 260, 10, 170];
+
+/* ------------------------------------------------------------------ live boards: is there anything new? */
+const STALE = 30 * 60 * 1000;
+let running = false;
+
+/** Look at the newest few posts of a live board's search. The first look is a baseline: what is already there is not "new". */
+export async function checkBoard(b) {
+  const had = b.newCount || 0;
+  try {
+    const prov = getProvider(b.provider);
+    const ratings = S('filters').ratings;
+    const feed = new Feed(prov, b.terms, { ...S('filters'), ...b.filters, order: '', ratings: { ...ratings, ...(b.filters || {}).ratings } });
+    feed.limit = 8;
+    const posts = (await prov.page(feed)).filter((p) => feed.filters.ratings[p.rating]).sort((x, y) => y.id - x.id);
+    const latest = posts[0];
+    const patch = { checked: Date.now(), err: '' };
+    if (latest) patch.latestId = Math.max(latest.id, b.latestId || 0);
+    if (!b.seenId && latest) Object.assign(patch, { seenId: latest.id, newCount: 0 });
+    else patch.newCount = posts.filter((p) => p.id > b.seenId).length;
+    boards.patch(b.id, patch);
+    return patch.newCount > had;
+  } catch (e) {
+    boards.patch(b.id, { checked: Date.now(), err: e.message });
+    return false;
+  }
+}
+
+/** Check live boards one by one (the proxy paces the requests). Only stale ones unless forced. */
+export async function refreshBoards({ force = false } = {}) {
+  if (running) return;
+  const list = boards.all().filter((b) => b.kind === 'smart' && b.terms?.length && (force || !b.checked || Date.now() - b.checked > STALE));
+  if (!list.length) return;
+  running = true;
+  let fresh = 0;
+  for (const b of list) if (boards.get(b.id) && (await checkBoard(boards.get(b.id)))) fresh++;
+  running = false;
+  if (fresh) announce('boards');
+}
 
 function tagline(b) {
   return b.terms.map((t) => (t.op === '+' ? '' : t.op === '-' ? '−' : '≈') + pretty(t.t));
@@ -70,7 +109,7 @@ function card(b, ctx) {
   const stack = coverStack(b);
   const meta = b.kind === 'pins'
     ? h('div', { class: 'bc-meta' }, b.inbox ? h('span', { class: 'quick' }, 'QUICK PIN') : null, `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`, h('span', {}, ago(b.updated)))
-    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), h('span', {}, getProvider(b.provider).name));
+    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), b.newCount ? h('span', { class: 'new', title: `${b.newCount} new since you last looked` }, `${b.newCount >= 8 ? '8+' : b.newCount} new`) : null, h('span', {}, getProvider(b.provider).name));
   const chips = b.kind === 'smart'
     ? h('div', { class: 'bc-tags' }, tagline(b).slice(0, 6).map((t) => h('span', {}, t)), b.terms.length > 6 ? h('span', {}, `+${b.terms.length - 6}`) : null)
     : null;

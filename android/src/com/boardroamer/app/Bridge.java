@@ -214,6 +214,26 @@ final class Bridge {
         a.runOnUiThread(() -> a.web.performHapticFeedback("heavy".equals(kind) ? HapticFeedbackConstants.LONG_PRESS : (Build.VERSION.SDK_INT >= 30 ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.KEYBOARD_TAP)));
     }
 
+    /** Is the app allowed to post notifications? (Always yes before Android 13.) */
+    @JavascriptInterface
+    public boolean notifyAllowed() {
+        return Notifier.allowed(a);
+    }
+
+    /** Ask for the notification permission (Android 13+). The answer is read back with notifyAllowed(). */
+    @JavascriptInterface
+    public void requestNotify() {
+        if (Build.VERSION.SDK_INT >= 33 && !notifyAllowed()) a.runOnUiThread(() -> a.requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 7));
+    }
+
+    /** Post a notification (text only, see Notifier). */
+    @JavascriptInterface
+    public void notify(String title, String body) { Notifier.post(a, title, body); }
+
+    /** The page's list of things to look for while the app is closed (see Watch). */
+    @JavascriptInterface
+    public void setWatch(String json) { Watch.update(a, json); }
+
     @JavascriptInterface public void setImmersive(boolean on) { a.runOnUiThread(() -> a.applyImmersive(on)); }
     @JavascriptInterface public void setOrientation(String mode) { a.runOnUiThread(() -> a.setOrientationMode(mode)); }
     @JavascriptInterface public void setBars(String colorHex, boolean lightIcons) { a.runOnUiThread(() -> a.setBars(colorHex, lightIcons)); }

@@ -84,8 +84,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override protected void onPause() { web.onPause(); super.onPause(); }
-    @Override protected void onResume() { super.onResume(); web.onResume(); }
+    @Override protected void onPause() { Watch.visible = false; web.onPause(); super.onPause(); }
+    @Override protected void onResume() { super.onResume(); Watch.visible = true; web.onResume(); }
 
     @Override protected void onDestroy() {
         if (web != null) { web.removeAllViews(); web.destroy(); }

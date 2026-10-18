@@ -47,7 +47,7 @@ function load() {
   try {
     const j = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (j && Array.isArray(j.tabs)) {
-      tabs = j.tabs.filter((t) => t && t.hash).map((t) => ({ id: t.id || uid(), hash: t.hash, title: t.title || '', thumb: t.thumb || '' }));
+      tabs = j.tabs.filter((t) => t && t.hash).map((t) => ({ id: t.id || uid(), hash: t.hash, title: t.title || '', thumb: t.thumb || '', from: t.from }));
       activeId = j.active;
     }
   } catch { /* start with one tab */ }
@@ -98,12 +98,21 @@ export const tabCount = () => tabs.length;
 export function open(hash, { background = true, title = '', thumb = '' } = {}) {
   if (!tabsEnabled()) return toast('Tabs are turned off. Turn them on in Settings > Look.', { ms: 3200 });
   ensure();
-  const t = make(hash, { ...(title ? { title } : {}), thumb });
+  const t = make(hash, { ...(title ? { title } : {}), thumb, from: activeId });
   tabs.splice(tabs.findIndex((x) => x.id === activeId) + 1, 0, t);
   persist();
   paint();
   if (!background) return switchTo(t.id);
   toast(`Opened “${t.title || 'a page'}” in a new tab`, { ms: 3000, action: { label: 'Switch', run: () => switchTo(t.id) } });
+}
+
+export const activeTabId = () => activeId;
+
+/** Back at the start of this tab's own trail: a tab that is not Main closes and hands you back to the tab you opened it from. */
+export const canBackOut = () => tabs.length > 1 && !!cur() && !isMain(cur());
+export function backOut() {
+  const t = cur();
+  if (t) close(t.id, t.from);
 }
 
 export const mainActive = () => !pinned() || tabs[0]?.id === activeId;
@@ -132,14 +141,14 @@ export function switchTo(id) {
   hooks.show(next);
 }
 
-export function close(id) {
+export function close(id, toId) {
   if (tabs.length < 2) return;
   const i = tabs.findIndex((t) => t.id === id);
   if (i < 0) return;
   const [gone] = tabs.splice(i, 1);
   closed = [...closed, { hash: gone.hash, title: gone.title }].slice(-10);
   if (id === activeId) {
-    const next = tabs[Math.min(i, tabs.length - 1)];
+    const next = tabs.find((t) => t.id === toId) || tabs[Math.min(i, tabs.length - 1)];
     activeId = next.id;
     persist();
     paint();

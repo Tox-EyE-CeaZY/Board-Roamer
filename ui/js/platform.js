@@ -89,6 +89,12 @@ export const native = {
       call('installUpdate', id, url);
     });
   },
+  /** Notifications on the phone: is it allowed, ask for permission, post one (text only). */
+  notifyAllowed: () => (has('notifyAllowed') ? !!call('notifyAllowed') : false),
+  requestNotify: () => call('requestNotify'),
+  notify: (title, body) => call('notify', title, body),
+  /** Hand the background job its watch list (JSON), see watch.js. */
+  setWatch: (json) => call('setWatch', json),
   open: (url) => call('openUrl', url),
   reveal: (uri) => call('reveal', uri || ''),
   share: (text, title) => call('share', text || '', title || ''),

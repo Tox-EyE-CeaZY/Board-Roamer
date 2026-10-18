@@ -131,7 +131,13 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   Settings → Look → Tabs can turn the bar off or keep it always visible.
   On a computer the first tab is a pinned **Main** tab where you move between Roam, Boards, Follows, Pools and Trail; artists,
   boards and pools you open from it get their own tabs (Settings → Look → *Pinned Main tab*). *Follows freshness* sets how soon
-  Follows re-checks for new posts.
+  Follows re-checks for new posts. Each tab keeps its own Back trail: pressing Back (or the mouse's back button) at the start
+  of a tab closes it and returns you to the tab you opened it from.
+- **Notifications** (Settings → Notifications, off by default): a system notification when a check finds new posts from your
+  follows, new posts on a live board, or new pages in a saved pool. Text only, never a picture, and generic by default
+  (“New posts from your follows”, “Your boards have new updates”). You can opt in to naming followed artists. They only appear
+  while the app is in the background, and on Android's lock screen only “New activity” shows. Live boards also show a “N new” mark.
+  On Android this keeps working with the app closed (a background check about every 30 minutes, no Google services needed).
 - **#blur**: add `#blur` to a blacklist line (`wolf solo #blur`) to blur matching posts instead of hiding them. They stay
   blurred, in the gallery and the viewer, until you tap reveal, even when blacklisting is set to Hide or Off.
 - **Sync**: Settings → Sync on the computer turns on sharing and shows an address and a pairing code. Enter them in the

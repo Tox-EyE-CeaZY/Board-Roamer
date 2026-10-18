@@ -77,6 +77,7 @@ fn handle(rq: tiny_http::Request) {
         "/save" => proxy::save(rq, query),
         "/open" => proxy::open_external(rq, query),
         "/img" => proxy::image(rq, query),
+        "/notify" => proxy::notify(rq),
         "/update/info" => updater::info(rq),
         "/update/apply" => updater::apply(rq),
         p if p.starts_with("/app/") => {

@@ -78,6 +78,30 @@ pub fn reveal(path: &Path) {
     }
 }
 
+/// Show a system notification. Text only, never a picture: what is shown is decided by the page and kept generic.
+/// The text travels as arguments or environment variables, never spliced into a script.
+pub fn notify(title: &str, body: &str) {
+    #[cfg(windows)]
+    {
+        const AUMID: &str = "BoardRoamer.App";
+        // an app id of our own, so the toast says "Board Roamer" rather than borrowing another program's name
+        let _ = quiet(Command::new("reg").args(["add", &format!(r"HKCU\Software\Classes\AppUserModelId\{AUMID}"), "/v", "DisplayName", "/d", "Board Roamer", "/f"])).output();
+        let script = "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;            $t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);            $n = $t.GetElementsByTagName('text');            $n.Item(0).AppendChild($t.CreateTextNode($env:BR_TITLE)) > $null;            $n.Item(1).AppendChild($t.CreateTextNode($env:BR_BODY)) > $null;            [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:BR_AUMID).Show([Windows.UI.Notifications.ToastNotification]::new($t))";
+        let _ = quiet(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]).env("BR_TITLE", title).env("BR_BODY", body).env("BR_AUMID", AUMID)).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script = "on run argv
+display notification (item 2 of argv) with title (item 1 of argv)
+end run";
+        let _ = Command::new("osascript").args(["-e", script, title, body]).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = Command::new("notify-send").args(["--app-name=Board Roamer", "--", title, body]).spawn();
+    }
+}
+
 pub fn computer_name() -> String {
     if let Some(n) = env::var("COMPUTERNAME").ok().or_else(|| env::var("HOSTNAME").ok()).filter(|s| !s.is_empty()) {
         return n;
