@@ -67,9 +67,9 @@ const fileUrl = (dev, root, path) => `${dev.base}/local/file?root=${enc(root)}&p
 
 /* ------------------------------------------------------------------ files as posts (so the gallery and viewer just work) */
 /** Downloads from before metadata was embedded still say where they came from in their name: e6_123456_artist+other.jpg */
-const SITES = { e6: ['e621', 'https://e621.net/posts/'], e9: ['e926', 'https://e926.net/posts/'], db: ['Danbooru', 'https://danbooru.donmai.us/posts/'], gb: ['Gelbooru', 'https://gelbooru.com/index.php?page=post&s=view&id='], sb: ['Safebooru', 'https://safebooru.org/index.php?page=post&s=view&id='] };
+const SITES = { e6: ['e621', 'https://e621.net/posts/'], e9: ['e926', 'https://e926.net/posts/'], db: ['Danbooru', 'https://danbooru.donmai.us/posts/'], gb: ['Gelbooru', 'https://gelbooru.com/index.php?page=post&s=view&id='], sb: ['Safebooru', 'https://safebooru.org/index.php?page=post&s=view&id='], dp: ['Derpibooru', 'https://derpibooru.org/images/'] };
 function fromName(name) {
-  const m = /^(e6|e9|db|gb|sb)_(\d+)(?:_(.+))?\.[a-z0-9]+$/i.exec(name);
+  const m = /^(e6|e9|db|gb|sb|dp)_(\d+)(?:_(.+))?\.[a-z0-9]+$/i.exec(name);
   if (!m) return null;
   const [site, base] = SITES[m[1].toLowerCase()];
   return { site, id: m[2], url: base + m[2], artists: m[3] ? m[3].split('+').filter(Boolean) : [], tags: [] };

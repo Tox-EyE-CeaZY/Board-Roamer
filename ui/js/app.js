@@ -4,7 +4,7 @@ import { S, setS, on, emit, boards, subs, library, reading, history as trailStor
 import { refreshLib } from './library.js';
 import { startWatch } from './watch.js';
 import { renderLocal } from './local.js';
-import { getProvider, providerList, Feed, catName } from './providers.js';
+import { getProvider, providerList, Feed, catName, linkToHash } from './providers.js';
 import { initTopo, paintTopo } from './bg.js';
 import { Gallery } from './gallery.js';
 import { SearchBar } from './search.js';
@@ -174,6 +174,7 @@ const currentGallery = () => (parseHash().view === 'roam' ? gal : boardGal);
 const searchBar = new SearchBar(strip, {
   getProv: () => prov,
   onRun: (terms) => navigateRoam({ terms }),
+  onLink: (url) => { const to = linkToHash(url); if (to) setHash(to); return !!to; },
   onFilters: (f) => {
     setS('filters', { ...S('filters'), ratings: f.ratings });
     navigateRoam({ filters: f });
@@ -385,6 +386,11 @@ function applyRoute() {
 }
 
 function applyRouteCore() {
+  if (parseHash().view === 'open') { // a link handed over by Android: send it to the post / search / pool it points at
+    const to = linkToHash(parseHash().p.get('u'));
+    history.replaceState(history.state, '', to || '#/roam');
+    if (!to) toast('Board Roamer cannot open that link', { kind: 'err', ms: 2600 });
+  }
   const restore = pendingRestore;
   pendingRestore = null;
   const { view, id, p } = parseHash();
@@ -1340,6 +1346,7 @@ function boot() {
   setTimeout(() => library.all().length && refreshLib().catch(() => {}), 7000);
   setInterval(() => !document.hidden && library.all().length && refreshLib().catch(() => {}), 30 * 60 * 1000);
   startWatch();
+  if (isAndroid()) { native.setLinks(S('openLinks') !== false); on('settings', (e) => e.detail.key === 'openLinks' && native.setLinks(S('openLinks') !== false)); }
   setTimeout(() => refreshBoards().catch(() => {}), 9000);
   setInterval(() => refreshBoards().catch(() => {}), 30 * 60 * 1000);
   st.filters = defaultFilters();

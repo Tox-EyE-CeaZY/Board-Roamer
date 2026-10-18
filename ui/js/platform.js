@@ -100,6 +100,9 @@ export const native = {
   requestLocalAccess: () => call('requestLocalAccess'),
   setHub: (url, code) => call('setHub', url || '', code || ''),
   setRemotes: (json) => call('setRemotes', json),
+  /** Android: offer Board Roamer for links to the supported sites, and open the system screen where that is switched on. */
+  setLinks: (on) => call('setLinks', !!on),
+  openLinkSettings: () => call('openLinkSettings'),
   open: (url) => call('openUrl', url),
   reveal: (uri) => call('reveal', uri || ''),
   share: (text, title) => call('share', text || '', title || ''),

@@ -67,6 +67,7 @@ export const DEFAULTS = {
   restoreTabs: true, // reopen the tabs from last time
   mainTab: true, // computers: the first tab is a pinned Main tab; what you open from it gets its own tab
   followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
+  openLinks: true, // Android: links to the supported sites offer Board Roamer
   localOn: false, // the Local section: browse pictures and videos in folders you choose, on this and your other devices
   localSort: 'new',
   notify: false, // system notifications when something new turns up (text only, never pictures)

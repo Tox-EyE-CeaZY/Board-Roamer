@@ -1,7 +1,7 @@
 # Board Roamer
 
 A board viewer written in Rust for **Windows, macOS, Linux and Android**. Pull artists, tags and tag combinations into a fast
-gallery with a proper viewer. Built for **e621**, with **e926, Danbooru, Gelbooru and Safebooru** supported too.
+gallery with a proper viewer. Built for **e621**, with **e926, Danbooru, Gelbooru, Safebooru and Derpibooru** supported too.
 
 Single small executable. The UI is embedded, and a small local server handles rate-limited, cached API
 access, so nothing needs installing besides the system web view (WebView2 on Windows, built into macOS, WebKitGTK on Linux).
@@ -133,6 +133,9 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   boards and pools you open from it get their own tabs (Settings → Look → *Pinned Main tab*). *Follows freshness* sets how soon
   Follows re-checks for new posts. Each tab keeps its own Back trail: pressing Back (or the mouse's back button) at the start
   of a tab closes it and returns you to the tab you opened it from.
+- **Links from the sites**: on Android, links to posts, searches and pools on any supported site offer Board Roamer (Settings → Links
+  turns that off, and opens Android's "Open by default" screen where "Open supported links" makes it automatic). On any device,
+  pasting such a link into the search box opens it. Derpibooru works without an account; an API key is optional and brings your own filter.
 - **Folders** for boards (pin boards and live boards) and for the library's pools and comics: *New folder*, drag a card onto a
   folder or right-click → *Move to folder*. Deleting a folder only moves its contents back out. Folders sync between devices.
 - **Local** (Settings → Local, off by default): a gallery of the pictures and videos in folders you choose, on this device and on

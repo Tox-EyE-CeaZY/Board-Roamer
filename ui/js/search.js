@@ -59,6 +59,7 @@ export class SearchBar {
     this.input.addEventListener('input', () => this._input());
     this.input.addEventListener('paste', (e) => {
       const txt = e.clipboardData.getData('text');
+      if (/^https?:\/\//i.test(txt.trim()) && hooks.onLink?.(txt.trim())) return e.preventDefault(); // a link to a post or a search: open it
       if (/\s/.test(txt.trim())) {
         e.preventDefault();
         txt.split(/\s+/).forEach((x) => this._add(parseToken(x), true));

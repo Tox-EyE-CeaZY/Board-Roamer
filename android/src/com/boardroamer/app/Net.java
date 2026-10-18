@@ -24,7 +24,7 @@ final class Net {
     private Net() {}
 
     static final String DEFAULT_UA = "BoardRoamer/0.1 (Android personal viewer)";
-    private static final String[] ALLOWED = {"e621.net", "e926.net", "donmai.us", "gelbooru.com", "safebooru.org", "rule34.xxx", "konachan.com", "konachan.net", "yande.re"};
+    private static final String[] ALLOWED = {"e621.net", "e926.net", "donmai.us", "gelbooru.com", "safebooru.org", "rule34.xxx", "konachan.com", "konachan.net", "yande.re", "derpibooru.org", "derpicdn.net"};
     private static final long CACHE_TTL_MS = 60_000;
 
     static final class Resp {
@@ -57,6 +57,7 @@ final class Net {
         if (host.endsWith("e621.net") || host.endsWith("e926.net")) return "https://e621.net/";
         if (host.endsWith("donmai.us")) return "https://danbooru.donmai.us/";
         if (host.endsWith("gelbooru.com")) return "https://gelbooru.com/";
+        if (host.endsWith("derpibooru.org") || host.endsWith("derpicdn.net")) return "https://derpibooru.org/";
         return "https://safebooru.org/";
     }
 

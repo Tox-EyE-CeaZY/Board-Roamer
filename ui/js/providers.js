@@ -136,6 +136,41 @@ function normGb(p, prov) {
   };
 }
 
+/* Derpibooru runs Philomena: JSON at /api/v1/json, tags are comma-separated in a query, and a tag may contain spaces. Inside the app a tag
+   is one word, so spaces become underscores here and are turned back when a request is made. */
+const PM_RATING = ['safe', 'suggestive', 'questionable', 'explicit', 'semi-grimdark', 'grimdark', 'grotesque'];
+const PM_CAT = { character: 'character', oc: 'character', origin: 'artist', species: 'species', rating: 'meta', spoiler: 'meta', 'content-official': 'general', 'content-fanmade': 'general' };
+const PM_FIELDS = /^(score|aspect_ratio|width|height|created_at|first_seen_at|faves|comment_count|mime_type|animated|id|uploader|wilson_score|tag_count|source_url|description|upvotes|downvotes|sha512_hash|orig_sha512_hash)([.:])/;
+
+function normPm(p, prov) {
+  if (!p || p.hidden_from_users || p.deletion_reason) return null;
+  const rep = p.representations || {};
+  const full = rep.full || p.view_url;
+  if (!full) return null;
+  const ext = String(p.format || full.split('.').pop()).toLowerCase().replace('jpeg', 'jpg');
+  const kind = mediaKind(ext);
+  const tags = {};
+  for (const c of CATS) tags[c] = [];
+  const names = (p.tags || []).map((t) => String(t).replace(/ /g, '_'));
+  for (const t of names) {
+    if (t.startsWith('artist:')) tags.artist.push(t);
+    else if (/^(oc|character):/.test(t)) tags.character.push(t);
+    else if (t.startsWith('series:')) tags.copyright.push(t);
+    else if (PM_RATING.includes(t.replace(/_/g, '-')) || /^(spoiler|editor|photographer|oc-?colors?):/.test(t)) tags.meta.push(t);
+    else tags.general.push(t);
+  }
+  const has = (t) => names.includes(t);
+  const rating = has('explicit') ? 'e' : has('questionable') || has('suggestive') ? 'q' : has('safe') ? 's' : 'e'; // grimdark / grotesque only: treat as adult
+  return {
+    provider: prov.id, id: p.id, rating, w: p.width, h: p.height, ext, kind, md5: p.orig_sha512_hash || p.sha512_hash || '', size: p.size || 0,
+    thumb: rep.thumb || rep.small || full, sample: kind === 'image' ? rep.large || rep.medium || full : null, full,
+    score: p.score ?? 0, up: p.upvotes ?? 0, down: p.downvotes ?? 0, favs: p.faves ?? 0,
+    tags, artists: tags.artist, sources: p.source_urls?.length ? p.source_urls : p.source_url ? [p.source_url] : [], created: p.created_at, desc: p.description || '',
+    parent: null, children: [], pools: [], duration: p.duration || 0, comments: p.comment_count || 0, faved: false, url: `${prov.web}/images/${p.id}`,
+    alts: [], isComic: tags.general.includes('comic'),
+  };
+}
+
 function normPool(j) {
   const ids = j.post_ids || [];
   return { id: j.id, name: String(j.name || '').replace(/_/g, ' '), desc: j.description || '', cat: j.category || 'collection', ids, count: j.post_count ?? ids.length, updated: j.updated_at, created: j.created_at, active: j.is_active !== false, creator: j.creator_name || '' };
@@ -311,6 +346,72 @@ const db = {
   },
 };
 
+const PM_SORT = [['', 'Newest'], ['score', 'Top score'], ['wilson_score', 'Best rated'], ['favcount', 'Most faved'], ['comment_count', 'Most comments'], ['random', 'Shuffle']];
+const PM_SF = { '': 'created_at', score: 'score', wilson_score: 'wilson_score', favcount: 'faves', comment_count: 'comment_count', random: 'random' };
+const pm = {
+  engine: 'pm', credKey: 'derpibooru', web: 'https://derpibooru.org', short: 'dp', color: 275, maxTags: 99, pageSize: 50,
+  sorts: PM_SORT, shapes: true, ages: true, media: true, pageNumberCap: 200, fav: false, vote: false, dossier: false, wiki: false,
+  creds() {
+    const c = credsFor(this);
+    return c.key ? { key: c.key } : { filter_id: 56027 }; // no key: the "Everything" filter, so the in-app rating switches decide what shows
+  },
+  filterTags(f) {
+    const t = [];
+    if (f.score > 0) t.push(`score.gte:${f.score}`);
+    const on = ['s', 'q', 'e'].filter((k) => f.ratings[k]);
+    const words = { s: ['safe'], q: ['suggestive', 'questionable'], e: ['explicit'] };
+    if (on.length && on.length < 3) {
+      const w = on.flatMap((k) => words[k]);
+      t.push(w.length === 1 ? w[0] : `(${w.join(' || ')})`);
+    }
+    if (f.media === 'still') t.push('animated:false');
+    if (f.media === 'animated') t.push('animated:true');
+    if (f.media === 'video') t.push('mime_type:video/webm');
+    if (f.shape === 'wide') t.push('aspect_ratio.gt:1');
+    if (f.shape === 'tall') t.push('aspect_ratio.lt:1');
+    if (f.shape === 'square') t.push('aspect_ratio:1');
+    const age = { day: '1 day', week: '1 week', month: '1 month', year: '1 year' }[f.age];
+    if (age) t.push(`created_at.gt:${age} ago`);
+    return t;
+  },
+  /** The search as Philomena wants it: tags joined by commas, `-` to exclude, `(a || b)` for "any of". */
+  query(feed) {
+    const word = (s) => (PM_FIELDS.test(s) ? s : s.replace(/_/g, ' '));
+    const pos = [], neg = [], any = [];
+    for (const t of feed.terms) (t.op === '-' ? neg : t.op === '~' ? any : pos).push(word(t.t));
+    const frag = this.filterTags(feed.filters);
+    const parts = [...pos, ...neg.map((x) => '-' + x), ...(any.length ? [`(${any.join(' || ')})`] : []), ...frag];
+    if (!pos.length && !any.length && !frag.length) parts.unshift('*');
+    return parts.join(',') || '*';
+  },
+  pageUrl(feed, limit) {
+    const q = { q: this.query(feed), sf: PM_SF[feed.filters.order || ''] || 'created_at', sd: 'desc', per_page: limit || this.pageSize, page: feed.pageNo, ...this.creds() };
+    return `${this.web}/api/v1/json/search/images?${qs(q)}`;
+  },
+  async page(feed) {
+    const j = await call(this, this.pageUrl(feed, feed.limit));
+    const raw = j.images || [];
+    if (j.total != null) feed.total = j.total;
+    feed.pageNo++;
+    if (!raw.length || feed.pageNo * (feed.limit || this.pageSize) > 10000) feed.done = true; // Philomena will not page past 10,000 results
+    return raw.map((p) => normPm(p, this)).filter(Boolean);
+  },
+  async post(id) {
+    const j = await call(this, `${this.web}/api/v1/json/images/${id}?${qs(this.creds())}`);
+    return normPm(j.image, this);
+  },
+  async autocomplete(q) {
+    const j = await call(this, `${this.web}/api/v1/json/search/tags?${qs({ q: q.replace(/_/g, ' ') + '*', per_page: 14 })}`);
+    return (j.tags || []).slice(0, 14).map((t) => ({ name: String(t.name).replace(/ /g, '_'), count: t.images || 0, cat: PM_CAT[t.category] || 'general' }));
+  },
+  async tagInfo(name) {
+    const want = name.replace(/_/g, ' ');
+    const j = await call(this, `${this.web}/api/v1/json/search/tags?${qs({ q: want, per_page: 5 })}`);
+    const t = (j.tags || []).find((x) => x.name === want);
+    return t ? { name, count: t.images || 0, cat: PM_CAT[t.category] || 'general' } : null;
+  },
+};
+
 const gbBase = (id, web, extra = {}) => ({
   engine: 'gb', credKey: id, auth: 'query', web, short: id === 'gelbooru' ? 'gb' : 'sb', color: id === 'gelbooru' ? 220 : 150, maxTags: 99, pageSize: 60,
   sorts: GB_SORT, shapes: false, ages: false, media: true, pageNumberCap: 1e9, fav: false, vote: false, dossier: false, wiki: false,
@@ -392,6 +493,7 @@ export const providers = {
   danbooru: { id: 'danbooru', name: 'Danbooru', sub: 'anime art · 2 tag limit signed out', adult: true, ...db },
   gelbooru: { id: 'gelbooru', name: 'Gelbooru', sub: 'needs a free API key', adult: true, needsKey: true, ...gbBase('gelbooru', 'https://gelbooru.com') },
   safebooru: { id: 'safebooru', name: 'Safebooru', sub: 'anime art, safe-only', adult: false, ...gbBase('safebooru', 'https://safebooru.org') },
+  derpibooru: { id: 'derpibooru', name: 'Derpibooru', sub: 'pony art · key optional', adult: true, ...pm },
 };
 providers.e926.credKey = 'e621';
 // Local files (ui/js/local.js) are shown with the same gallery and viewer, so they need a provider of their own. It cannot be searched.
@@ -399,6 +501,47 @@ providers.local = { id: 'local', engine: 'local', internal: true, credKey: 'loca
   sorts: [], shapes: false, ages: false, media: false, fav: false, vote: false, dossier: false, wiki: false, pools: false, filterTags: () => [], async page() { return []; } };
 export const providerList = Object.values(providers).filter((p) => !p.internal);
 export const getProvider = (id) => providers[id] || providers.e621;
+
+/* ------------------------------------------------------------------ links from the sites */
+/**
+ * Turn a link to a post, a search or a pool on any supported site into the in-app address that shows it, or null if it is not one.
+ * (Used by links opened from other apps on Android, and by pasting a link into the search box.)
+ */
+export function linkToHash(text) {
+  const m = /https?:\/\/[^\s<>"']+/i.exec(String(text || ''));
+  if (!m) return null;
+  let u;
+  try { u = new URL(m[0]); } catch { return null; }
+  const host = u.hostname.toLowerCase().replace(/^www\./, ''), path = u.pathname.replace(/\/+$/, ''), q = u.searchParams;
+  const post = (p, id) => `#/roam?p=${p}&post=${id}`;
+  const find = (p, tags) => {
+    const terms = String(tags || '').trim();
+    return terms ? '#/roam?' + new URLSearchParams({ p, q: terms }) : '#/roam?p=' + p;
+  };
+  let r;
+  if (host === 'e621.net' || host === 'e926.net') {
+    const p = host === 'e621.net' ? 'e621' : 'e926';
+    if ((r = /^\/posts\/(\d+)$/.exec(path) || /^\/post\/show\/(\d+)/.exec(path))) return post(p, r[1]);
+    if ((r = /^\/pools\/(\d+)$/.exec(path))) return `#/pool/${r[1]}?p=${p}`;
+    if (path === '/posts' || path === '/post') return find(p, q.get('tags'));
+  } else if (host === 'donmai.us' || host.endsWith('.donmai.us')) {
+    if ((r = /^\/posts\/(\d+)$/.exec(path))) return post('danbooru', r[1]);
+    if (path === '/posts') return find('danbooru', q.get('tags'));
+  } else if (host === 'gelbooru.com' || host === 'safebooru.org') {
+    const p = host === 'gelbooru.com' ? 'gelbooru' : 'safebooru';
+    if (path === '/index.php' && q.get('page') === 'post') {
+      if (q.get('s') === 'view' && /^\d+$/.test(q.get('id') || '')) return post(p, q.get('id'));
+      if (q.get('s') === 'list') return find(p, q.get('tags'));
+    }
+  } else if (host === 'derpibooru.org') {
+    if ((r = /^\/images\/(\d+)$/.exec(path) || /^\/(\d+)$/.exec(path))) return post('derpibooru', r[1]);
+    if (path === '/search' || path === '/search/index') {
+      // Derpibooru queries are comma separated and tags may have spaces; in the app a tag is a word
+      return find('derpibooru', String(q.get('q') || '').split(',').map((s) => s.trim().replace(/\s+/g, '_')).filter(Boolean).join(' '));
+    }
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------ query building */
 export function termsToTags(terms) {

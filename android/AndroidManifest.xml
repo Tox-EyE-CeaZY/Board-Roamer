@@ -31,15 +31,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- open booru post links straight in the app -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="e621.net" android:pathPrefix="/posts/" />
-                <data android:scheme="https" android:host="e926.net" android:pathPrefix="/posts/" />
-                <data android:scheme="https" android:host="danbooru.donmai.us" android:pathPrefix="/posts/" />
-            </intent-filter>
             <!-- "Share" a link to the app from a browser -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -47,6 +38,36 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Links to posts, searches and pools on the supported sites open in Board Roamer. An alias, so Settings can turn it off. -->
+        <activity-alias
+            android:name=".LinkAlias"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="e621.net" />
+                <data android:host="www.e621.net" />
+                <data android:host="e926.net" />
+                <data android:host="danbooru.donmai.us" />
+                <data android:host="gelbooru.com" />
+                <data android:host="www.gelbooru.com" />
+                <data android:host="safebooru.org" />
+                <data android:host="derpibooru.org" />
+                <data android:host="www.derpibooru.org" />
+                <data android:pathPrefix="/posts" />
+                <data android:pathPrefix="/post/show" />
+                <data android:pathPrefix="/pools" />
+                <data android:pathPrefix="/index.php" />
+                <data android:pathPrefix="/images" />
+                <data android:pathPrefix="/search" />
+                <data android:pathPattern="/[0-9][0-9]*" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".ShareService"

@@ -99,10 +99,10 @@ export function openSettings(section) {
     const creds = { ...(S('creds') || {}) };
     const c = creds[p.credKey] || {};
     const save = () => { creds[p.credKey] = { user: user.value.trim(), key: key.value.trim() }; setS('creds', creds); };
-    const label = p.engine === 'gb' ? ['User ID', 'API key'] : ['Username', 'API key'];
+    const label = p.engine === 'gb' ? ['User ID', 'API key'] : p.engine === 'pm' ? ['Username (optional)', 'API key (optional)'] : ['Username', 'API key'];
     const user = h('input', { class: 'input', placeholder: label[0], value: c.user || '', spellcheck: 'false', oninput: save });
     const key = h('input', { class: 'input', placeholder: label[1], type: 'password', value: c.key || '', spellcheck: 'false', oninput: save });
-    const help = { e621: 'e621.net → Account → Manage API Access', e926: 'Same account and key as e621', danbooru: 'Danbooru → My Account → API Key', gelbooru: 'gelbooru.com → Settings → Options → API Access Credentials', safebooru: 'Not needed' }[p.id];
+    const help = { e621: 'e621.net → Account → Manage API Access', e926: 'Same account and key as e621', danbooru: 'Danbooru → My Account → API Key', gelbooru: 'gelbooru.com → Settings → Options → API Access Credentials', safebooru: 'Not needed', derpibooru: 'Optional. derpibooru.org → Account → Settings → API key. With a key your own filter applies; without one everything shows and the rating switches decide' }[p.id];
     credBox.replaceChildren(
       h('div', { class: 'st-note' }, p.needsKey ? h('b', {}, 'This site requires credentials. ') : null, `Optional for most sites — needed for favorites, votes and your own blacklist. ${help ? `Find them at: ${help}.` : ''}`),
       p.id === 'safebooru' ? null : h('div', { class: 'two' }, user, key),
@@ -305,6 +305,10 @@ export function openSettings(section) {
       slider('Tile size', 'density', 130, 520, 10, (v) => v + 'px'), slider('Gap', 'gap', 0, 28, 1, (v) => v + 'px'),
       seg('Thumbnails', 'thumbQ', [['sharp', 'Sharp'], ['fast', 'Fast']], 'Sharp loads the 850px sample on big tiles'),
       toggle('Always show stats on tiles', 'showMeta'), toggle('Blur thumbnails until hovered', 'blurThumbs', 'Handy in public')),
+    isAndroid() ? sec('links', 'Links',
+      toggle('Open booru links in Board Roamer', 'openLinks', 'Links to posts, searches and pools on e621, e926, Danbooru, Gelbooru, Safebooru and Derpibooru offer Board Roamer. You can also paste any of them into the search box'),
+      h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Make it the default'), h('small', {}, 'Android only opens links straight in an app once you allow it: turn on “Open supported links” on the screen this opens')),
+        h('button', { class: 'btn', onclick: () => native.openLinkSettings() }, 'Open settings'))) : null,
     (isTouch() || isPhone()) ? sec('phone', 'Phone & touch',
       seg('Columns', 'mobileCols', [[1, '1'], [2, '2'], [3, '3'], [4, '4']], 'In the gallery when the phone is upright. One more when sideways'),
       seg('Double-tap a picture', 'dtap', [['like', 'Like'], ['zoom', 'Zoom']], 'Like favorites and upvotes it. Triple-tap pins it. Pinch always zooms'),
@@ -339,7 +343,7 @@ export function openSettings(section) {
   paintCreds();
   panel = h('aside', { class: 'settings' },
     h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
+    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', ...(isAndroid() ? ['links'] : []), 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
     body);
   document.body.append(panel);
   requestAnimationFrame(() => panel?.classList.add('in'));

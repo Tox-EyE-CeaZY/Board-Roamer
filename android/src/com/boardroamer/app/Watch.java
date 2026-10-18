@@ -111,7 +111,7 @@ final class Watch {
             if (j instanceof JSONArray) list = (JSONArray) j;
             else if (j instanceof JSONObject) {
                 JSONObject o = (JSONObject) j;
-                Object p = "gb".equals(eng) ? o.opt("post") : o.opt("posts");
+                Object p = "gb".equals(eng) ? o.opt("post") : "pm".equals(eng) ? o.opt("images") : o.opt("posts");
                 if (p instanceof JSONArray) list = (JSONArray) p;
                 else if (p instanceof JSONObject) list = new JSONArray().put(p);
                 else if (p == null) return 0; // an empty search

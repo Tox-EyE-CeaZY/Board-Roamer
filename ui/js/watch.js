@@ -18,6 +18,7 @@ function auth(prov) {
 /** The request the page's own check would make, as {url, eng}. */
 function postsRequest(prov, terms, filters) {
   const feed = new Feed(prov, terms, filters);
+  if (prov.engine === 'pm') return { url: prov.pageUrl(feed, 8), eng: 'pm' };
   const q = new URLSearchParams(prov.engine === 'gb'
     ? { page: 'dapi', s: 'post', q: 'index', json: 1, limit: 8, pid: 0, tags: feed.tags.join(' '), ...(prov.creds?.() || {}) }
     : { tags: feed.tags.join(' '), limit: 8 });

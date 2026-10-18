@@ -22,6 +22,8 @@ const ALLOWED: &[&str] = &[
     "konachan.com",
     "konachan.net",
     "yande.re",
+    "derpibooru.org",
+    "derpicdn.net",
 ];
 const DEFAULT_UA: &str = "BoardRoamer/0.1 (personal desktop viewer)";
 const CACHE_TTL: Duration = Duration::from_secs(60);
@@ -300,6 +302,8 @@ pub fn image(rq: Request, query: &str) {
         "https://danbooru.donmai.us/"
     } else if host.ends_with("gelbooru.com") {
         "https://gelbooru.com/"
+    } else if host.ends_with("derpibooru.org") || host.ends_with("derpicdn.net") {
+        "https://derpibooru.org/"
     } else {
         "https://safebooru.org/"
     };

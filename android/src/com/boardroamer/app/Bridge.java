@@ -250,6 +250,29 @@ final class Bridge {
     @JavascriptInterface
     public void setRemotes(String json) { Local.setRemotes(json); }
 
+    /** Should links to the supported sites offer Board Roamer? (Turns the link alias on or off.) */
+    @JavascriptInterface
+    public void setLinks(boolean on) {
+        try {
+            a.getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(a, "com.boardroamer.app.LinkAlias"),
+                on ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP);
+        } catch (Throwable ignored) { }
+    }
+
+    /** Android's "Open by default" screen for this app, where "Open supported links" is switched on. */
+    @JavascriptInterface
+    public void openLinkSettings() {
+        a.runOnUiThread(() -> {
+            try {
+                String act = Build.VERSION.SDK_INT >= 31 ? android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS : android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS;
+                a.startActivity(new Intent(act, Uri.parse("package:" + a.getPackageName())));
+            } catch (Throwable e) {
+                a.startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + a.getPackageName())));
+            }
+        });
+    }
+
     /** Post a notification (text only, see Notifier). */
     @JavascriptInterface
     public void notify(String title, String body) { Notifier.post(a, title, body); }

@@ -304,19 +304,13 @@ public class MainActivity extends Activity {
     }
 
     /* ------------------------------------------------------------------ links in from other apps */
-    private static final Pattern[] POST_LINKS = {
-            Pattern.compile("(e621|e926)\\.net/posts/(\\d+)"),
-            Pattern.compile("danbooru\\.donmai\\.us/posts/(\\d+)"),
-            Pattern.compile("(gelbooru\\.com|safebooru\\.org)/index\\.php\\?[^\\s]*[?&]id=(\\d+)"),
-    };
+    private static final Pattern LINK = Pattern.compile("https?://[^\\s<>\"']+");
 
+    /** Any link from another app: the page works out which site it is from and what it points at (see linkToHash in providers.js). */
     static String hashFor(String s) {
         if (s == null) return "";
-        Matcher m;
-        if ((m = POST_LINKS[0].matcher(s)).find()) return "#/roam?p=" + m.group(1) + "&post=" + m.group(2);
-        if ((m = POST_LINKS[1].matcher(s)).find()) return "#/roam?p=danbooru&post=" + m.group(1);
-        if ((m = POST_LINKS[2].matcher(s)).find()) return "#/roam?p=" + (m.group(1).startsWith("gel") ? "gelbooru" : "safebooru") + "&post=" + m.group(2);
-        return "";
+        Matcher m = LINK.matcher(s);
+        return m.find() ? "#/open?u=" + Uri.encode(m.group()) : "";
     }
 
     private void handleIntent(Intent i) {
