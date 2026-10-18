@@ -46,16 +46,22 @@ export function initTitlebar() {
   bar.hidden = false;
   const maxBtn = h('button', { class: 'tb-btn', title: 'Maximize', onclick: () => send('max'), html: icon('winMax', 14) });
   const label = h('span', { class: 'tb-ctx' });
+  const drag = { onmousedown: (e) => e.button === 0 && e.detail === 1 && send('drag'), ondblclick: () => send('max') };
   bar.append(
-    h('div', { class: 'tb-drag', onmousedown: (e) => e.button === 0 && e.detail === 1 && send('drag'), ondblclick: () => send('max') },
+    h('div', { class: 'tb-drag tb-left', ...drag },
       h('svg', { class: 'tb-mark', viewBox: '0 0 40 40', width: 16, height: 16, html: '<rect x="3" y="3" width="34" height="34" fill="none" stroke="currentColor" stroke-width="3"/><path d="M20 8 25 20 20 32 15 20z" fill="var(--accent)"/>' }),
       h('span', { class: 'tb-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER'),
       label),
+    h('div', { class: 'tb-tabs' }), // the tab strip moves in here (tabs.js keeps driving it)
+    h('div', { class: 'tb-drag tb-fill', ...drag }),
     h('div', { class: 'tb-btns' },
       h('button', { class: 'tb-btn', title: 'Minimize', onclick: () => send('min'), html: icon('winMin', 14) }),
       maxBtn,
       h('button', { class: 'tb-btn close', title: 'Close', onclick: () => send('close'), html: icon('close', 14) })),
   );
+
+  document.querySelector('.tb-tabs').append(document.getElementById('tabs'));
+  root.classList.add('tabs-in-bar');
 
   // invisible edge handles so the undecorated window can still be resized
   for (const d of ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW']) {

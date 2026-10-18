@@ -745,6 +745,14 @@ html.fullscreen { --tb: 0px; }
   background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
 html.fullscreen #titlebar { display: none; }
 .tb-drag { flex: 1; display: flex; align-items: center; gap: 10px; padding-left: 14px; min-width: 0; }
+.tb-left { flex: none; padding-right: 14px; }
+.tb-fill { flex: 1 1 24px; padding: 0; }
+.tb-tabs { flex: 0 1 auto; min-width: 0; display: flex; align-items: stretch; }
+/* tabs living in the title bar (computers) */
+.tabs-in-bar .tb-tabs .tabstrip { flex: 0 1 auto; min-width: 0; height: 36px; padding: 0; background: none; border: 0; }
+.tabs-in-bar .tb-tabs .tab-i { margin-top: 5px; flex: 0 1 190px; min-width: 96px; }
+.tabs-in-bar .tb-tabs .tab-i.on { background: var(--bg3); }
+.tabs-in-bar .tb-tabs .tab-new { margin-top: 5px; }
 .tb-mark { color: var(--accent); flex: none; }
 .tb-name { font: 800 10.5px var(--f-mono); letter-spacing: .34em; color: var(--ink); }
 .tb-name i { font-style: normal; color: var(--accent); margin: 0 .15em; }
