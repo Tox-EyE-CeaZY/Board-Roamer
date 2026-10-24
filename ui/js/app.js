@@ -388,9 +388,17 @@ function noteTabRoute() {
   tabNoteRoute({ hash, title: live ? live.name : tabTitleFor(hash), thumb: view === 'roam' ? st.loaded[0]?.thumb : view === 'board' ? boards.get(id)?.posts?.[0]?.thumb : '' });
 }
 
+/* Back to a page you scrolled (Follows, Boards, Pools, Trail): it is rebuilt from scratch, so remember where it was.
+   Keyed by tab + history depth + hash, i.e. by the history entry itself. */
+const KEEP_SCROLL = ['boards', 'follows', 'pools', 'trail'];
+const pageScroll = new Map();
+let onScreen = null; // { key, view } of what applyRoute last put up
+const entryKey = () => `${activeTabId() || ''}|${navDepth}|${location.hash}`;
+
 function applyRoute() {
   applyRouteCore();
   noteTabRoute();
+  onScreen = { key: entryKey(), view: parseHash().view };
 }
 
 function applyRouteCore() {
@@ -1371,15 +1379,19 @@ function boot() {
   // history entries are numbered so the system Back button knows how deep we are
   history.replaceState({ n: 0 }, '');
   addEventListener('hashchange', () => {
+    if (onScreen && KEEP_SCROLL.includes(onScreen.view)) pageScroll.set(onScreen.key, other.scrollTop); // the page is still on screen here
     const st = history.state;
+    let returning = false;
     if (st && typeof st.n === 'number') { // back / forward
       if (st.t && activeTabId() && st.t !== activeTabId()) { // that entry belongs to another tab: this tab's trail ran out
         if (canBackOut()) return backOut();
         history.replaceState({ n: 0, t: activeTabId() }, '');
         navDepth = 0;
-      } else navDepth = st.n;
+      } else (navDepth = st.n), (returning = true);
     } else history.replaceState({ n: ++navDepth, t: activeTabId() }, ''); // a fresh push
+    if (!returning) pageScroll.delete(entryKey());
     applyRoute();
+    if (returning && KEEP_SCROLL.includes(parseHash().view)) restoreScroll(pageScroll.get(entryKey()));
   });
   if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
   setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, mainOn });
