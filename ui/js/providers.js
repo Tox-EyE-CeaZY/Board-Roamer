@@ -1,4 +1,4 @@
-import { S, tagc } from './store.js';
+import { S, tagc, poolUnblur } from './store.js';
 
 /* Tag categories, in display order */
 export const CATS = ['artist', 'contributor', 'copyright', 'character', 'species', 'general', 'lore', 'meta', 'invalid'];
@@ -273,6 +273,18 @@ const e6 = {
     const j = await call(this, `${this.web}/pools.json?${qs(o)}`);
     return (Array.isArray(j) ? j : []).map(normPool);
   },
+  /**
+   * A few pages of each pool, spread evenly from first to last, so the pool list can judge how much of each one your blacklist
+   * covers without loading every page. `have` (Map id -> post) holds pages already fetched (the covers). Resolves Map(poolId -> posts).
+   */
+  async poolSamples(list, per = 8, have = new Map()) {
+    const pick = (ids) => (ids.length <= per ? ids : [...new Set(Array.from({ length: per }, (_, k) => ids[Math.round((k * (ids.length - 1)) / (per - 1))]))]);
+    const want = new Map(list.map((p) => [p.id, pick(p.ids || [])]));
+    const got = new Map(have);
+    const missing = [...new Set([...want.values()].flat())].filter((x) => !got.has(x));
+    for (const p of await this.postsByIds(missing)) got.set(p.id, p);
+    return new Map([...want].map(([id, ids]) => [id, ids.map((x) => got.get(x)).filter(Boolean)]));
+  },
   /** Fetch several posts by id in one request (used for pool covers). */
   async postsByIds(ids) {
     const out = [];
@@ -444,6 +456,17 @@ const pm = {
       out.push(...raw.map((p) => normPm(p, this)).filter(Boolean));
       onProgress?.(out.length, pool.count || j.total || out.length);
       if (raw.length < 50) break;
+    }
+    return out;
+  },
+  /** A few random pages of each comic (one small search per comic), to judge how much of it your blacklist covers. */
+  async poolSamples(list, per = 8) {
+    const out = new Map();
+    for (const p of list) {
+      try {
+        const j = await this._images(pmQuote(pmPoolTag(p.id)), { per, sf: 'random' });
+        out.set(p.id, (j.images || []).map((x) => normPm(x, this)).filter(Boolean));
+      } catch { /* that comic just isn't judged */ }
     }
     return out;
   },
@@ -689,12 +712,16 @@ export function compileBlacklist(lines, which = 'hide') {
 }
 
 let blurCache = { sig: null, rules: [] };
-/** Does a #blur rule match this post? (Independent of the blacklist mode.) */
-export function isBlurred(post) {
+/** The #blur rule this post matches, or null. (Independent of the blacklist mode, and of comics you unblurred.) */
+export function blurHit(post) {
   const lines = S('blacklist') || [];
   const sig = lines.join('\n');
   if (blurCache.sig !== sig) blurCache = { sig, rules: compileBlacklist(lines, 'blur') };
-  return !!blacklistHit(post, blurCache.rules);
+  return blacklistHit(post, blurCache.rules);
+}
+/** Should this post show blurred? A page of a comic you unblurred as a whole stays clear. */
+export function isBlurred(post) {
+  return !!blurHit(post) && !poolUnblur.covers(post);
 }
 
 export function blacklistHit(post, rules) {

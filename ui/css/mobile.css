@@ -173,6 +173,9 @@ html.phone .bd-title { flex: 1 1 0; min-width: 0; } html.phone .bd-name { font-s
 html.phone .vhead.bd .vhead-act { margin-left: 0; }
 html.phone .pool-meta { gap: 4px 10px; }
 html.phone .pool-desc { margin: 0 12px 8px; }
+html.phone .pool-note { margin: 0 12px 8px; flex-wrap: wrap; }
+html.phone .pool-note .pn-txt { flex-basis: calc(100% - 64px); }
+html.phone .rd-note { top: calc(60px + var(--safe-t, 0px)); }
 html.phone .jump { flex: 1 1 100%; } html.phone .jump .input { flex: 1; width: auto; } html.phone .jump .btn { flex: none; }
 html.phone .bgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; padding: 14px 12px 24px; }
 html.phone .bc-info { padding: 10px 12px 14px; } html.phone .bc-info h3 { font-size: 15px; } html.phone .bc-tags { display: none; }

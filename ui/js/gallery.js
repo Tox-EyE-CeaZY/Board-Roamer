@@ -234,6 +234,13 @@ export class Gallery {
     this._maybeMore();
   }
 
+  /** Mount the visible tiles again (after something that changes how they look, like unblurring a whole comic). */
+  repaint() {
+    this.live.forEach((el) => el.remove());
+    this.live.clear();
+    this.render();
+  }
+
   refreshMarks() {
     for (const [i, el] of this.live) {
       const it = this.items[i];

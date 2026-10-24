@@ -1,6 +1,8 @@
 import { h, clamp, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, reading } from './store.js';
+import { S, setS, reading, postKey, poolUnblur } from './store.js';
+import { isBlurred } from './providers.js';
+import { poolWeight, poolNotice, unblurKey } from './poolweight.js';
 import { toast } from './ui.js';
 import { showMenu, bindContext, menuOpen, lastLongPress } from './ctxmenu.js';
 import { isFullscreen, setFullscreen, toggleFullscreen } from './titlebar.js';
@@ -66,7 +68,9 @@ export class ComicReader {
       b('right', 'Next page', () => this.step(this.rtl ? -1 : 1), 'r-desk'));
     this.film = h('div', { class: 'rd-film' });
     this.pageNo = h('div', { class: 'rd-pageno' });
-    this.root.append(this.stage, this.top, this.bottom, this.film, this.pageNo, this.endCard);
+    this.note = h('div', { class: 'rd-note', hidden: true });
+    this._reveal = new Set(); // single pages revealed by hand
+    this.root.append(this.stage, this.top, this.note, this.bottom, this.film, this.pageNo, this.endCard);
     this.root.hidden = true;
 
     // input
@@ -99,8 +103,32 @@ export class ComicReader {
     requestAnimationFrame(() => this.root.classList.add('in'));
     this.i = clamp(index, 0, posts.length - 1);
     this._rebuildSpreads();
+    this._paintNote();
     this.render(0);
     this._wake();
+  }
+
+  /** A comic mostly made of something you blur says so (once per opening), with one button that unblurs every page. */
+  _paintNote() {
+    const w = { ...poolWeight(this.pages), hide: 'none' }; // the reader shows every page, so only #blur rules matter here
+    const done = () => (this.note.hidden = true);
+    const un = poolUnblur.has(unblurKey(this.prov.id, this.pool.id));
+    const el = (w.blur === 'mostly' && !un) || w.blur === 'warn'
+      ? poolNotice(w, { provId: this.prov.id, poolId: this.pool.id, kind: this.kind, onClose: done, onChange: () => { done(); this.render(0); toast(poolUnblur.has(unblurKey(this.prov.id, this.pool.id)) ? 'Every page unblurred' : 'Blurred again', { ms: 1400 }); } })
+      : null;
+    this.note.replaceChildren(el || '');
+    this.note.hidden = !el;
+  }
+
+  _blurred(post) {
+    return isBlurred(post) && !this._reveal.has(postKey(post));
+  }
+
+  /** The "Blurred · tap to reveal" button over a page (or spread); revealing it clears just those pages. */
+  _blurBtn(posts, after) {
+    const stop = (e) => e.stopPropagation();
+    return h('button', { class: 'vw-blur rd-blur', type: 'button', onpointerdown: stop, onpointerup: stop, onclick: (e) => { stop(e); posts.forEach((p) => this._reveal.add(postKey(p))); after(); } },
+      h('i', { html: icon('eye', 22) }), h('b', {}, 'Blurred'), h('small', {}, isTouch() ? 'Tap to reveal' : 'Click to reveal'));
   }
 
   close() {
@@ -179,6 +207,7 @@ export class ComicReader {
     }
     img.onerror = () => { if (!img._tried) { img._tried = true; img.src = '/img?u=' + encodeURIComponent(post.full); } };
     img.addEventListener('load', () => img.classList.add('ready'));
+    if (this._blurred(post)) img.classList.add('blurred');
     return img;
   }
 
@@ -195,6 +224,8 @@ export class ComicReader {
     this.stage.style.setProperty('--z', this.zoom);
     const old = this.stage.firstChild;
     this.stage.replaceChildren(spread);
+    const veiled = idx.map((k) => this.pages[k]).filter((p) => this._blurred(p));
+    if (veiled.length) this.stage.append(this._blurBtn(veiled, () => this.render(0)));
     this.stage.scrollTop = 0;
     this.stage.scrollLeft = 0;
     const sign = (dir || 0) * (this.rtl ? -1 : 1);
@@ -214,9 +245,11 @@ export class ComicReader {
     this.stage.replaceChildren(col);
     const loadBox = (box) => {
       if (box.firstChild) return;
-      const img = this._img(this.pages[+box.dataset.page]);
+      const post = this.pages[+box.dataset.page];
+      const img = this._img(post);
       img.style.aspectRatio = '';
       box.append(img);
+      if (img.classList.contains('blurred')) box.append(this._blurBtn([post], () => { img.classList.remove('blurred'); box.querySelector('.rd-blur')?.remove(); this._renderFilm(); }));
     };
     this._ioLoad = new IntersectionObserver((es) => es.forEach((en) => en.isIntersecting && loadBox(en.target)), { root: this.stage, rootMargin: '1800px 0px' });
     wrap.forEach((b) => this._ioLoad.observe(b));
@@ -278,7 +311,7 @@ export class ComicReader {
     const cur = this.mode === 'scroll' ? [this.i] : this.spreads[this._spreadOf(this.i)];
     const frag = [];
     for (let k = a; k < z; k++) {
-      frag.push(h('button', { class: 'fs' + (cur.includes(k) ? ' cur' : ''), 'data-i': k, onclick: () => this.goto(k) }, h('img', { src: this.pages[k].thumb, alt: '', loading: 'lazy', draggable: 'false' }), h('i', { class: 'fs-n' }, k + 1)));
+      frag.push(h('button', { class: 'fs' + (cur.includes(k) ? ' cur' : ''), 'data-i': k, onclick: () => this.goto(k) }, h('img', { src: this.pages[k].thumb, alt: '', loading: 'lazy', draggable: 'false', class: this._blurred(this.pages[k]) ? 'blurred' : '' }), h('i', { class: 'fs-n' }, k + 1)));
     }
     this.film.replaceChildren(...frag);
     this.film.querySelector('.cur')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });

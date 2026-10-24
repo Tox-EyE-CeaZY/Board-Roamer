@@ -48,6 +48,8 @@ export const DEFAULTS = {
   creds: {},
   blacklist: [],
   blacklistMode: 'veil', // veil | hide | off
+  poolMostly: 50, // a pool whose pages match the blacklist MORE than this % counts as "mostly" that: hidden / veiled, or (#blur) offers to unblur it all
+  poolWarn: 15, // a pool with at least this % of #blur pages is flagged as having blurred pages (below it, those pages are only blurred one by one)
   starred: [], // [{p: credKey, t: tag, cat}]
   mobileCols: 2, // gallery columns on a phone held upright (one more when sideways)
   haptics: true,
@@ -87,7 +89,7 @@ let settings = { ...structuredClone(DEFAULTS), ...load('settings', {}) };
 settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEFAULTS.filters.ratings, ...(settings.filters || {}).ratings } };
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
-export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
+export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'poolMostly', 'poolWarn', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
   'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs'];
 let settingsT = load('settingsT', {}); // when each synced setting was last changed here
 
@@ -99,6 +101,20 @@ export function setS(k, v) {
   emit('settings', { key: k, value: v });
 }
 export const allSettings = () => settings;
+
+/* ---------- comics / pools you chose to see unblurred (per device) ---------- */
+const unblurPools = new Set(load('unblurPools', []));
+/** Keys are `<provider id>:<pool id>`, which is what a post's `pools` list can be checked against. */
+export const poolUnblur = {
+  has: (key) => unblurPools.has(key),
+  set(key, v) {
+    v ? unblurPools.add(key) : unblurPools.delete(key);
+    save('unblurPools', [...unblurPools]);
+    emit('unblur', { key, on: v });
+  },
+  /** Is this post a page of a pool that was unblurred as a whole? */
+  covers: (post) => !!unblurPools.size && !!post.pools?.some((id) => unblurPools.has(`${post.provider}:${id}`)),
+};
 
 /* ---------- post helpers ---------- */
 export const postKey = (p) => `${p.provider}:${p.id}`;

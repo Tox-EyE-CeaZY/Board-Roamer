@@ -1,8 +1,9 @@
 import { h, ago, pretty, fmtNum, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, reading, library, on, emit } from './store.js';
+import { S, setS, reading, library, on, emit, poolUnblur } from './store.js';
 import { toggleLibrary, renderLibrary } from './library.js';
-import { getProvider } from './providers.js';
+import { getProvider, isBlurred, compileBlacklist } from './providers.js';
+import { poolWeight, poolNotice, ruleList, unblurKey } from './poolweight.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented } from './ui.js';
 import { downloadMany, selBar, openExternal } from './actions.js';
@@ -57,6 +58,9 @@ export async function loadPool(prov, id, onProgress) {
   touchLibrary(prov, pool, res.kind);
   return res;
 }
+
+/** Every page we have for a pool: all of them once it was opened, else null. */
+const loadedPages = (prov, id) => fullCache.get(keyOf(prov, id))?.posts || null;
 
 export const dtext = (t) => String(t || '').replace(/thumb #\d+/g, '').replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (m, a, b) => b || a).replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z]+(=[^\]]*)?\]/gi, '').replace(/^h\d\.\s*/gm, '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
@@ -125,6 +129,14 @@ export async function renderPoolView(root, id, ctx) {
     h('button', { class: 'ibtn', title: 'Open on site', html: icon('external', 18), onclick: () => openExternal(poolWeb(prov, id)) }),
   );
   const desc = dtext(pool.desc);
+  // how much of it the blacklist covers: a warning, or (mostly #blur) one button that unblurs every page
+  const noteHost = h('div', { class: 'pool-note-host' });
+  const paintNote = () => noteHost.replaceChildren(poolNotice(poolWeight(posts), { provId: prov.id, poolId: pool.id, kind, onChange: () => (paintNote(), gal.repaint()) }) || '');
+  paintNote();
+  const offNote = on('settings', (e) => {
+    if (!root.isConnected || !root.contains(noteHost)) return offNote();
+    if (['blacklist', 'blacklistMode', 'poolMostly', 'poolWarn'].includes(e.detail.key)) paintNote();
+  });
   headHost.replaceChildren(
     h('div', { class: 'vhead bd pool-head' },
       h('button', { class: 'ibtn', title: 'All pools', html: icon('left', 20), onclick: () => ctx.go('#/pools') }),
@@ -133,6 +145,7 @@ export async function renderPoolView(root, id, ctx) {
         h('div', { class: 'pool-meta' }, kindBadge(kind), h('span', {}, `${fmtNum(posts.length)}${posts.length !== pool.count ? ` of ${pool.count}` : ''} pages`), pool.updated ? h('span', {}, `updated ${ago(pool.updated)}`) : null, pool.creator ? h('span', {}, `by ${pool.creator}`) : null, !pool.active ? h('span', { class: 'inactive' }, 'inactive') : null)),
       act),
     desc ? h('details', { class: 'pool-desc' }, h('summary', {}, 'About this pool'), h('p', {}, desc.slice(0, 1800))) : null,
+    noteHost,
   );
   const ctxItems = () => [
     { label: 'Copy pool link', icon: 'link', run: () => (copyText(poolWeb(prov, id)), toast('Link copied', { ms: 1200 })) },
@@ -156,7 +169,7 @@ export async function renderPoolView(root, id, ctx) {
 /* ================================================================== all pools */
 export function renderPools(root, ctx) {
   const prov = getProvider(ctx.provId);
-  const st = { q: '', category: '', order: 'updated_at', page: 1, comicsOnly: false, items: [], covers: new Map(), done: false, loading: false };
+  const st = { q: '', category: '', order: 'updated_at', page: 1, comicsOnly: false, items: [], covers: new Map(), samples: new Map(), done: false, loading: false };
   const grid = h('div', { class: 'pgrid' });
   const more = h('button', { class: 'btn', onclick: () => load() }, 'Load more');
   const note = h('div', { class: 'pools-note' });
@@ -253,8 +266,10 @@ export function renderPools(root, ctx) {
     const libBtn = h('button', { class: 'lib-add', 'aria-label': 'Add to library', onclick: (e) => { e.stopPropagation(); addToLib(el); } });
     const cover = h('div', { class: 'pc-cover' }, h('i', { class: 'pc-ph', html: icon('pool', 30) }), h('div', { class: 'lib-act' }, libBtn));
     const badge = h('span', { class: 'kind kind-' + (pool.cat === 'series' ? 'series' : 'collection'), html: icon('pool', 12) + (pool.cat === 'series' ? 'SERIES' : 'COLLECTION') });
+    const flag = h('span', { class: 'pc-flag', hidden: true });
     const el = h('article', { class: 'pcard', tabindex: 0, 'data-id': pool.id, 'data-hash': `#/pool/${pool.id}?p=${prov.id}`, onclick: () => ctx.go(`#/pool/${pool.id}?p=${prov.id}`), onkeydown: (e) => e.key === 'Enter' && ctx.go(`#/pool/${pool.id}?p=${prov.id}`) },
-      cover, h('div', { class: 'pc-info' }, h('h3', {}, pool.name), h('div', { class: 'pc-meta' }, badge, h('span', {}, `${fmtNum(pool.count)} pages`), h('span', {}, ago(pool.updated)))));
+      cover, h('div', { class: 'pc-info' }, h('h3', {}, pool.name), h('div', { class: 'pc-meta' }, badge, h('span', {}, `${fmtNum(pool.count)} pages`), h('span', {}, ago(pool.updated)), flag)));
+    el._flag = flag;
     el._pool = pool;
     el._cover = cover;
     el._badge = badge;
@@ -280,7 +295,9 @@ export function renderPools(root, ctx) {
     const pool = el._pool, p = coverOf(pool);
     if (!p) return;
     el._cover.querySelector('.pc-ph')?.remove();
+    el._cover.querySelector('img')?.remove();
     el._cover.prepend(h('img', { src: p.sample || p.thumb, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') }));
+    paintWeight(el);
     if (p.isComic) {
       el._comic = true;
       el._badge.className = 'kind kind-comic';
@@ -289,10 +306,62 @@ export function renderPools(root, ctx) {
     applyFilter();
   };
 
+  /* ---- blacklist weight: judged from a sample of each pool's pages (every page once the pool was opened) */
+  const blOn = () => !!(S('blacklist') || []).length && (S('blacklistMode') !== 'off' || compileBlacklist(S('blacklist'), 'blur').length > 0);
+  const weightOf = (pool) => {
+    const all = loadedPages(prov, pool.id);
+    if (all) return poolWeight(all);
+    const smp = st.samples.get(pool.id);
+    // too few pages seen to call a big pool "mostly" anything
+    return smp && (smp.length >= 5 || smp.length >= (pool.count || pool.ids?.length || 0)) ? poolWeight(smp, true) : null;
+  };
+  const paintWeight = (el) => {
+    const pool = el._pool, w = blOn() ? weightOf(pool) : null;
+    const un = poolUnblur.has(unblurKey(prov.id, pool.id)), est = w?.sampled ? ' (judged from a sample of its pages)' : '';
+    el._bl = w?.hide === 'mostly' ? S('blacklistMode') : null; // 'hide' takes the card out, 'veil' covers it
+    const img = el._cover.querySelector('img'), p = coverOf(pool);
+    img?.classList.toggle('blurred', (w?.blur === 'mostly' && !un) || (!!p && isBlurred(p)));
+    el._cover.querySelector('.pc-veil')?.remove();
+    if (el._bl === 'veil' && !el._revealed) {
+      el._cover.append(h('button', { class: 'pc-veil', title: 'Show this pool', onclick: (e) => { e.stopPropagation(); el._revealed = true; paintWeight(el); } },
+        h('i', { html: icon('cloak', 22) }), h('b', {}, 'Mostly blacklisted'), h('small', {}, ruleList(w.hideRules, 1).slice(0, 40))));
+    }
+    const f = el._flag;
+    f.hidden = true;
+    if (w?.blur === 'mostly' && !un) Object.assign(f, { hidden: false, className: 'pc-flag mostly', title: `Mostly ${ruleList(w.blurRules)}, which you blur${est}. Open it to unblur every page at once.` }), (f.innerHTML = icon('cloak', 11) + 'MOSTLY BLURRED');
+    else if (w?.blur === 'warn' || (w?.blur === 'mostly' && un)) Object.assign(f, { hidden: false, className: 'pc-flag warn', title: `Has pages blurred by your blacklist: ${ruleList(w.blurRules)}${est}` }), (f.innerHTML = icon('cloak', 11) + 'BLURRED PAGES');
+  };
+  const judge = (els) => {
+    if (!blOn() || !prov.poolSamples) return;
+    const todo = els.filter((el) => !st.samples.has(el._pool.id) && !loadedPages(prov, el._pool.id)).map((el) => el._pool);
+    if (!todo.length) return els.forEach(paintWeight), applyFilter();
+    const myGen = st.gen;
+    const have = new Map([...st.covers].filter(([k]) => typeof k === 'number'));
+    prov.poolSamples(todo, 8, have).then((found) => {
+      found.forEach((posts, id) => st.samples.set(id, posts));
+      if (myGen !== st.gen) return;
+      els.forEach(paintWeight);
+      applyFilter();
+    }).catch(() => {});
+  };
+  const offW = on('settings', (e) => {
+    if (!root.isConnected || !root.contains(grid)) return offW();
+    if (!['blacklist', 'blacklistMode', 'poolMostly', 'poolWarn'].includes(e.detail.key)) return;
+    const els = [...grid.children].filter((el) => el._pool);
+    els.forEach(paintWeight);
+    applyFilter();
+    judge(els);
+  });
+
   const applyFilter = () => {
-    for (const el of grid.children) el.hidden = st.comicsOnly && !el._comic;
+    let gone = 0;
+    for (const el of grid.children) {
+      const out = el._bl === 'hide';
+      gone += out ? 1 : 0;
+      el.hidden = (st.comicsOnly && !el._comic) || out;
+    }
     const shown = [...grid.children].filter((e) => !e.hidden).length;
-    note.textContent = st.items.length ? `${shown} shown${st.comicsOnly ? ' (comics only)' : ''}` : '';
+    note.textContent = st.items.length ? `${shown} shown${st.comicsOnly ? ' (comics only)' : ''}${gone ? ` · ${gone} hidden by blacklist (mostly made of what you blacklisted)` : ''}` : '';
   };
 
   async function load() {
@@ -317,7 +386,8 @@ export function renderPools(root, ctx) {
           if (myGen !== st.gen) return;
           found.forEach((p, id) => st.covers.set('pool:' + id, p));
           els.forEach(paintCover);
-        }).catch(() => {});
+          judge(els);
+        }).catch(() => judge(els));
         return;
       }
       const ids = list.map((p) => p.ids[0]).filter(Boolean);
@@ -325,7 +395,8 @@ export function renderPools(root, ctx) {
         if (myGen !== st.gen) return;
         posts.forEach((p) => st.covers.set(p.id, p));
         els.forEach(paintCover);
-      }).catch(() => {});
+        judge(els);
+      }).catch(() => judge(els));
     } catch (e) {
       note.textContent = e.message;
     } finally {
