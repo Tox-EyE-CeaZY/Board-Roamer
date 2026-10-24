@@ -277,7 +277,8 @@ export function openSettings(section) {
     sec('look', 'Look', themeRow, slider('Accent hue', 'hue', 0, 360, 1, (v) => v + '°'), toggle('Topographic backdrop', 'topo'), toggle('Film grain', 'grain'),
       seg('Tabs', 'tabs', [['off', 'Off'], ['auto', 'Auto'], ['always', 'Always']], 'Auto shows the tab bar once you open a second tab: right-click or long-press anything and choose Open in new tab, middle-click a section, or press Ctrl+T'),
       toggle('Reopen my tabs when the app starts', 'restoreTabs'),
-      ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Roam, Boards, Follows, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')])),
+      ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Roam, Boards, Follows, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')]),
+      toggle('New-post counters on live boards', 'boardCounters', 'The “N new” mark on live board cards, on their chips above the gallery, and the count next to Boards. To hide it for just one board, right-click or long-press that board')),
     sec('notifications', 'Notifications',
       toggle('Notify me about new content', 'notify', 'A system notification when a check finds something new while the app is in the background. Words only, never a picture', async (on) => {
         if (!on) return;
