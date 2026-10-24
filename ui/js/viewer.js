@@ -409,6 +409,14 @@ export class Viewer {
     if (p.kind === 'flash') return;
     const nw = p.w || m.naturalWidth || m.videoWidth || 800, nh = p.h || m.naturalHeight || m.videoHeight || 800;
     const sw = this.stage.clientWidth, sh = this.stage.clientHeight;
+    // the picture is placed from the stage's centre: when the stage grows or shrinks under a zoomed picture
+    // (the phone's info bar sliding away), shift by half the change so it stays put instead of jumping
+    const [lw, lh] = this._stageWH || [sw, sh];
+    this._stageWH = [sw, sh];
+    if (this.mode !== 'fit' && !reset) {
+      this.tx -= (sw - lw) / 2; this.ttx -= (sw - lw) / 2;
+      this.ty -= (sh - lh) / 2; this.tty -= (sh - lh) / 2;
+    }
     m.style.width = nw + 'px';
     m.style.height = nh + 'px';
     m.style.marginLeft = -nw / 2 + 'px';
@@ -451,6 +459,7 @@ export class Viewer {
     const k = this.swy ? 1 - Math.min(Math.abs(this.swy) / 1400, 0.14) : 1;
     m.style.transform = `translate(${this.tx + this.swx}px,${this.ty + this.swy}px) rotate(${this.rot}deg) scale(${this.sc * k})`;
     this.stage.classList.toggle('zoomed', this.tsc > this.fit * 1.02);
+    this.root.classList.toggle('free', this.mode !== 'fit'); // (not `zoomed`: that follows the fit, which moves when the stage resizes)
     this.zoomTag.textContent = this.mode === 'fit' ? 'FIT' : Math.round(this.tsc * 100) + '%';
     this.zoomTag.hidden = false;
   }

@@ -266,6 +266,8 @@ html.phone .vw-main { inset: 0; bottom: calc(var(--peek) + var(--film)); }
 html.phone .vw-film { bottom: var(--peek); height: var(--film); padding: 6px 10px; }
 html.phone .fs { width: 50px; height: 60px; }
 html.phone #viewer.is-video.chrome-off, html.phone #viewer.immersive { --peek: 0px; --film: 0px; }
+/* a zoomed picture takes the whole screen once the controls are away (an un-zoomed one keeps its size, so a tap doesn't re-fit it) */
+html.phone #viewer.free.chrome-off { --peek: 0px; --film: 0px; }
 
 /* the info panel becomes a bottom sheet with a peek row */
 html.phone .vw-panel {
