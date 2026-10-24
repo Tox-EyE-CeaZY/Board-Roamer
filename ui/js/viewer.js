@@ -8,6 +8,7 @@ import { Player } from './player.js';
 import { bindContext, showMenu, menuOpen, lastLongPress } from './ctxmenu.js';
 import { isPhone, isTouch, isAndroid, haptic, native } from './platform.js';
 import { toggleFullscreen, isFullscreen, setFullscreen } from './titlebar.js';
+import { renderDText } from './dtext.js';
 
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 
@@ -1215,7 +1216,7 @@ export class Viewer {
         p.parent ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.parent, 'only') }, '↰ parent #' + p.parent) : null,
         (p.children?.length || p.hasChildren) ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.id, 'only') }, `⧉ children${p.children?.length ? ' (' + p.children.length + ')' : ''}`) : null)) : null,
       p.pools?.length ? h('div', { class: 'ir col' }, h('span', {}, 'Pools'), poolBox) : null,
-      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), h('p', { class: 'desc' }, p.desc.replace(/\[\/?[a-z]+(=[^\]]*)?\]/gi, '').trim().slice(0, 900))) : null,
+      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov })))) : null,
     );
   }
 

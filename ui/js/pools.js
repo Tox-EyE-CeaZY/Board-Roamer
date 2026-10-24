@@ -11,6 +11,7 @@ import { pinPopover, quickPin } from './pins.js';
 import { showMenu, bindContext } from './ctxmenu.js';
 import { isPhone } from './platform.js';
 import { popover } from './ui.js';
+import { renderDText } from './dtext.js';
 
 /* ================================================================== data */
 const metaCache = new Map(); // key -> Promise<pool>
@@ -128,7 +129,7 @@ export async function renderPoolView(root, id, ctx) {
     h('button', { class: 'btn', title: 'Pin every page to a board', html: icon('pin', 16) + '<span>Pin all</span>', onclick: (e) => pinPopover(e.currentTarget, posts) }),
     h('button', { class: 'ibtn', title: 'Open on site', html: icon('external', 18), onclick: () => openExternal(poolWeb(prov, id)) }),
   );
-  const desc = dtext(pool.desc);
+  const desc = pool.desc?.trim() ? renderDText(pool.desc, { prov }) : null;
   // how much of it the blacklist covers: a warning, or (mostly #blur) one button that unblurs every page
   const noteHost = h('div', { class: 'pool-note-host' });
   const paintNote = () => noteHost.replaceChildren(poolNotice(poolWeight(posts), { provId: prov.id, poolId: pool.id, kind, onChange: () => (paintNote(), gal.repaint()) }) || '');
@@ -144,7 +145,7 @@ export async function renderPoolView(root, id, ctx) {
         h('h1', { class: 'bd-name' }, pool.name),
         h('div', { class: 'pool-meta' }, kindBadge(kind), h('span', {}, `${fmtNum(posts.length)}${posts.length !== pool.count ? ` of ${pool.count}` : ''} pages`), pool.updated ? h('span', {}, `updated ${ago(pool.updated)}`) : null, pool.creator ? h('span', {}, `by ${pool.creator}`) : null, !pool.active ? h('span', { class: 'inactive' }, 'inactive') : null)),
       act),
-    desc ? h('details', { class: 'pool-desc' }, h('summary', {}, 'About this pool'), h('p', {}, desc.slice(0, 1800))) : null,
+    desc?.childNodes.length ? h('details', { class: 'pool-desc' }, h('summary', {}, 'About this pool'), desc) : null,
     noteHost,
   );
   const ctxItems = () => [

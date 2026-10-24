@@ -616,13 +616,39 @@ video.media { background: #000; outline: 0; }
 .info { padding: 6px 18px; }
 .ir { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed oklch(1 0 0 / .08); font-size: 12.5px; }
 .ir span { font: 700 10px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: #778; padding-top: 2px; }
-.ir b { font: 500 12px var(--f-mono); text-align: right; color: #dde; }
+.ir > b { font: 500 12px var(--f-mono); text-align: right; color: #dde; }
 .ir.col { flex-direction: column; }
 .srcs { display: grid; gap: 4px; } .srcs a { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--f-mono); color: var(--accent); width: fit-content; } @media (hover: hover) {
   .srcs a:hover { text-decoration: underline; }
 }
 .rels { display: flex; gap: 6px; flex-wrap: wrap; }
-.desc { margin: 0; color: #bbc; font-size: 13px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.desc { margin: 0; color: #bbc; font-size: 13px; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
+p.desc { white-space: pre-wrap; }
+
+/* DText (e621/Danbooru markup) in post and pool descriptions */
+.dtext { line-height: 1.45; overflow-wrap: anywhere; }
+.ir .dtext span { font: inherit; letter-spacing: normal; text-transform: none; color: inherit; padding: 0; } /* undo the .ir label style */
+.dtext > :first-child { margin-top: 0; } .dtext > :last-child { margin-bottom: 0; }
+.dtext p { margin: 0 0 .7em; }
+.dt-h { margin: .9em 0 .35em; font-weight: 700; line-height: 1.25; }
+.dt-h1 { font-size: 1.45em; } .dt-h2 { font-size: 1.3em; } .dt-h3 { font-size: 1.15em; } .dt-h4, .dt-h5, .dt-h6 { font-size: 1em; }
+.dt-list { margin: 0 0 .7em; padding-left: 1.3em; } .dt-list .dt-list { margin: .15em 0; }
+.dt-quote { margin: 0 0 .7em; padding: 4px 10px; border-left: 3px solid var(--line2); background: oklch(1 0 0 / .04); }
+.dt-quote > :last-child { margin-bottom: 0; }
+.dt-section { margin: 0 0 .7em; padding: 4px 10px; border: 1px solid var(--line2); border-radius: 4px; }
+.dt-section > summary { cursor: pointer; font-weight: 600; }
+.dt-section[open] > summary { margin-bottom: .4em; }
+.dt-code { margin: 0 0 .7em; padding: 6px 8px; font: 12px var(--f-mono); background: oklch(0 0 0 / .25); border-radius: 4px; white-space: pre-wrap; }
+.dt-icode { padding: 0 3px; font: .92em var(--f-mono); background: oklch(0 0 0 / .25); border-radius: 3px; }
+.dt-tn { font-size: .85em; opacity: .75; }
+.dt-hr { border: 0; border-top: 1px solid var(--line2); margin: .8em 0; }
+.dt-table { border-collapse: collapse; margin: 0 0 .7em; } .dt-table td, .dt-table th { border: 1px solid var(--line2); padding: 2px 6px; }
+.dt-link { color: var(--accent); text-decoration: none; } @media (hover: hover) {
+  .dt-link:hover { text-decoration: underline; }
+}
+.dt-spoiler { background: currentColor; border-radius: 2px; cursor: pointer; }
+.dt-spoiler * { visibility: hidden; } .dt-spoiler.shown { background: transparent; cursor: auto; } .dt-spoiler.shown * { visibility: visible; }
+span.dt-spoiler { color: inherit; } div.dt-spoiler { margin: 0 0 .7em; padding: 2px 6px; }
 
 .vw-film { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; height: var(--film); display: flex; gap: 4px; align-items: center; padding: 8px 14px; overflow-x: auto; overflow-y: hidden; background: linear-gradient(transparent, oklch(.06 .02 205 / .85) 40%); transition: opacity .3s; }
 #viewer.no-film .vw-film { display: none; }
@@ -1012,7 +1038,7 @@ video.media { background: transparent; backface-visibility: hidden; }
 .pool-meta .inactive { color: var(--hot); }
 .pool-desc { margin: 0 30px 8px; padding: 8px 14px; border-left: 3px solid var(--line2); background: var(--bg2); }
 .pool-desc summary { cursor: pointer; font: 700 10.5px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-.pool-desc p { margin: 8px 0 2px; white-space: pre-wrap; color: var(--dim); max-height: 220px; overflow: auto; }
+.pool-desc > .dtext { margin: 8px 0 2px; color: var(--dim); max-height: 320px; overflow: auto; }
 .jump { display: flex; gap: 4px; } .jump .input { width: 78px; padding: 7px 8px; }
 .btn.big { height: 42px; padding: 0 20px; font-size: 12.5px; }
 .vhead.bd.pool-head .vhead-act { margin-left: auto; }
