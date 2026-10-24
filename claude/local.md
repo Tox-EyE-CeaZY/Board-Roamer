@@ -38,3 +38,14 @@ Testing in a headless Edge against the real app: it auto-syncs with the PC hub, 
 ## Derpibooru comics as pools
 A pool is a `comic:<title>` tag (`pmPoolId`); pages are the images with that tag by id ascending. `pool()`, `poolPosts()`, `poolsSearch()` (tags
 search for Biggest, a walk over the newest comic pages for Recently updated), `poolCovers()` (cover art tag, else a page already seen).
+
+## Blacklist weight of pools / comics (`poolweight.js`)
+`poolWeight(posts)` counts how many pages hit a hide rule and how many hit a `#blur` rule (union, plus a per-rule tally for the wording).
+Thresholds are settings: `poolMostly` (MORE than this % = "mostly", default 50) and `poolWarn` (at least this % of #blur pages = warn, default 15).
+- Pool list: judged from `prov.poolSamples()` (e621: 8 evenly spaced page ids through `postsByIds`, reusing the covers; Derpibooru: one
+  `sf=random` search per comic), or from every page once the pool was opened (`fullCache`). Mostly-hidden pools leave the list in Hide mode
+  and get a click-to-show veil in Veil mode; mostly-#blur pools get a blurred cover + MOSTLY BLURRED chip, warn ones a BLURRED PAGES chip.
+- Pool page and reader: `poolNotice()` banner. "Unblur all pages" stores `<provider id>:<pool id>` in `poolUnblur` (store.js, per device);
+  `isBlurred()` skips any post whose `pools` contains an unblurred pool, so the gallery, viewer and reader all follow it. `blurHit()` is the
+  raw rule match that ignores it (used for counting).
+- The reader now blurs #blur pages too (it didn't before), with the same click-to-reveal button as the viewer.

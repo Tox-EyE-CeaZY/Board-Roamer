@@ -1105,6 +1105,35 @@ html.touch .sync-addr, html.touch .sync-code { min-height: 48px; }
 .vw-blur small { font-weight: 500; letter-spacing: .08em; color: #bcd; text-transform: none; }
 @media (hover: hover) { .vw-blur:hover { border-color: var(--accent); color: var(--accent); } }
 .fs img.blurred { filter: blur(10px); }
+/* blacklist weight of pools / comics */
+.rd-img.blurred { filter: blur(34px) saturate(.7); }
+.rd-pg { position: relative; overflow: hidden; }
+.rd-pg .rd-blur { position: absolute; }
+.pc-cover img.blurred { filter: blur(22px) saturate(.7); }
+.pc-veil { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 4px; padding: 8px; text-align: center; background: var(--bg3); color: var(--faint); cursor: pointer; }
+.pc-veil b { font: 700 11px var(--f-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+.pc-veil small { font: 500 10px var(--f-mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) { .pc-veil:hover { color: var(--accent); } }
+.pc-flag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 5px; font: 700 9.5px var(--f-mono); letter-spacing: .06em; }
+.pc-flag.mostly { background: oklch(.1 .02 205 / .88); color: var(--accent); }
+.pc-flag.warn { border: 1px solid var(--line2); color: var(--dim); }
+.pool-note { display: flex; align-items: center; gap: 12px; margin: 0 30px 10px; padding: 10px 14px; border-left: 3px solid var(--line2); background: var(--bg2); color: var(--dim); }
+.pool-note > i { display: grid; color: var(--faint); }
+.pool-note.mostly { border-left-color: var(--accent); }
+.pool-note.mostly > i { color: var(--accent); }
+.pool-note.mostly.clear { border-left-color: var(--line2); }
+.pool-note.mostly.clear > i { color: var(--faint); }
+.pool-note.hide { border-left-color: var(--hot); }
+.pn-txt { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.pn-txt b { font: 600 13px var(--f-display); color: var(--ink); }
+.pn-txt em { font-style: normal; color: var(--accent); }
+.pool-note.hide .pn-txt em { color: var(--hot); }
+.pn-txt small { font: 500 11px var(--f-mono); color: var(--faint); }
+.pool-note .pn-x { flex: none; }
+.rd-note { position: absolute; z-index: 6; top: 58px; left: 50%; translate: -50% 0; width: min(640px, calc(100% - 24px)); transition: opacity .3s; }
+.rd-note .pool-note { margin: 0; background: oklch(.1 .02 205 / .92); color: #cde; border-top: 1px solid oklch(1 0 0 / .12); }
+.rd-note .pn-txt b { color: #eef; }
+.rd-note .pn-txt small { color: #9ab; }
 
 /* ---------- updates ---------- */
 .upd-box { display: flex; flex-direction: column; gap: 10px; }
