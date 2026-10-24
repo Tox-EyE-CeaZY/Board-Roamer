@@ -902,7 +902,6 @@ export class Viewer {
     const prov = getProvider(p.provider);
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
-    this.bSave.hidden = p.kind === 'flash';
     this.bFav.classList.toggle('on', !!p.faved);
     this.bPin.classList.toggle('on', boards.inAny(postKey(p)));
     this.bPlay.innerHTML = icon(this.playing ? 'pause' : 'play', 19);
