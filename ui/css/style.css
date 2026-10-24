@@ -452,7 +452,10 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 
 /* ------------------------------------------------------------ other views */
 #v-other { overflow-y: auto; display: block; }
-#v-other:has(.gal) { display: flex; }
+#v-other:has(> .pane:not([hidden]) .gal) { display: flex; }
+/* each view's pane is invisible to layout (its children sit in #v-other); a kept page waiting in the background is display:none */
+.pane { display: contents; }
+.pane[hidden] { display: none; }
 .vhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 30px 30px 14px; }
 .vhead h1 { margin: 0; font: 800 clamp(34px, 5vw, 54px)/1 var(--f-display); letter-spacing: -.035em; position: relative; display: inline-block; }
 .vhead h1::after { content: ''; position: absolute; left: 0; bottom: -8px; width: 56%; height: 5px; background: var(--accent); }

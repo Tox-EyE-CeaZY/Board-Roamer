@@ -193,8 +193,9 @@ export function renderFollows(root, ctx) {
     return el;
   };
 
+  const scroller = root.closest('.view') || root; // root is a pane inside the scrolling view
   function paint(keepScroll) {
-    const top = root.scrollTop;
+    const top = scroller.scrollTop;
     const all = subs.all();
     const unseen = subs.unseen();
     sub.textContent = all.length ? `${all.length} artist${all.length === 1 ? '' : 's'}${unseen ? ` · ${unseen} new post${unseen === 1 ? '' : 's'}` : ' · all caught up'}` : 'Follow artists to see what’s new from them';
@@ -226,7 +227,7 @@ export function renderFollows(root, ctx) {
     for (const id of [...cache.keys()]) if (!subs.get(id)) cache.delete(id);
     st.painted = true;
     if (!list.length) host.replaceChildren(h('div', { class: 'empty-state' }, h('h2', {}, 'No match'), h('p', {}, 'Nobody followed matches that filter.')));
-    if (keepScroll) root.scrollTop = top;
+    if (keepScroll && !root.hidden) scroller.scrollTop = top; // parked in the background: leave the view's scroll to what is on screen
   }
 
   bindContext(host, (e) => {
