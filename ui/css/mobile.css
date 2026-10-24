@@ -247,14 +247,14 @@ html.phone .ds-act .ibtn { margin-left: auto; }
 
 
 /* ============================================================ viewer on a phone / touch */
-.v-more, .pn-grab { display: none; }
+.v-more, .v-phone, .pn-grab { display: none; }
 html.touch #viewer { background: oklch(.1 .015 205 / var(--vbg-a, .97)); }
 /* no filter and no cross-fade here: re-blurring a screen-sized layer on every swipe is what made the transition flash and tear */
 html.touch #viewer .vw-bg { inset: 0; filter: none; opacity: .32; transition: none; }
 html.phone #viewer { --peek: calc(66px + var(--safe-b, 0px)); --film: 76px; inset: 0; }
 html.phone #viewer.no-film { --film: 0px; }
 html.phone .v-desk, html.phone .vw-top .vw-sep, html.phone .vw-top .vw-spacer { display: none; }
-html.phone .v-more { display: grid; }
+html.phone .v-more, html.phone .v-phone { display: grid; }
 html.phone .vw-top { height: calc(56px + var(--safe-t, 0px)); padding: var(--safe-t, 0px) 2px 0 2px; gap: 0; }
 html.phone .vw-count { margin: 0 8px 0 2px; font-size: 11px; }
 html.phone .vw-title { flex: 1; min-width: 0; max-width: none; }

@@ -70,13 +70,14 @@ export class Viewer {
     this.bPanel = btn('info', 'Info panel (I)', () => this.togglePanel(), 'v-desk');
     this.bFilm = btn('film', 'Filmstrip (T)', () => this.toggleFilm(), 'v-desk');
     this.bFs = btn('fullscreen', 'Fullscreen (F)', () => this.fullscreen(), 'v-desk');
+    this.bSave = btn('download', 'Download', () => this.download(), 'v-phone'); // phones only: the desktop one sits with the other tools
     this.bMore = btn('more', 'More', (e) => this._moreMenu(e.currentTarget), 'v-more');
     this.scrim = h('div', { class: 'vw-scrim', onclick: () => performance.now() - (this._sheetAt || 0) > 450 && this.closeSheet() }); // (the click that ends the opening tap lands here too)
 
     const top = h('div', { class: 'vw-top' },
       btn('close', 'Close (Esc)', () => this.close()), this.counter, this.title, this.poolBar,
       h('div', { class: 'vw-spacer' }),
-      this.bFav, this.bUp, this.bPin,
+      this.bFav, this.bUp, this.bPin, this.bSave,
       h('span', { class: 'vw-sep' }),
       btn('zoomIn', 'Zoom: fit ⇄ 100% (Z)', () => this.cycleZoom(), 'v-desk'),
       btn('rotate', 'Rotate (R)', () => this.rotate(), 'v-desk'),
@@ -901,6 +902,7 @@ export class Viewer {
     const prov = getProvider(p.provider);
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
+    this.bSave.hidden = p.kind === 'flash';
     this.bFav.classList.toggle('on', !!p.faved);
     this.bPin.classList.toggle('on', boards.inAny(postKey(p)));
     this.bPlay.innerHTML = icon(this.playing ? 'pause' : 'play', 19);
