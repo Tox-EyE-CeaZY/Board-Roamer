@@ -759,6 +759,9 @@ html.fullscreen #titlebar { display: none; }
 .tabs-in-bar .tb-tabs .tab-new { margin-top: 5px; }
 .tabs-in-bar.has-tabs .tb-ctx { display: none; } /* the first tab already says where you are */
 .tb-mark { color: var(--accent); flex: none; }
+.tb-mark { overflow: visible; display: block; }
+.tb-mark path { transform-origin: 20px 20px; transition: transform .9s var(--spring); }
+@media (hover: hover) { .tb-left:hover .tb-mark path { transform: rotate(200deg); } }
 .tb-name { font: 800 10.5px var(--f-mono); letter-spacing: .34em; color: var(--ink); }
 .tb-name i { font-style: normal; color: var(--accent); margin: 0 .15em; }
 .tb-ctx { font: 600 10px var(--f-mono); letter-spacing: .2em; text-transform: uppercase; color: var(--faint); padding-left: 12px; border-left: 1px solid var(--line2); }

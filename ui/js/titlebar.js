@@ -49,7 +49,7 @@ export function initTitlebar() {
   const drag = { onmousedown: (e) => e.button === 0 && e.detail === 1 && send('drag'), ondblclick: () => send('max') };
   bar.append(
     h('div', { class: 'tb-drag tb-left', ...drag },
-      h('svg', { class: 'tb-mark', viewBox: '0 0 40 40', width: 16, height: 16, html: '<rect x="3" y="3" width="34" height="34" fill="none" stroke="currentColor" stroke-width="3"/><path d="M20 8 25 20 20 32 15 20z" fill="var(--accent)"/>' }),
+      h('svg', { class: 'tb-mark', viewBox: '0 0 40 40', width: 16, height: 16, html: '<rect x="3" y="3" width="34" height="34" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="20" cy="20" r="10" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/><path d="M20 8 25 20 20 32 15 20z" fill="var(--accent)"/>' }),
       h('span', { class: 'tb-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER'),
       label),
     h('div', { class: 'tb-tabs' }), // the tab strip moves in here (tabs.js keeps driving it)
