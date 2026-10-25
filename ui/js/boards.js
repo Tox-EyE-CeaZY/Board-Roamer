@@ -1,6 +1,6 @@
 import { h, ago, fmtNum, pretty, download, pickFile, hash01, clamp } from './util.js';
 import { icon } from './icons.js';
-import { boards, postKey, S, exportAll, importAll, tagc, emit, folders } from './store.js';
+import { boards, postKey, S, exportAll, importAll, tagc, emit, folders, on } from './store.js';
 import { newFolder, moveEntry, folderCard, draggableItem, folderMenu } from './folders.js';
 import { getProvider, Feed } from './providers.js';
 import { announce } from './notify.js';
@@ -49,6 +49,19 @@ export async function refreshBoards({ force = false } = {}) {
   for (const b of list) if (boards.get(b.id) && (await checkBoard(boards.get(b.id)))) fresh++;
   running = false;
   if (fresh) announce('boards');
+}
+
+const newLabel = (n) => `${n >= 8 ? '8+' : n} new`;
+
+/** The "N new" mark on a live board's card and its Mark seen button. Repainted in place when a check finds something. */
+function paintNew(el, b) {
+  const n = boards.counts(b) ? b.newCount || 0 : 0;
+  el.classList.toggle('has-new', !!n);
+  el.querySelector('.bc-new')?.remove();
+  el.querySelector('.bc-seen')?.remove();
+  if (!n) return;
+  el.prepend(h('span', { class: 'bc-new', title: `${n} new since you last looked`, html: icon('sparkle', 12) + newLabel(n) }));
+  el.querySelector('.bc-act')?.prepend(h('button', { class: 'bc-seen', title: 'Mark seen', html: icon('check', 15), onclick: (e) => (e.stopPropagation(), boards.markSeen(b.id)) }));
 }
 
 function tagline(b) {
@@ -110,7 +123,7 @@ function card(b, ctx) {
   const stack = coverStack(b);
   const meta = b.kind === 'pins'
     ? h('div', { class: 'bc-meta' }, b.inbox ? h('span', { class: 'quick' }, 'QUICK PIN') : null, `${b.posts.length} pin${b.posts.length === 1 ? '' : 's'}`, h('span', {}, ago(b.updated)))
-    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), b.newCount ? h('span', { class: 'new', title: `${b.newCount} new since you last looked` }, `${b.newCount >= 8 ? '8+' : b.newCount} new`) : null, h('span', {}, b.sources?.length ? `${1 + b.sources.length} sites` : getProvider(b.provider).name));
+    : h('div', { class: 'bc-meta' }, h('span', { class: 'live' }, 'LIVE'), h('span', {}, b.sources?.length ? `${1 + b.sources.length} sites` : getProvider(b.provider).name));
   const chips = b.kind === 'smart'
     ? h('div', { class: 'bc-tags' }, tagline(b).slice(0, 6).map((t) => h('span', {}, t)), b.terms.length > 6 ? h('span', {}, `+${b.terms.length - 6}`) : null)
     : null;
@@ -122,6 +135,7 @@ function card(b, ctx) {
       h('button', { title: 'Delete', html: icon('trash', 15), onclick: async (e) => { e.stopPropagation(); if (await confirmDlg('Delete board?', `“${b.name}” and its ${b.kind === 'pins' ? b.posts.length + ' pins' : 'saved search'} will be removed.`)) { boards.remove(b.id); ctx.refresh(); } } }),
     ),
   );
+  if (b.kind === 'smart') paintNew(el, b);
   el.dataset.hash = b.kind === 'smart' ? ctx.roamHash(b.terms, b.filters, b.provider) : `#/board/${b.id}`;
   const open = () => (b.kind === 'smart' ? ctx.runSmart(b) : ctx.go(`#/board/${b.id}`));
   el.addEventListener('click', open);
@@ -157,9 +171,16 @@ export function renderBoards(root, ctx) {
   const list = boards.all().filter(inFolder);
   const pinBoards = list.filter((b) => b.kind === 'pins').sort((a, c) => (c.inbox ? 1 : 0) - (a.inbox ? 1 : 0) || c.updated - a.updated);
   const live = list.filter((b) => b.kind === 'smart');
+  const sub = h('p');
+  const paintSub = () => {
+    const fresh = live.reduce((n, b) => n + (boards.counts(b) ? b.newCount || 0 : 0), 0);
+    sub.textContent = `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}${fresh ? ` · ${fresh} new post${fresh === 1 ? '' : 's'}` : ''}`;
+  };
+  paintSub();
   const head = h('div', { class: 'vhead' },
-    h('div', {}, h('h1', {}, open ? open.name : 'Boards'), h('p', {}, `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}`)),
+    h('div', {}, h('h1', {}, open ? open.name : 'Boards'), sub),
     h('div', { class: 'vhead-act' },
+      live.length ? h('button', { class: 'btn', title: 'Check your live boards for new posts', html: icon('refresh', 16) + '<span>Refresh</span>', onclick: () => (toast('Checking your live boards…', { ms: 1400 }), refreshBoards({ force: true })) }) : null,
       open ? h('button', { class: 'btn fback', title: 'Back to all boards. Drop a board here to take it out of the folder', html: icon('left', 16) + '<span>All boards</span>', onclick: () => ctx.go('#/boards'),
         ondragover: (e) => e.preventDefault(), ondrop: (e) => { const id = e.dataTransfer.getData('text/x-br-item'); if (id) (boards.update(id, { folder: null }), ctx.refresh()); } }) : null,
       h('button', { class: 'btn', html: icon('folder', 16) + '<span>New folder</span>', onclick: async () => { const f = await newFolder('boards'); if (f) ctx.refresh(); } }),
@@ -187,6 +208,14 @@ export function renderBoards(root, ctx) {
     ...section('Live boards', 'saved searches that refresh themselves', live,
       h('div', { class: 'bhint' }, h('i', { html: icon('compass', 22) }), h('p', {}, 'None yet. Search for something and press the save button (next to the search bar) to keep it here.'))));
   root.replaceChildren(head, grid);
+  // background checks and Mark seen change the counts while you look: repaint them without rebuilding the cards
+  const repaint = () => {
+    if (!grid.isConnected) return offs.forEach((off) => off());
+    live.forEach((b, i) => (live[i] = boards.get(b.id) || b));
+    grid.querySelectorAll('.bcard.live').forEach((el) => { const b = boards.get(el.dataset.id); if (b) paintNew(el, b); });
+    paintSub();
+  };
+  const offs = [on('boards', repaint), on('settings', (e) => e.detail.key === 'boardCounters' && repaint())];
   grid.querySelectorAll('.bcard').forEach((el) => !el.classList.contains('inbox') && draggableItem(el, el.dataset.id));
   bindContext(grid, (e) => {
     const fl = e.target.closest('.fldr');
@@ -211,6 +240,8 @@ export function renderBoards(root, ctx) {
       !b.inbox && { label: 'Colour', icon: 'flame', sub: HUES.map((hue) => ({ label: `Hue ${hue}°`, checked: hue === b.hue, run: () => { boards.update(b.id, { hue }); ctx.refresh(); } })) },
       !b.inbox && { label: 'Duplicate', icon: 'copy', run: dup },
       { label: 'Export this board', icon: 'download', run: () => { download(`board-${b.name.replace(/\W+/g, '-')}.json`, JSON.stringify({ app: 'board-roamer', v: 2, boards: [b] }, null, 1)); toast('Board exported'); } },
+      b.kind === 'smart' && boards.counts(b) && b.newCount && { label: 'Mark seen', icon: 'check', run: () => boards.markSeen(b.id) },
+      b.kind === 'smart' && S('boardCounters') !== false && { label: 'Show new-post counter', icon: 'sparkle', checked: !b.hideNew, run: () => boards.update(b.id, { hideNew: !b.hideNew }) },
       b.kind === 'smart' && ctx.editSources && { label: 'Sites & tags…', icon: 'link', run: () => ctx.editSources(b) },
       b.kind === 'smart' && { label: 'Copy search as text', icon: 'link', run: () => navigator.clipboard.writeText(b.terms.map((t) => (t.op === '+' ? '' : t.op) + t.t).join(' ')) },
       !b.inbox && { sep: true },

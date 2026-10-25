@@ -53,18 +53,20 @@ const NAV = [['roam', 'Roam', 'roam'], ['boards', 'Boards', 'boards'], ['follows
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolBadge = h('b', { class: 'nav-badge', hidden: true });
+const boardBadge = h('b', { class: 'nav-badge', hidden: true });
 
 const markSvg = '<svg class="mark" viewBox="0 0 40 40" width="30" height="30"><rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 3"/><path d="M20 7 24 20 20 33 16 20z" fill="var(--accent)"/><circle cx="20" cy="20" r="2.2" fill="var(--bg)"/></svg>';
 const appbarTitle = h('span', { class: 'ab-title' }, 'Roam');
 const dialMini = h('button', { class: 'dial-mini', 'aria-label': 'Switch source', onclick: () => providerMenu() });
 const tabBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolTabBadge = h('b', { class: 'nav-badge', hidden: true });
+const boardTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const appbar = h('header', { id: 'appbar' },
   h('a', { class: 'ab-brand', href: '#/roam', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
-  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, label), id === 'follows' ? tabBadge : id === 'pools' ? poolTabBadge : null)));
+  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, label), id === 'follows' ? tabBadge : id === 'pools' ? poolTabBadge : id === 'boards' ? boardTabBadge : null)));
 const fab = h('button', { class: 'fab', hidden: true, 'aria-label': 'Back to top', onclick: () => document.querySelector('#v-roam:not([hidden]) .gal, #v-other:not([hidden]) .gal, #v-other:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' }), html: icon('up', 22) });
 const ptr = h('div', { class: 'ptr', 'aria-hidden': 'true', html: icon('refresh', 20) });
 document.body.append(appbar, tabbar, fab);
@@ -76,7 +78,7 @@ function buildRail() {
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
       h('i', { class: 'nav-ind' }),
-      NAV.map(([id, label, ic], n) => h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : null))),
+      NAV.map(([id, label, ic], n) => h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : id === 'boards' ? boardBadge : null))),
     h('div', { class: 'rail-spacer' }),
     dial,
     h('button', { class: 'ibtn', title: 'Cloak screen (`)', html: icon('cloak', 20), onclick: toggleCloak }),
@@ -98,6 +100,15 @@ function paintLocalNav() {
   document.querySelectorAll('[data-view="local"]').forEach((a) => (a.hidden = !onn));
   tabbar.style.setProperty('--tabs', onn ? 6 : 5);
   setActiveNav(parseHash().view);
+}
+
+/** New posts on live boards, summed like Follows. Boards whose counter is off (all, or just that one) don't count. */
+function paintBoardBadge() {
+  const n = boards.unseen();
+  for (const b of [boardBadge, boardTabBadge]) {
+    b.hidden = !n;
+    b.textContent = n > 99 ? '99+' : n;
+  }
 }
 
 function paintFollowBadge() {
@@ -876,10 +887,10 @@ function renderRoutes() {
     chips.push(h('button', { class: 'route follow', title: 'Everything from the artists you follow', html: icon('bell', 14) + `<span>Following · ${mine.length}${fresh ? ` · ${fresh} new` : ''}</span>`, onclick: () => feedOf(mine) }));
   }
   const smart = boards.all().filter((b) => b.kind === 'smart').slice(0, 8).map((b) =>
-    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: b.newCount ? `Live board · ${b.newCount} new` : 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}${b.newCount ? ` · ${b.newCount >= 8 ? '8+' : b.newCount} new` : ''}</span>` }));
+    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: boards.counts(b) && b.newCount ? `Live board · ${b.newCount} new` : 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}${boards.counts(b) && b.newCount ? ` · ${b.newCount >= 8 ? '8+' : b.newCount} new` : ''}</span>` }));
   routesEl.replaceChildren(...chips, ...(smart.length ? [h('i', { class: 'route-sep' })] : []), ...smart);
 }
-on('boards', () => { if (!roam.hidden) renderRoutes(); updateBoardBar(); });
+on('boards', () => { paintBoardBadge(); if (!roam.hidden) renderRoutes(); updateBoardBar(); });
 on('subs', () => { paintFollowBadge(); if (!roam.hidden) renderRoutes(); });
 on('library', paintPoolBadge);
 
@@ -892,6 +903,8 @@ bindContext(routesEl, (e) => {
     { label: 'Run this board', icon: 'compass', run: () => runSmart(b) },
     tabsEnabled() && { label: 'Open in new tab', icon: 'plus', run: () => openTab(roamHashFor(b.terms, b.filters, b.provider), { title: b.name, thumb: (b.cover || [])[0] }) },
     { label: 'Rename', icon: 'edit', run: async () => { const n = await promptText('Rename board', b.name); if (n) boards.update(b.id, { name: n }); } },
+    boards.counts(b) && b.newCount && { label: 'Mark seen', icon: 'check', run: () => boards.markSeen(b.id) },
+    S('boardCounters') !== false && { label: 'Show new-post counter', icon: 'sparkle', checked: !b.hideNew, run: () => boards.update(b.id, { hideNew: !b.hideNew }) },
     { label: 'Sites & tags…', icon: 'link', run: () => editSources(b, () => renderRoutes()) },
     { label: 'Show in Boards', icon: 'boards', run: () => go('#/boards') },
     { sep: true },
@@ -1121,6 +1134,7 @@ on('settings', (e) => {
   if (['blacklist', 'blacklistMode'].includes(k)) rebuildBlacklist();
   if (k === 'provider' && e.detail.value !== prov.id) setProvider(e.detail.value);
   if (k === 'starred') renderRoutes();
+  if (k === 'boardCounters') (renderRoutes(), paintBoardBadge());
 });
 
 const rebuildBlacklist = debounce(() => {
@@ -1366,6 +1380,7 @@ function boot() {
   paintDial();
   paintFollowBadge();
   paintPoolBadge();
+  paintBoardBadge();
   // saved pools and comics are checked for new pages shortly after start, then every half hour
   setTimeout(() => library.all().length && refreshLib().catch(() => {}), 7000);
   setInterval(() => !document.hidden && library.all().length && refreshLib().catch(() => {}), 30 * 60 * 1000);

@@ -69,6 +69,7 @@ export const DEFAULTS = {
   restoreTabs: true, // reopen the tabs from last time
   mainTab: true, // computers: the first tab is a pinned Main tab; what you open from it gets its own tab
   followsFresh: 10, // minutes before Follows re-checks for new posts when you look at it
+  boardCounters: true, // "N new" on live boards, their chips above the gallery and the Boards badge (one board can opt out: board.hideNew)
   openLinks: true, // Android: links to the supported sites offer Board Roamer
   localOn: false, // the Local section: browse pictures and videos in folders you choose, on this and your other devices
   localSort: 'new',
@@ -90,7 +91,7 @@ settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEF
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
 export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'poolMostly', 'poolWarn', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
-  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs'];
+  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters'];
 let settingsT = load('settingsT', {}); // when each synced setting was last changed here
 
 export const S = (k) => settings[k];
@@ -271,8 +272,10 @@ export const boards = {
     boardList.forEach((b) => b.kind === 'smart' && ((b.seenId = b.latestId || 0), (b.newCount = 0)));
     saveBoards();
   },
-  /** How many live boards have posts you have not seen. */
-  unseen: () => boardList.reduce((n, b) => n + (b.kind === 'smart' && b.newCount ? 1 : 0), 0),
+  /** Does this board show its new-post counter? Off everywhere (Settings > Look) or for this board (its menu). */
+  counts: (b) => b?.kind === 'smart' && S('boardCounters') !== false && !b.hideNew,
+  /** How many new posts the live boards that show a counter have, all together. */
+  unseen: () => boardList.reduce((n, b) => n + (boards.counts(b) ? b.newCount || 0 : 0), 0),
 };
 
 /* ---------- follows (artist subscriptions) ---------- */
