@@ -182,6 +182,10 @@ fn main() {
         println!("Board Roamer {}", updater::VERSION);
         return;
     }
+    // where this copy lives, so other apps (Web Roamer) can start it
+    if let Ok(exe) = env::current_exe() {
+        let _ = std::fs::write(os::data_dir().join("exe.path"), exe.to_string_lossy().as_bytes());
+    }
     let browser_mode = args.iter().any(|a| a == "--browser");
     let want_port: u16 = args
         .iter()
