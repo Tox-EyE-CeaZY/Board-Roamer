@@ -164,6 +164,19 @@ pub fn request(mut rq: Request, path: &str) {
             }
             json(rq, 200, serde_json::json!({ "ok": true }));
         }
+        // another app (Web Roamer) hands over a link to a post, search or pool: show the window and go there
+        "/app/open" => {
+            let mut body = String::new();
+            let _ = rq.as_reader().take(4096).read_to_string(&mut body);
+            let link = body.trim();
+            if !(link.starts_with("http://") || link.starts_with("https://")) {
+                return json(rq, 400, serde_json::json!({ "error": "not a link" }));
+            }
+            if let Some(p) = PROXY.get() {
+                let _ = p.send_event(format!("open:{link}"));
+            }
+            json(rq, 200, serde_json::json!({ "ok": true }));
+        }
         "/app/config" => {
             if rq.method() == &Method::Post {
                 let mut body = String::new();

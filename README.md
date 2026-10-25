@@ -102,6 +102,10 @@ On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev li
 
 Press `?` in the app for all shortcuts.
 
+**Handing links over from other apps (Web Roamer):** `board-roamer --open <link>` opens a post, search or pool link from any
+supported site, starting the app if needed. When Board Roamer is already running, the same thing works with
+`POST http://127.0.0.1:4621/app/open` (the link as the request body); the window comes forward and shows it.
+
 ## Notes
 
 - e621 asks API clients to identify themselves: set a User-Agent like `BoardRoamer/0.1 (by yourname on e621)` in
