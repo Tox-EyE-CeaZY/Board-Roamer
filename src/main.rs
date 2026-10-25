@@ -171,11 +171,20 @@ fn build_tray(proxy: EventLoopProxy<String>) -> Option<TrayIcon> {
     TrayIconBuilder::new().with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip("Board Roamer").with_icon(icon).build().ok()
 }
 
+/// Percent-encode a link so it can ride inside the app's `#/open?u=` address.
+fn enc(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--version") {
         println!("Board Roamer {}", updater::VERSION);
         return;
+    }
+    // where this copy lives, so other apps (Web Roamer) can start it
+    if let Ok(exe) = env::current_exe() {
+        let _ = std::fs::write(os::data_dir().join("exe.path"), exe.to_string_lossy().as_bytes());
     }
     let browser_mode = args.iter().any(|a| a == "--browser");
     let want_port: u16 = args
@@ -227,6 +236,13 @@ fn main() {
         }
     }
     let url = format!("http://127.0.0.1:{port}/");
+    // --open <link>: another app (Web Roamer) asks for a post, search or pool to be shown
+    let open_link = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)).filter(|l| l.starts_with("http")).cloned();
+    if let (true, Some(link)) = (already && !browser_mode, &open_link) {
+        if ureq::post(&format!("{url}app/open")).timeout(Duration::from_millis(1500)).send_string(link).is_ok() {
+            return;
+        }
+    }
 
     // Already running (maybe hidden in the tray)? Bring that window forward and leave.
     if already && !browser_mode && !args.iter().any(|a| a == "--background" || a == "--minimized") {
@@ -277,7 +293,10 @@ fn main() {
     let window = wb.build(&event_loop).expect("window");
     let mut ctx = WebContext::new(Some(os::data_dir()));
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
-        .with_url(&url)
+        .with_url(match &open_link {
+            Some(l) => format!("{url}#/open?u={}", enc(l)),
+            None => url.clone(),
+        })
         .with_background_color((10, 17, 19, 255))
         .with_initialization_script(&format!("window.__plat='{}';", os::os_name()))
         .with_ipc_handler(move |req| {
@@ -330,6 +349,13 @@ fn main() {
                         window.set_visible(true);
                         window.set_minimized(false);
                         window.set_focus();
+                    }
+                    c if c.starts_with("open:") => {
+                        window.set_visible(true);
+                        window.set_minimized(false);
+                        window.set_focus();
+                        let link = serde_json::to_string(&enc(&c[5..])).unwrap_or_default();
+                        let _ = webview.evaluate_script(&format!("location.hash='#/open?u='+{link}"));
                     }
                     "drag" => {
                         if window.fullscreen().is_none() {
