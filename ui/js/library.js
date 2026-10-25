@@ -111,7 +111,19 @@ export function renderLibrary(root, ctx) {
     }
   };
 
+  // Cards are kept between repaints: a library check updates every title in turn, and rebuilding the grid each time
+  // made all the covers blink. A card is only rebuilt when something it shows has changed.
+  const cards = new Map();
   const card = (f) => {
+    const rd0 = reading.get(readKey(f));
+    const sig = JSON.stringify([f.name, f.kind, f.cover, f.count, f.updated, f.err, library.newPages(f), rd0 && [rd0.i, rd0.total], f.pid, f.p, f.folder]);
+    const old = cards.get(f.id);
+    if (old && old.sig === sig) return old.el;
+    const el = buildCard(f);
+    cards.set(f.id, { sig, el });
+    return el;
+  };
+  const buildCard = (f) => {
     const prov = provOf(f);
     const n = library.newPages(f);
     const rd = reading.get(readKey(f));
@@ -161,7 +173,9 @@ export function renderLibrary(root, ctx) {
       }
     }
     const list = all.filter(here).filter((f) => !st.q || f.name.toLowerCase().includes(st.q)).sort((a, b) => { const x = sortKey(a), y = sortKey(b); return typeof x === 'string' ? x.localeCompare(y) : x - y; });
-    grid.replaceChildren(...tiles, ...(list.length ? list.map(card) : tiles.length && !st.q && !openFolder ? [] : [h('div', { class: 'empty-state' }, h('h2', {}, st.q ? 'No match' : 'Nothing here yet'), h('p', {}, st.q ? 'Nothing in your library matches that filter.' : 'Right-click a title and choose Move to folder.'))]));
+    for (const id of [...cards.keys()]) if (!library.get(id)) cards.delete(id);
+    const nodes = [...tiles, ...(list.length ? list.map(card) : tiles.length && !st.q && !openFolder ? [] : [h('div', { class: 'empty-state' }, h('h2', {}, st.q ? 'No match' : 'Nothing here yet'), h('p', {}, st.q ? 'Nothing in your library matches that filter.' : 'Right-click a title and choose Move to folder.'))])];
+    if (nodes.length !== grid.children.length || nodes.some((nd, i) => nd !== grid.children[i])) grid.replaceChildren(...nodes);
     grid.querySelectorAll('.lcard').forEach((el) => draggableItem(el, el.dataset.id));
   }
 
