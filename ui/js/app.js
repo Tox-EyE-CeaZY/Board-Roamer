@@ -401,14 +401,55 @@ function noteTabRoute() {
 
 /* Back to a page you scrolled (Follows, Boards, Pools, Trail): it is rebuilt from scratch, so remember where it was.
    Keyed by tab + history depth + hash, i.e. by the history entry itself. */
-const KEEP_SCROLL = ['boards', 'follows', 'pools', 'trail'];
+const KEEP_SCROLL = ['boards', 'trail']; // Pools and Follows are kept whole instead, see mountPane()
 const pageScroll = new Map();
 let onScreen = null; // { key, view } of what applyRoute last put up
 const entryKey = () => `${activeTabId() || ''}|${navDepth}|${location.hash}`;
 
+/* Pools and Follows stay alive while you look at what you opened from them (a pool, an artist), so going back finds them
+   exactly as they were: every page that was loaded, the same scroll, nothing fetched again. Each lives in its own pane in
+   #v-other (per tab; Pools also per site); every other view shares the scratch pane, which is emptied when a kept one returns. */
+const KEEP_ALIVE = { pools: () => prov.id, follows: () => '' };
+const kept = new Map(); // `${tabId}|${view}` -> pane, oldest first
+const scratch = h('div', { class: 'pane' });
+other.append(scratch);
+let shownPane = scratch;
+
+function showPane(pane) {
+  for (const p of other.children) if (p.classList.contains('pane')) p.hidden = p !== pane;
+  if (pane !== scratch) scratch.replaceChildren(); // what was opened from it is gone now, and its listeners with it
+  shownPane = pane;
+}
+
+/** The pane a view renders into; `alive` when it is a kept page coming back as it was (nothing to render). */
+function mountPane(view, wasUp) {
+  const sig = KEEP_ALIVE[view]?.();
+  if (sig === undefined) return showPane(scratch), { root: scratch, alive: false };
+  const key = `${activeTabId() || ''}|${view}`;
+  let pane = kept.get(key);
+  kept.delete(key);
+  if (pane && pane._sig === sig && !(wasUp && pane === shownPane)) { // the same view applied again (a refresh) renders anew
+    kept.set(key, pane);
+    showPane(pane);
+    other.scrollTop = pane._scroll || 0;
+    return { root: pane, alive: true };
+  }
+  pane?.remove();
+  pane = h('div', { class: 'pane' });
+  pane._sig = sig;
+  pane._key = key;
+  other.append(pane);
+  kept.set(key, pane);
+  for (const [k, p] of kept) if (kept.size > 4) p.remove(), kept.delete(k); // a few tabs' worth; the oldest go
+  showPane(pane);
+  return { root: pane, alive: false };
+}
+
 function applyRoute() {
   applyRouteCore();
   noteTabRoute();
+  const k = shownPane._key;
+  if (k?.startsWith('|') && activeTabId()) kept.delete(k), kept.set((shownPane._key = activeTabId() + k), shownPane); // the first tab only exists once noted
   onScreen = { key: entryKey(), view: parseHash().view };
 }
 
@@ -420,6 +461,8 @@ function applyRouteCore() {
   }
   const restore = pendingRestore;
   pendingRestore = null;
+  const wasUp = !other.hidden; // #v-other was on screen (not Roam)
+  if (wasUp && shownPane !== scratch) shownPane._scroll = other.scrollTop; // a hidden pane forgets its scroll
   const { view, id, p } = parseHash();
   setActiveNav(view);
   closePopover();
@@ -451,6 +494,14 @@ function applyRouteCore() {
   st.smartId = null; // leaving Roam ends the "you are inside this board" state
   document.title = 'Board Roamer';
   const ctx = viewCtx();
+  const { root, alive } = mountPane(view, wasUp);
+  if (alive) {
+    boardGal = null;
+    handleRead(null);
+    handlePost(null);
+    if (view === 'follows') refreshAll(); // what rendering it would have done: catch up on stale follows
+    return;
+  }
   if (view === 'pool') {
     const provId = p.get('p') || prov.id;
     if (curPool?.id === id && boardGal) {
@@ -460,7 +511,7 @@ function applyRouteCore() {
     }
     boardGal = null;
     curPool = { id, provId };
-    renderPoolView(other, id, { ...ctx, provId }).then((g) => {
+    renderPoolView(root, id, { ...ctx, provId }).then((g) => {
       if (!g || parseHash().id !== id || parseHash().view !== 'pool') return;
       boardGal = g;
       const q = parseHash().p;
@@ -470,20 +521,20 @@ function applyRouteCore() {
     return;
   }
   handleRead(null);
-  if (view === 'boards') (boardGal = null), renderBoards(other, ctx);
+  if (view === 'boards') (boardGal = null), renderBoards(root, ctx);
   else if (view === 'board') {
-    const g = renderBoard(other, id, ctx);
+    const g = renderBoard(root, id, ctx);
     boardGal = g;
     if (g) requestAnimationFrame(() => handlePost(p.get('post'), g));
   } else if (view === 'local') {
     const key = location.hash.split('?post=')[0].split('&post=')[0];
     if (boardGal && curLocal === key) return handlePost(p.get('post'), boardGal); // only the viewer changed
     curLocal = key;
-    boardGal = renderLocal(other, ctx, { devId: id ? decodeURIComponent(id) : '', rootId: p.get('r') || '', rel: p.get('d') || '' });
+    boardGal = renderLocal(root, ctx, { devId: id ? decodeURIComponent(id) : '', rootId: p.get('r') || '', rel: p.get('d') || '' });
     return handlePost(p.get('post'), boardGal);
-  } else if (view === 'trail') (boardGal = null), renderTrail(other, ctx);
-  else if (view === 'follows') (boardGal = null), renderFollows(other, ctx);
-  else if (view === 'pools') (boardGal = null), renderPools(other, ctx);
+  } else if (view === 'trail') (boardGal = null), renderTrail(root, ctx);
+  else if (view === 'follows') (boardGal = null), renderFollows(root, ctx);
+  else if (view === 'pools') (boardGal = null), renderPools(root, ctx);
   if (view !== 'board') handlePost(null);
 }
 

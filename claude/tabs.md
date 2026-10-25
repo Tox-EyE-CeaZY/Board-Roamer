@@ -73,3 +73,11 @@ Doze/battery savers can delay the job; it is not instant. Live boards store `see
 On Windows and Linux the custom title bar hosts the strip: `initTitlebar()` moves `#tabs` into `.tb-tabs`, to the right of the
 view label, and adds `html.tabs-in-bar`. Dragging the window works on the left block and the filler after the tabs, not on the
 tabs. macOS keeps its native frame and phones have no strip, so there it stays in `.main` / the count button.
+
+## Pools and Follows stay alive (`mountPane()` in `app.js`)
+`#v-other` holds panes (`.pane`, `display: contents`). Pools and Follows each get their own pane per tab (Pools also per site,
+see `KEEP_ALIVE`); every other view renders into the shared scratch pane. Opening a pool / an artist / a board hides the kept pane
+instead of replacing it, so coming back (Back, the pool's arrow, the bottom bar) shows it as it was: loaded pages, "Load more"
+progress, scroll (saved in `pane._scroll`, since a hidden pane loses it). Applying the same view again while it is on screen still
+re-renders. A kept pane stays connected, so its `root.contains(...)` listeners keep updating it in the background. At most 4 kept.
+Render functions must not treat `root` as the scroller: use `root.closest('.view')` (see `follows.js`).
