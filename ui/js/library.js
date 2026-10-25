@@ -111,14 +111,31 @@ export function renderLibrary(root, ctx) {
     }
   };
 
-  const card = (f) => {
+  /* Cards and folder tiles are kept between paints and only rebuilt when something they show changed: the library event
+     fires for every page-count check, and rebuilding everything made each cover fade in again (the whole page flashed). */
+  const kept = new Map(); // key -> { sig, el }
+  const keep = (key, sig, make) => {
+    const k = kept.get(key);
+    if (k && k.sig === sig) return k.el;
+    const el = make(k?.el);
+    kept.set(key, { sig, el });
+    return el;
+  };
+
+  // the picture that is already on screen stays (same node, already faded in) when only the text around it changed
+  const cover_ = (src, prev) => {
+    const old = prev?.querySelector('.pc-cover img');
+    return old && old.getAttribute('src') === src ? old : h('img', { src, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') });
+  };
+
+  const card = (f, prev) => {
     const prov = provOf(f);
     const n = library.newPages(f);
     const rd = reading.get(readKey(f));
     const pct = rd && rd.total ? Math.min(100, ((rd.i + 1) / rd.total) * 100) : 0;
     const go = () => ctx.go(`#/pool/${f.pid}?p=${prov.id}`);
     const cover = h('div', { class: 'pc-cover' },
-      f.cover ? h('img', { src: f.cover, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') }) : h('i', { class: 'pc-ph', html: icon('book', 30) }),
+      f.cover ? cover_(f.cover, prev) : h('i', { class: 'pc-ph', html: icon('book', 30) }),
       n ? h('span', { class: 'lib-new', html: icon('sparkle', 12) + `+${n > 99 ? '99+' : n} new` }) : null,
       pct ? h('i', { class: 'lib-prog', title: `Page ${rd.i + 1} of ${rd.total}` }, h('b', { style: `width:${pct}%` })) : null,
       h('div', { class: 'lib-act' },
@@ -131,6 +148,7 @@ export function renderLibrary(root, ctx) {
     const status = rd && rd.i > 0 ? h('div', { class: 'lib-read' }, rd.i >= rd.total - 1 && !n ? 'Finished' : `Page ${rd.i + 1} of ${rd.total}`) : null;
     const el = h('article', { class: 'pcard lcard' + (n ? ' has-new' : ''), tabindex: 0, 'data-id': f.id, 'data-hash': `#/pool/${f.pid}?p=${prov.id}`, onclick: go, onkeydown: (e) => e.key === 'Enter' && go() },
       cover, h('div', { class: 'pc-info' }, h('h3', {}, f.name), meta, status));
+    draggableItem(el, f.id);
     return el;
   };
 
@@ -140,6 +158,7 @@ export function renderLibrary(root, ctx) {
     sub.textContent = all.length ? `${all.length} saved${n ? ` · ${n} with new pages` : ' · all caught up'}` : '';
     seenBtn.disabled = !n;
     if (!all.length) {
+      kept.clear();
       grid.replaceChildren(h('div', { class: 'empty-state' },
         h('div', { class: 'es-art', html: icon('book', 60) }),
         h('h2', {}, 'Your library is empty'),
@@ -157,12 +176,20 @@ export function renderLibrary(root, ctx) {
     } else if (!st.q) {
       for (const fo of folders.all('library')) {
         const inside = all.filter((x) => x.folder === fo.id);
-        tiles.push(folderCard(fo, { count: inside.length, noun: 'title', covers: inside.map((x) => x.cover).filter(Boolean), onOpen: () => { openFolder = fo.id; paint(); }, onDrop: (id) => library.update(id, { folder: fo.id, folderT: Date.now() }) }));
+        const covers = inside.map((x) => x.cover).filter(Boolean);
+        tiles.push(keep('fo:' + fo.id, JSON.stringify([fo.name, inside.length, covers.slice(0, 3)]), () => folderCard(fo, { count: inside.length, noun: 'title', covers, onOpen: () => { openFolder = fo.id; paint(); }, onDrop: (id) => library.update(id, { folder: fo.id, folderT: Date.now() }) })));
       }
     }
     const list = all.filter(here).filter((f) => !st.q || f.name.toLowerCase().includes(st.q)).sort((a, b) => { const x = sortKey(a), y = sortKey(b); return typeof x === 'string' ? x.localeCompare(y) : x - y; });
-    grid.replaceChildren(...tiles, ...(list.length ? list.map(card) : tiles.length && !st.q && !openFolder ? [] : [h('div', { class: 'empty-state' }, h('h2', {}, st.q ? 'No match' : 'Nothing here yet'), h('p', {}, st.q ? 'Nothing in your library matches that filter.' : 'Right-click a title and choose Move to folder.'))]));
-    grid.querySelectorAll('.lcard').forEach((el) => draggableItem(el, el.dataset.id));
+    const cards = list.map((f) => {
+      const rd = reading.get(readKey(f));
+      return keep('c:' + f.id, JSON.stringify([f.name, f.kind, f.cover, f.count, f.updated, f.err, library.newPages(f), rd && [rd.i, rd.total]]), (prev) => card(f, prev));
+    });
+    const nodes = [...tiles, ...(cards.length ? cards : tiles.length && !st.q && !openFolder ? [] : [h('div', { class: 'empty-state' }, h('h2', {}, st.q ? 'No match' : 'Nothing here yet'), h('p', {}, st.q ? 'Nothing in your library matches that filter.' : 'Right-click a title and choose Move to folder.'))])];
+    const live = new Set(nodes);
+    for (const [k, v] of kept) if (!live.has(v.el)) kept.delete(k); // gone from the list (or filtered out)
+    nodes.forEach((n, i) => grid.children[i] !== n && grid.insertBefore(n, grid.children[i] || null)); // in place: only what moved or is new is touched
+    while (grid.children.length > nodes.length) grid.lastElementChild.remove();
   }
 
   bindContext(grid, (e) => {

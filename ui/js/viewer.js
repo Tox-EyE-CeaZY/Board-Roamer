@@ -1216,7 +1216,7 @@ export class Viewer {
         p.parent ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.parent, 'only') }, '↰ parent #' + p.parent) : null,
         (p.children?.length || p.hasChildren) ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.id, 'only') }, `⧉ children${p.children?.length ? ' (' + p.children.length + ')' : ''}`) : null)) : null,
       p.pools?.length ? h('div', { class: 'ir col' }, h('span', {}, 'Pools'), poolBox) : null,
-      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov })))) : null,
+      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov }))) : null,
     );
   }
 
