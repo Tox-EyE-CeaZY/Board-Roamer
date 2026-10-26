@@ -1,7 +1,9 @@
 name: Build and release
 
 # Every push to main builds everything (so a broken build is noticed straight away).
-# Pushing a tag like v1.4.0 also publishes a GitHub release, which is what the in-app updater looks at.
+# It also publishes the downloads as the GitHub release for the version in Cargo.toml (which is what the in-app updater
+# looks at): the first push of a version creates the release, later pushes of the same version refresh its files.
+# Pushing a tag like v1.4.0 publishes that version instead.
 on:
   push:
     branches: [main]
@@ -100,7 +102,7 @@ jobs:
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             echo "BR_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          elif [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/main ]]; then
             echo "A release needs the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASS secrets (Settings > Secrets and variables > Actions)."
             exit 1
           else
@@ -125,11 +127,13 @@ jobs:
   release:
     name: publish release
     needs: [desktop, android]
-    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ always() && !cancelled() && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -141,11 +145,16 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create the release
+      - name: Create or refresh the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Board Roamer ${GITHUB_REF_NAME#v}" \
-            --generate-notes
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"; fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Board Roamer ${TAG#v}" \
+              --generate-notes
+          fi
