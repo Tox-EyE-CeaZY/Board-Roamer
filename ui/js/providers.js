@@ -305,7 +305,8 @@ const e6 = {
   },
   /** `keep`: never undo a vote that is already there (double-tap likes must only ever add). */
   async setVote(post, score, keep = false) {
-    await call(this, `${this.web}/posts/${post.id}/votes.json?${qs({ score, no_unvote: keep ? 'true' : 'false' })}`, { method: 'POST' });
+    // answers {score, up, down, our_score}: our_score is 1 when the vote now stands, 0 when it was taken back
+    return call(this, `${this.web}/posts/${post.id}/votes.json?${qs({ score, no_unvote: keep ? 'true' : 'false' })}`, { method: 'POST' });
   },
   async accountBlacklist() {
     const c = credsFor(this);

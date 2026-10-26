@@ -1,6 +1,6 @@
 import { h, clamp, fmtNum, fmtBytes, fmtDate, ago, copyText, pretty } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, boards, postKey, tagc } from './store.js';
+import { S, setS, boards, postKey, tagc, saved, voted } from './store.js';
 import { CATS, CAT_LABEL, getProvider, isBlurred } from './providers.js';
 import { toast, stamp, closePopover } from './ui.js';
 import { pinContent, pinPopover, quickPin } from './pins.js';
@@ -72,6 +72,7 @@ export class Viewer {
     this.bFilm = btn('film', 'Filmstrip (T)', () => this.toggleFilm(), 'v-desk');
     this.bFs = btn('fullscreen', 'Fullscreen (F)', () => this.fullscreen(), 'v-desk');
     this.bSave = btn('download', 'Download', () => this.download(), 'v-phone'); // phones only: the desktop one sits with the other tools
+    this.bSaveDesk = btn('download', 'Download to your Downloads folder (S)', () => this.download(), 'v-desk');
     this.bMore = btn('more', 'More', (e) => this._moreMenu(e.currentTarget), 'v-more');
     this.scrim = h('div', { class: 'vw-scrim', onclick: () => performance.now() - (this._sheetAt || 0) > 450 && this.closeSheet() }); // (the click that ends the opening tap lands here too)
 
@@ -84,7 +85,7 @@ export class Viewer {
       btn('rotate', 'Rotate (R)', () => this.rotate(), 'v-desk'),
       this.bFs, this.bPlay, this.bFilm,
       h('span', { class: 'vw-sep' }),
-      btn('download', 'Download to your Downloads folder (S)', () => this.download(), 'v-desk'),
+      this.bSaveDesk,
       btn('copy', 'Copy post link (C)', () => this.copyLink(), 'v-desk'),
       btn('external', 'Open on site (O)', () => this.openSite(), 'v-desk'),
       this.bPanel,
@@ -759,7 +760,7 @@ export class Viewer {
     }
     const jobs = [];
     if (prov.fav && !p.faved) jobs.push(prov.setFav(p, true).then(() => { p.faved = true; p.favs += 1; this._paintToggles(); }));
-    if (prov.vote && !p._voted) jobs.push(prov.setVote(p, 1, true).then(() => { Object.defineProperty(p, '_voted', { value: true, enumerable: false, writable: true, configurable: true }); }));
+    if (prov.vote && !voted.has(p)) jobs.push(prov.setVote(p, 1, true).then(() => { voted.set(p, true); this._paintToggles(); }));
     if (!jobs.length) return;
     try {
       await Promise.all(jobs);
@@ -913,6 +914,8 @@ export class Viewer {
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
     this.bFav.classList.toggle('on', !!p.faved);
+    this.bUp.classList.toggle('on', voted.has(p));
+    for (const b of [this.bSave, this.bSaveDesk]) { b.classList.toggle('on', saved.has(p)); b.title = saved.has(p) ? 'Already downloaded (S)' : 'Download to your Downloads folder (S)'; }
     this.bPin.classList.toggle('on', boards.inAny(postKey(p)));
     this.bPlay.innerHTML = icon(this.playing ? 'pause' : 'play', 19);
     this.bPlay.classList.toggle('on', this.playing);
@@ -965,15 +968,20 @@ export class Viewer {
     const c = (S('creds') || {})[prov.credKey];
     if (!c?.user || !c?.key) return toast('Add your username + API key in Settings to vote.', { kind: 'err' });
     try {
-      await prov.setVote(p, 1);
-      toast('Upvoted', { ms: 1200 });
+      const r = await prov.setVote(p, 1);
+      const on = r?.our_score != null ? r.our_score > 0 : !voted.has(p);
+      voted.set(p, on);
+      toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1200 });
+      this._paintToggles();
     } catch (e) {
       toast(e.message, { kind: 'err' });
     }
   }
 
-  download() {
-    this.hooks.savePost?.(this.post);
+  download(again = false) {
+    const p = this.post;
+    if (saved.has(p) && !again) return void toast('Already downloaded', { action: { label: 'Download again', run: () => this.download(true) }, ms: 3500 });
+    Promise.resolve(this.hooks.savePost?.(p)).finally(() => this._paintToggles());
   }
 
   copyLink() {
