@@ -95,6 +95,12 @@ export class Viewer {
     this.root.append(this.bg, top, h('div', { class: 'vw-main' }, this.stage, this.panel), this.film, this.prog, this.scrim);
     this.root.hidden = true;
 
+    // nothing behind the lightbox may scroll: a wheel turn or drag only scrolls an element inside it that can still move that way (the info panel, the filmstrip)
+    this.root.addEventListener('wheel', (e) => this._holdScroll(e, e.deltaY, e.deltaX), { passive: false, capture: true });
+    let ty = 0, tx = 0;
+    this.root.addEventListener('touchstart', (e) => { ty = e.touches[0].clientY; tx = e.touches[0].clientX; }, { passive: true, capture: true });
+    this.root.addEventListener('touchmove', (e) => { if (e.touches.length === 1 && !e.target.closest('.vw-stage')) this._holdScroll(e, ty - e.touches[0].clientY, tx - e.touches[0].clientX); }, { passive: false, capture: true });
+
     const s = this.stage;
     s.addEventListener('wheel', (e) => this._wheel(e), { passive: false });
     s.addEventListener('pointerdown', (e) => this._pdown(e));
@@ -136,7 +142,20 @@ export class Viewer {
   }
 
   /* ============================================================ open / close */
+  /** Let the event scroll only an element inside the viewer that can still move in that direction; swallow it otherwise so it cannot chain to the page behind. */
+  _holdScroll(e, dy, dx) {
+    if (e.ctrlKey || !this.open_) return;
+    for (let el = e.target; el && el !== this.root; el = el.parentElement) {
+      if (el.nodeType !== 1) continue;
+      const cs = getComputedStyle(el);
+      if (dy && /auto|scroll/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1 && (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1)) return;
+      if (dx && /auto|scroll/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1 && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return;
+    }
+    if (e.cancelable) e.preventDefault();
+  }
+
   async open(list, index, fromRect) {
+    document.documentElement.classList.add('viewing');
     this.list = list;
     this.stack = [];
     this.poolCtx = null;
@@ -157,6 +176,7 @@ export class Viewer {
   close() {
     if (!this.open_) return;
     this.open_ = false;
+    document.documentElement.classList.remove('viewing');
     this.stopSlideshow();
     closePopover();
     document.removeEventListener('keydown', this._onKey, true);
