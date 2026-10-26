@@ -1,6 +1,6 @@
 import { h, sleep } from './util.js';
 import { icon } from './icons.js';
-import { S, postKey } from './store.js';
+import { S, postKey, saved } from './store.js';
 import { getProvider } from './providers.js';
 import { toast } from './ui.js';
 import { isAndroid, native } from './platform.js';
@@ -28,12 +28,14 @@ export async function savePost(p, { dir = '', name = '' } = {}) {
     // the Android shell downloads, embeds the metadata and files it under Downloads/Board Roamer
     const r = await native.save(p.full, name || fileName(p), dir, S('embedMeta') ? metaOf(p) : null, S('ua'));
     lastMeta = r.meta;
+    saved.add(p);
     return r.path;
   }
   const r = await fetch(`/save?u=${encodeURIComponent(p.full)}&name=${encodeURIComponent(name || fileName(p))}${dir ? '&dir=' + encodeURIComponent(dir) : ''}`, { method: 'POST', headers: { 'x-br-ua': S('ua') || '', 'content-type': 'application/json' }, body: S('embedMeta') ? JSON.stringify(metaOf(p)) : '' });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || 'download failed');
   lastMeta = j.meta;
+  saved.add(p);
   return j.path;
 }
 

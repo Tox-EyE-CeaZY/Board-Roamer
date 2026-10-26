@@ -408,6 +408,9 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 }
 .pinmark { position: absolute; right: 8px; top: 8px; width: 24px; height: 24px; display: none; place-items: center; background: var(--accent); color: var(--accent-ink); }
 .tile.pinned .pinmark { display: grid; }
+.savedmark { position: absolute; left: 8px; bottom: 8px; width: 20px; height: 20px; display: none; place-items: center; background: var(--accent); color: var(--accent-ink); pointer-events: none; }
+.tile.saved .savedmark { display: grid; }
+@media (hover: hover) { .tile.saved:hover .savedmark { display: none; } }
 @media (hover: hover) {
   .tile.pinned:hover .pinmark { display: none; }
 }
