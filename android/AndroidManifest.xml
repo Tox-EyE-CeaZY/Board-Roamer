@@ -69,6 +69,117 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Home screen widgets: Following, Library and Local, each in a few layouts. -->
+        <receiver
+            android:name=".WidgetProviders$FollowStrip"
+            android:exported="false"
+            android:label="@string/w_follow_strip">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_follow_strip" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$FollowList"
+            android:exported="false"
+            android:label="@string/w_follow_list">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_follow_list" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$FollowSummary"
+            android:exported="false"
+            android:label="@string/w_follow_summary">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_follow_summary" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LibraryGrid"
+            android:exported="false"
+            android:label="@string/w_library_grid">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_library_grid" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LibraryList"
+            android:exported="false"
+            android:label="@string/w_library_list">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_library_list" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LibraryFeature"
+            android:exported="false"
+            android:label="@string/w_library_feature">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_library_feature" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LocalGrid"
+            android:exported="false"
+            android:label="@string/w_local_grid">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_local_grid" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LocalList"
+            android:exported="false"
+            android:label="@string/w_local_list">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_local_list" />
+        </receiver>
+        <receiver
+            android:name=".WidgetProviders$LocalRow"
+            android:exported="false"
+            android:label="@string/w_local_row">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/w_local_row" />
+        </receiver>
+
+        <activity
+            android:name=".WidgetConfig"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".ShareService"
             android:exported="false"

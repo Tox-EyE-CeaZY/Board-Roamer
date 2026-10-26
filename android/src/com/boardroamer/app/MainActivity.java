@@ -316,6 +316,11 @@ public class MainActivity extends Activity {
     private void handleIntent(Intent i) {
         if (i == null) return;
         String s = null;
+        if (Widgets.ACTION_OPEN.equals(i.getAction())) { // a tap on a home screen widget: it names the screen to open
+            String hash = i.getStringExtra("hash");
+            pendingHash = hash != null && hash.startsWith("#/") && hash.length() < 2000 ? hash : "";
+            return;
+        }
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getData() != null) s = i.getDataString();
         else if (Intent.ACTION_SEND.equals(i.getAction())) s = i.getStringExtra(Intent.EXTRA_TEXT);
         pendingHash = hashFor(s);

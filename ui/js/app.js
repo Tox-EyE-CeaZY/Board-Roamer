@@ -3,6 +3,7 @@ import { icon } from './icons.js';
 import { S, setS, on, emit, NEW_CAP, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
 import { refreshLib } from './library.js';
 import { startWatch } from './watch.js';
+import { startWidgets } from './widgets.js';
 import { renderLocal } from './local.js';
 import { MultiFeed } from './multi.js';
 import { editSources } from './sources.js';
@@ -1437,6 +1438,7 @@ function boot() {
   setTimeout(() => library.all().length && refreshLib().catch(() => {}), 7000);
   setInterval(() => !document.hidden && library.all().length && refreshLib().catch(() => {}), 30 * 60 * 1000);
   startWatch();
+  startWidgets();
   if (isAndroid()) { native.setLinks(S('openLinks') !== false); on('settings', (e) => e.detail.key === 'openLinks' && native.setLinks(S('openLinks') !== false)); }
   setTimeout(() => refreshBoards().catch(() => {}), 9000);
   setInterval(() => refreshBoards().catch(() => {}), 30 * 60 * 1000);
