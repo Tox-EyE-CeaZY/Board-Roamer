@@ -2,7 +2,7 @@ import { h, download, pickFile, copyText, ago } from './util.js';
 import { RELEASES_URL } from './version.js';
 import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
 import { icon } from './icons.js';
-import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs } from './store.js';
+import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs, saved } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
 import { segmented, toast, confirmDlg, dialog } from './ui.js';
 import { sendTest } from './notify.js';
@@ -40,6 +40,12 @@ export function openSettings(section) {
     const i = h('input', { type: 'range', min, max, step, value: S(key), oninput: () => { setS(key, +i.value); out.textContent = fmt(+i.value); } });
     return h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), out), i);
   };
+  const savedNote = h('div', { class: 'st-note' });
+  const refreshSavedNote = () => {
+    const n = saved.count(), kb = saved.bytes() / 1024;
+    savedNote.textContent = n ? `${n.toLocaleString()} saved post${n === 1 ? '' : 's'} remembered, using ${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB on this device.` : 'No saved posts remembered yet.';
+  };
+  refreshSavedNote();
   const seg = (label, key, opts, hint) => h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, label), hint ? h('small', {}, hint) : null), segmented(opts, S(key), (v) => setS(key, v)));
 
   /* --- local files */
@@ -338,8 +344,11 @@ export function openSettings(section) {
         h('button', { class: 'btn', onclick: () => download('board-roamer-backup.json', exportAll()) }, 'Export backup'),
         h('button', { class: 'btn', onclick: async () => { const f = await pickFile('.json'); if (!f) return; try { importAll(await f.text()); toast('Imported — reloading…'); setTimeout(() => location.reload(), 700); } catch (e) { toast(e.message, { kind: 'err' }); } } }, 'Import backup'),
         h('button', { class: 'btn', onclick: () => fetch('/open?reveal=downloads', { method: 'POST' }) }, 'Downloads folder')),
+      h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'Remember what you saved'), h('small', {}, 'Posts you saved to Downloads get a small mark in galleries. The list is only post numbers, so keeping it costs next to nothing')), segmented([['never', 'Keep it'], ['monthly', 'Forget after a month']], S('savedClear'), (v) => { setS('savedClear', v); saved.prune(); refreshSavedNote(); })),
+      savedNote,
       h('div', { class: 'row-btns' },
         h('button', { class: 'btn', onclick: () => (wipe('tags'), toast('Tag memory cleared')) }, 'Forget tag info'),
+        h('button', { class: 'btn', onclick: () => { saved.clear(); refreshSavedNote(); toast('Saved-posts memory cleared'); } }, 'Forget saved posts'),
         h('button', { class: 'btn', onclick: () => (wipe('trail'), toast('Trail cleared')) }, 'Clear trail'),
         h('button', { class: 'btn danger', onclick: () => { Object.keys(DEFAULTS).forEach((k) => k !== 'creds' && k !== 'blacklist' && setS(k, structuredClone(DEFAULTS[k]))); toast('Settings reset — reloading…'); setTimeout(() => location.reload(), 700); } }, 'Reset settings'))),
   );

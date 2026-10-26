@@ -620,6 +620,7 @@ const viewer = new Viewer($('#viewer'), {
   readPool: (id, postId) => readPool(id, postId, viewer.post?.provider),
 });
 on('pins-changed', () => { refreshMarks(); });
+on('saved', () => refreshMarks());
 function refreshMarks() {
   gal.refreshMarks();
   boardGal?.refreshMarks();

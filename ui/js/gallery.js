@@ -1,6 +1,6 @@
 import { h, clamp, fmtNum, fmtDur, pretty } from './util.js';
 import { icon } from './icons.js';
-import { S, postKey, boards } from './store.js';
+import { S, postKey, boards, saved } from './store.js';
 import { blacklistHit, compileBlacklist, isBlurred } from './providers.js';
 import { showMenu } from './ctxmenu.js';
 import { isPhone, isLandscape } from './platform.js';
@@ -245,6 +245,7 @@ export class Gallery {
     for (const [i, el] of this.live) {
       const it = this.items[i];
       el.classList.toggle('pinned', boards.inAny(postKey(it.post)));
+      el.classList.toggle('saved', saved.has(it.post));
     }
   }
 
@@ -260,6 +261,7 @@ export class Gallery {
     const el = h('div', { class: 'tile', 'data-i': i, style: `transform:translate(${r.x}px,${r.y}px);width:${r.w}px;height:${r.h}px` });
     el.classList.toggle('sel', this.sel.has(key));
     el.classList.toggle('pinned', boards.inAny(key));
+    el.classList.toggle('saved', saved.has(p));
     const clip = h('div', { class: 'tile-clip' });
     if (it.hit && !it.revealed) {
       el.classList.add('veiled');
@@ -295,6 +297,7 @@ export class Gallery {
         h('div', { class: 'badges' }, badges),
         this.numbered ? h('span', { class: 'pgn' }, i + 1) : null,
         h('i', { class: 'pinmark', html: icon('pin', 13) }),
+        h('i', { class: 'savedmark', title: 'Saved to Downloads', html: icon('download', 12) }),
         h('i', { class: 'selbox', html: icon('check', 14) }),
         h('div', { class: 'tile-meta' },
           h('span', { class: 'm-art' }, p.artists[0] ? pretty(p.artists[0]) : '#' + p.id),

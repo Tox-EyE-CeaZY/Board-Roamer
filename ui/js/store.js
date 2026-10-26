@@ -79,6 +79,7 @@ export const DEFAULTS = {
   notifyPools: true,
   notifyNames: false, // say which followed artists posted, instead of just "your follows"
   autoUpdate: true, // look for a newer version on GitHub now and then
+  savedClear: 'never', // never | monthly: forget posts saved more than 30 days ago (the list of saved posts is tiny, so the default keeps it forever)
   poolsTab: 'browse', // browse | library
   libSort: 'updates',
   subSort: 'latest',
@@ -115,6 +116,39 @@ export const poolUnblur = {
   },
   /** Is this post a page of a pool that was unblurred as a whole? */
   covers: (post) => !!unblurPools.size && !!post.pools?.some((id) => unblurPools.has(`${post.provider}:${id}`)),
+};
+
+/* ---------- posts saved to Downloads (per device) ---------- */
+const DAY = 86400_000, SAVED_KEEP = 30;
+/** {provider id: {post id: day number}}: about 15 bytes a post, so even 50,000 saves stay under 1 MB. */
+let savedMap = load('saved', {});
+const savedDay = () => Math.floor(Date.now() / DAY);
+const savedPrune = () => {
+  if (settings.savedClear !== 'monthly') return;
+  const cut = savedDay() - SAVED_KEEP;
+  for (const pid of Object.keys(savedMap)) {
+    for (const id of Object.keys(savedMap[pid])) if (savedMap[pid][id] < cut) delete savedMap[pid][id];
+    if (!Object.keys(savedMap[pid]).length) delete savedMap[pid];
+  }
+  save('saved', savedMap);
+};
+savedPrune();
+export const saved = {
+  has: (p) => !!savedMap[p.provider]?.[p.id],
+  add(p) {
+    (savedMap[p.provider] ||= {})[p.id] = savedDay();
+    save('saved', savedMap);
+    emit('saved', { key: postKey(p) });
+  },
+  count: () => Object.values(savedMap).reduce((n, m) => n + Object.keys(m).length, 0),
+  /** Roughly what it takes up in this device's storage. */
+  bytes: () => (localStorage.getItem(NS + 'saved') || '').length * 2,
+  clear() {
+    savedMap = {};
+    save('saved', savedMap);
+    emit('saved', {});
+  },
+  prune: savedPrune,
 };
 
 /* ---------- post helpers ---------- */
