@@ -1,6 +1,6 @@
 import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, on, emit, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
+import { S, setS, on, emit, NEW_CAP, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
 import { refreshLib } from './library.js';
 import { startWatch } from './watch.js';
 import { renderLocal } from './local.js';
@@ -104,10 +104,10 @@ function paintLocalNav() {
 
 /** New posts on live boards, summed like Follows. Boards whose counter is off (all, or just that one) don't count. */
 function paintBoardBadge() {
-  const n = boards.unseen();
+  const { n, more } = boards.unseen();
   for (const b of [boardBadge, boardTabBadge]) {
     b.hidden = !n;
-    b.textContent = n > 99 ? '99+' : n;
+    b.textContent = n > 99 ? '99+' : n + (more ? '+' : '');
   }
 }
 
@@ -939,7 +939,7 @@ function renderRoutes() {
     chips.push(h('button', { class: 'route follow', title: 'Everything from the artists you follow', html: icon('bell', 14) + `<span>Following · ${mine.length}${fresh ? ` · ${fresh} new` : ''}</span>`, onclick: () => feedOf(mine) }));
   }
   const smart = boards.all().filter((b) => b.kind === 'smart').slice(0, 8).map((b) =>
-    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: boards.counts(b) && b.newCount ? `Live board · ${b.newCount} new` : 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}${boards.counts(b) && b.newCount ? ` · ${b.newCount >= 8 ? '8+' : b.newCount} new` : ''}</span>` }));
+    h('button', { class: 'route smart', 'data-board': b.id, style: `--bh:${b.hue}`, title: boards.counts(b) && b.newCount ? `Live board · ${b.newCount} new` : 'Live board', onclick: () => runSmart(b), html: icon('compass', 14) + `<span>${b.name.replace(/</g, '&lt;')}${boards.counts(b) && b.newCount ? ` · ${b.newCount >= NEW_CAP ? NEW_CAP + '+' : b.newCount} new` : ''}</span>` }));
   routesEl.replaceChildren(...chips, ...(smart.length ? [h('i', { class: 'route-sep' })] : []), ...smart);
 }
 on('boards', () => { paintBoardBadge(); if (!roam.hidden) renderRoutes(); updateBoardBar(); });
