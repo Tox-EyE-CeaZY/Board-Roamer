@@ -1,6 +1,6 @@
 import { h, ago, fmtNum, pretty, download, pickFile, hash01, clamp } from './util.js';
 import { icon } from './icons.js';
-import { boards, postKey, S, exportAll, importAll, tagc, emit, folders, on } from './store.js';
+import { boards, postKey, S, exportAll, importAll, tagc, emit, folders, on, NEW_CAP } from './store.js';
 import { newFolder, moveEntry, folderCard, draggableItem, folderMenu } from './folders.js';
 import { getProvider, Feed } from './providers.js';
 import { announce } from './notify.js';
@@ -51,7 +51,7 @@ export async function refreshBoards({ force = false } = {}) {
   if (fresh) announce('boards');
 }
 
-const newLabel = (n) => `${n >= 8 ? '8+' : n} new`;
+const newLabel = (n) => `${n >= NEW_CAP ? NEW_CAP + '+' : n} new`;
 
 /** The "N new" mark on a live board's card and its Mark seen button. Repainted in place when a check finds something. */
 function paintNew(el, b) {
@@ -173,8 +173,8 @@ export function renderBoards(root, ctx) {
   const live = list.filter((b) => b.kind === 'smart');
   const sub = h('p');
   const paintSub = () => {
-    const fresh = live.reduce((n, b) => n + (boards.counts(b) ? b.newCount || 0 : 0), 0);
-    sub.textContent = `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}${fresh ? ` · ${fresh} new post${fresh === 1 ? '' : 's'}` : ''}`;
+    const { n, more } = boards.unseen(live);
+    sub.textContent = `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}${n ? ` · ${n}${more ? '+' : ''} new post${n === 1 && !more ? '' : 's'}` : ''}`;
   };
   paintSub();
   const head = h('div', { class: 'vhead' },
