@@ -156,5 +156,6 @@ jobs:
             gh release create "$TAG" dist/* \
               --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "Board Roamer ${TAG#v}" \
-              --generate-notes
+              --generate-notes \
+              --notes "Android: Android or Play Protect may warn that the app is from an unknown source or not commonly installed. That is normal for an app installed outside Google Play. The APK asks for All files access (only for Settings > Local) and Install unknown apps (only for in-app updates). Details are in the README."
           fi

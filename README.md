@@ -20,6 +20,20 @@ Grab the latest build from the [Releases page](../../releases/latest):
 The Android APK is universal: one file for ARM and x86 phones, tablets and emulators.
 `SHA256SUMS.txt` lists the checksum of every file.
 
+**Android's "unsafe" / "unknown app" warnings.** Board Roamer is installed from GitHub rather than Google Play, so Android
+(and Google Play Protect) may warn that the app is from an unknown source or "isn't commonly installed". That is expected for any
+sideloaded app and is not a sign of malware. It is also signed with the project's own key, not a Play key. The APK asks for two
+sensitive permissions, and both are used only for the features below:
+
+- **All files access** (`MANAGE_EXTERNAL_STORAGE`): only for Settings → Local, so you can browse folders you pick and, if you
+  choose, share them with your other devices. It is off until you turn Local on, and the app never reads other folders.
+- **Install unknown apps** (`REQUEST_INSTALL_PACKAGES`): only for Settings → Updates, which downloads the new APK from this
+  project's releases, checks it against `SHA256SUMS.txt` and hands it to Android's installer.
+
+It also uses the internet, notifications, start-at-boot (to keep follow checks and sharing running) and a foreground service
+("Sharing with your devices"). If Play Protect asks, choose **More details → Install anyway**. You can verify the download
+against `SHA256SUMS.txt` first.
+
 **Background.** On a computer, closing the window keeps Board Roamer running in the system tray (menu bar on macOS), so
 your phone can still sync with it. Settings → Background lets you turn that off, start the app when you sign in, and choose
 whether it starts closed (tray only), minimized or open. Quit from the tray icon. Opening the app again brings the window back.
