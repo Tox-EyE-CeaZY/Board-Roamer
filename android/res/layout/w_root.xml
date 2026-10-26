@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/w_bg_classic">
+
+    <LinearLayout
+        android:id="@+id/inner"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:id="@+id/head"
+            android:layout_width="match_parent"
+            android:layout_height="26dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="3dp"
+            android:paddingEnd="3dp">
+
+            <ImageView
+                android:id="@+id/h_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_bell" />
+
+            <TextView
+                android:id="@+id/h_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.14"
+                android:singleLine="true"
+                android:text="BOARD ROAMER"
+                android:textColor="#a2bbb1"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <FrameLayout
+                android:id="@+id/h_pill"
+                android:layout_width="wrap_content"
+                android:layout_height="18dp"
+                android:minWidth="18dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/h_pill_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY"
+                    android:src="@drawable/w_pill" />
+
+                <TextView
+                    android:id="@+id/h_pill_txt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:paddingStart="7dp"
+                    android:paddingEnd="7dp"
+                    android:singleLine="true"
+                    android:textColor="#0b1500"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/body"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical" />
+    </LinearLayout>
+</FrameLayout>

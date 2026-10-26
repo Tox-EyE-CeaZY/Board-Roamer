@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Board Roamer</string>
+    <string name="w_follow_strip">Following: strip</string>
+    <string name="w_follow_strip_desc">Faces of the artists you follow, with new-post counts.</string>
+    <string name="w_follow_list">Following: list</string>
+    <string name="w_follow_list_desc">Your follows with how many new posts each has.</string>
+    <string name="w_follow_summary">Following: count</string>
+    <string name="w_follow_summary_desc">One number: new posts from everyone you follow.</string>
+    <string name="w_library_grid">Library: covers</string>
+    <string name="w_library_grid_desc">Covers of the pools and comics you saved, with new pages.</string>
+    <string name="w_library_list">Library: list</string>
+    <string name="w_library_list_desc">Saved pools and comics with their new pages.</string>
+    <string name="w_library_feature">Library: next up</string>
+    <string name="w_library_feature_desc">The saved title with new pages, as a big cover.</string>
+    <string name="w_local_grid">Local: folders</string>
+    <string name="w_local_grid_desc">Folders on this phone and your other devices, one tap away.</string>
+    <string name="w_local_list">Local: list</string>
+    <string name="w_local_list_desc">Your Local folders as a list, with the device each is on.</string>
+    <string name="w_local_row">Local: row</string>
+    <string name="w_local_row_desc">A single row of Local folders.</string>
 </resources>

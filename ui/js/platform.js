@@ -95,6 +95,8 @@ export const native = {
   notify: (title, body) => call('notify', title, body),
   /** Hand the background job its watch list (JSON), see watch.js. */
   setWatch: (json) => call('setWatch', json),
+  /** Hand the home screen widgets what they show (JSON), see widgets.js. */
+  setWidgets: (json) => call('setWidgets', json),
   /** Local files on the phone: is access to files allowed, ask for it, and tell the shell how to reach the desktop and other devices. */
   localAccess: () => (has('localAccess') ? !!call('localAccess') : true),
   requestLocalAccess: () => call('requestLocalAccess'),

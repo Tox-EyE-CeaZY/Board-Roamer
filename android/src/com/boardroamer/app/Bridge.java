@@ -281,6 +281,10 @@ final class Bridge {
     @JavascriptInterface
     public void setWatch(String json) { Watch.update(a, json); }
 
+    /** What the home screen widgets show (see Widgets). */
+    @JavascriptInterface
+    public void setWidgets(String json) { Widgets.update(a, json); }
+
     @JavascriptInterface public void setImmersive(boolean on) { a.runOnUiThread(() -> a.applyImmersive(on)); }
     @JavascriptInterface public void setOrientation(String mode) { a.runOnUiThread(() -> a.setOrientationMode(mode)); }
     @JavascriptInterface public void setBars(String colorHex, boolean lightIcons) { a.runOnUiThread(() -> a.setBars(colorHex, lightIcons)); }

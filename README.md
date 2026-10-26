@@ -151,6 +151,12 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   boards and pools you open from it get their own tabs (Settings → Look → *Pinned Main tab*). *Follows freshness* sets how soon
   Follows re-checks for new posts. Each tab keeps its own Back trail: pressing Back (or the mouse's back button) at the start
   of a tab closes it and returns you to the tab you opened it from.
+- **Home screen widgets** (Android): nine widgets in three families. *Following* (strip, list, count) shows the artists you follow
+  with their new-post counts, *Library* (covers, list, next up) shows your saved pools and comics with new pages, and *Local*
+  (folders, list, row) opens your chosen folders on this phone or another synced device. Each tap opens that screen in the app. When you add one,
+  pick its look: the app's square outlined style, or fully rounded corners that follow One UI (the default on Samsung phones). Pictures from
+  adult sources stay hidden unless you allow them, and nothing shows pictures while Blur thumbnails is on. Widgets refresh when the app updates
+  your follows and library, so open the app now and then.
 - **Links from the sites**: on Android, links to posts, searches and pools on any supported site offer Board Roamer (Settings → Links
   turns that off, and opens Android's "Open by default" screen where "Open supported links" makes it automatic). On any device,
   pasting such a link into the search box opens it. Derpibooru works without an account; an API key is optional and brings your own filter.

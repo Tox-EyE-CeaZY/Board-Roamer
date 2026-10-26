@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/w_bg_classic"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/e_msg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="Open Board Roamer to load this widget."
+        android:textColor="#a2bbb1"
+        android:textSize="13sp" />
+</FrameLayout>
