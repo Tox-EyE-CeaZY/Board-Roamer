@@ -151,6 +151,16 @@ export const saved = {
   prune: savedPrune,
 };
 
+/* ---------- posts you upvoted from here (per device): the site's post lists don't say, so it is remembered ---------- */
+const votedSet = new Set(load('voted', []));
+export const voted = {
+  has: (p) => votedSet.has(postKey(p)),
+  set(p, on) {
+    on ? votedSet.add(postKey(p)) : votedSet.delete(postKey(p));
+    save('voted', [...votedSet]);
+  },
+};
+
 /* ---------- post helpers ---------- */
 export const postKey = (p) => `${p.provider}:${p.id}`;
 
