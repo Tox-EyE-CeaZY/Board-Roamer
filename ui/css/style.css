@@ -787,8 +787,8 @@ html.fullscreen #titlebar { display: none; }
 .tabs-in-bar .tb-tabs .tab-i.on { background: var(--bg3); }
 .tabs-in-bar .tb-tabs .tab-new { margin-top: 5px; }
 .tabs-in-bar.has-tabs .tb-ctx { display: none; } /* the first tab already says where you are */
-.tb-mark { color: var(--accent); flex: none; }
-.tb-mark { overflow: visible; display: block; }
+.tb-mark { color: var(--accent); flex: none; display: grid; }
+.tb-mark svg { overflow: visible; display: block; }
 .tb-mark path { transform-origin: 20px 20px; transition: transform .9s var(--spring); }
 @media (hover: hover) { .tb-left:hover .tb-mark path { transform: rotate(200deg); } }
 .tb-name { font: 800 10.5px var(--f-mono); letter-spacing: .34em; color: var(--ink); }
