@@ -17,6 +17,7 @@ import android.graphics.Shader;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.RemoteViews;
 
 import org.json.JSONArray;
@@ -166,7 +167,7 @@ final class Widgets {
             try {
                 WidgetProviders.Base p = (WidgetProviders.Base) k.getDeclaredConstructor().newInstance();
                 for (int id : ids) render(c, m, id, p.kind(), p.layout());
-            } catch (Throwable ignored) { /* one widget failing must not stop the others */ }
+            } catch (Throwable e) { Log.w("BoardRoamer", "widget refresh failed", e); }
         }
     }
 
@@ -192,7 +193,19 @@ final class Widgets {
         try { return Color.parseColor(d.optString(key)); } catch (Throwable e) { return fallback; }
     }
 
+    /** All the pictures of one widget travel to the launcher in a single binder call (about 1 MB at most), so they share this many pixels. */
+    private static final int PX_BUDGET = 150_000;
+
     static void render(Context c, AppWidgetManager mgr, int id, Kind kind, Layout layout) {
+        try {
+            render(c, mgr, id, kind, layout, PX_BUDGET);
+        } catch (RuntimeException e) { // too big for the launcher after all: again with far smaller pictures
+            Log.w("BoardRoamer", "widget " + id + " retry smaller", e);
+            try { render(c, mgr, id, kind, layout, PX_BUDGET / 6); } catch (RuntimeException e2) { Log.w("BoardRoamer", "widget " + id + " failed", e2); }
+        }
+    }
+
+    private static void render(Context c, AppWidgetManager mgr, int id, Kind kind, Layout layout, int budget) {
         String pkg = c.getPackageName();
         JSONObject d = data(c);
         boolean round = round(c, id);
@@ -226,10 +239,16 @@ final class Widgets {
         JSONArray items = kind == Kind.FOLLOW ? d.optJSONArray("follows") : kind == Kind.LIBRARY ? d.optJSONArray("library") : d.optJSONArray("local");
         int n = items == null ? 0 : items.length();
         int pics = pics(c, id);
+        int gCols = layout == Layout.GRID ? clamp((int) (iw / 80), 2, 5) : clamp((int) (iw / 70), 1, 6);
+        int gRows = layout == Layout.GRID ? clamp((int) (ih / 92), 1, 4) : 1;
+        int lRows = clamp((int) (ih / 50), 1, 6);
+        int slots = layout == Layout.LIST ? lRows : layout == Layout.FEATURE ? 1 : gCols * gRows;
+        int maxPx = budget / Math.max(1, Math.min(n, slots));
         boolean blur = d.optBoolean("blur");
 
         if (n == 0 && layout != Layout.SUMMARY) {
             RemoteViews e = new RemoteViews(pkg, rid(c, "layout", "w_empty"));
+            e.setInt(rid(c, "id", "empty"), "setBackgroundColor", 0); // the widget's own background is already behind it
             e.setTextViewText(rid(c, "id", "e_msg"), kind == Kind.FOLLOW ? "Follow an artist in Board Roamer and their new posts show up here."
                 : kind == Kind.LIBRARY ? "Save a pool or comic to your library and its new pages show up here."
                 : d.has("v") ? "Turn on Local in Settings and choose folders to open them from here." : "Open Board Roamer to load this widget.");
@@ -264,7 +283,7 @@ final class Widgets {
                 for (int i = 0; i < n; i++) if (items.optJSONObject(i).optInt("new") > 0) { it = items.optJSONObject(i); break; }
                 RemoteViews f = new RemoteViews(pkg, rid(c, "layout", "w_feature"));
                 int nw = it.optInt("new");
-                f.setImageViewBitmap(rid(c, "id", "f_img"), picture(c, it, round, showPic(it, pics, blur), (int) iw, (int) (h - 2 * pad), accent));
+                f.setImageViewBitmap(rid(c, "id", "f_img"), picture(c, it, round, showPic(it, pics, blur), (int) iw, (int) (h - 2 * pad), accent, maxPx));
                 f.setTextViewText(rid(c, "id", "f_kicker"), nw > 0 ? "NEW PAGES" : "IN YOUR LIBRARY");
                 f.setTextColor(rid(c, "id", "f_kicker"), accent);
                 f.setTextViewText(rid(c, "id", "f_title"), it.optString("n"));
@@ -274,7 +293,7 @@ final class Widgets {
                 break;
             }
             case LIST: {
-                int rows = clamp((int) (ih / 50), 1, 6);
+                int rows = lRows;
                 for (int i = 0; i < Math.min(n, rows); i++) {
                     JSONObject it = items.optJSONObject(i);
                     RemoteViews l = new RemoteViews(pkg, rid(c, "layout", "w_line"));
@@ -285,7 +304,7 @@ final class Widgets {
                         l.setTextViewText(rid(c, "id", "l_t2"), it.optString("sub"));
                         pill(c, l, "l_pill", null, accent, ink);
                     } else {
-                        l.setImageViewBitmap(rid(c, "id", "l_img"), picture(c, it, round, showPic(it, pics, blur), 44, 44, accent));
+                        l.setImageViewBitmap(rid(c, "id", "l_img"), picture(c, it, round, showPic(it, pics, blur), 44, 44, accent, maxPx));
                         int nw = it.optInt("new");
                         l.setTextViewText(rid(c, "id", "l_t2"), kind == Kind.FOLLOW ? (nw > 0 ? nw + " new" : "Up to date") + (it.optString("site").isEmpty() ? "" : " · " + it.optString("site"))
                             : (nw > 0 ? nw + " new pages" : it.optInt("count") + " pages"));
@@ -299,8 +318,7 @@ final class Widgets {
             }
             default: { // STRIP and GRID: tiles (pictures) or chips (folders), side by side
                 boolean grid = layout == Layout.GRID;
-                int cols = grid ? clamp((int) (iw / 80), 2, 5) : clamp((int) (iw / 70), 1, 6);
-                int rows = grid ? clamp((int) (ih / 92), 1, 4) : 1;
+                int cols = gCols, rows = gRows;
                 float tw = iw / cols - 6, th = ih / rows - 6;
                 int at = 0;
                 for (int r = 0; r < rows && at < n; r++) {
@@ -319,7 +337,7 @@ final class Widgets {
                             t.setOnClickPendingIntent(rid(c, "id", "chip"), open(c, id, slot++, it.optString("hash", sectionHash)));
                         } else {
                             t = new RemoteViews(pkg, rid(c, "layout", "w_tile"));
-                            t.setImageViewBitmap(rid(c, "id", "t_img"), picture(c, it, round, showPic(it, pics, blur), (int) tw, (int) th, accent));
+                            t.setImageViewBitmap(rid(c, "id", "t_img"), picture(c, it, round, showPic(it, pics, blur), (int) tw, (int) th, accent, maxPx));
                             int nw = it.optInt("new");
                             pill(c, t, "t_pill", nw > 0 ? (nw > 99 ? "99+" : String.valueOf(nw)) : null, accent, ink);
                             t.setTextViewText(rid(c, "id", "t_label"), it.optString("n"));
@@ -358,9 +376,9 @@ final class Widgets {
      * The tile's picture, cropped to the shape it will be shown in and with rounded corners (none in the classic look).
      * Without a picture (not downloaded yet, hidden, or none) it is the item's initial on a dark tile.
      */
-    private static Bitmap picture(Context c, JSONObject it, boolean round, boolean show, int wDp, int hDp, int accent) {
+    private static Bitmap picture(Context c, JSONObject it, boolean round, boolean show, int wDp, int hDp, int accent, int maxPx) {
         float dens = c.getResources().getDisplayMetrics().density;
-        float scale = Math.min(1f, 320f / Math.max(1f, Math.max(wDp, hDp) * dens));
+        float scale = Math.min(Math.min(1f, 320f / Math.max(1f, Math.max(wDp, hDp) * dens)), (float) Math.sqrt(maxPx / Math.max(1f, wDp * dens * hDp * dens)));
         int w = Math.max(24, (int) (wDp * dens * scale)), h = Math.max(24, (int) (hDp * dens * scale));
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(out);
