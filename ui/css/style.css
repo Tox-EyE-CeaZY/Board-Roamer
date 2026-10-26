@@ -1212,6 +1212,7 @@ html.touch .sync-addr, html.touch .sync-code { min-height: 48px; }
 .fl-thumbs { display: flex; gap: 4px; height: 54px; }
 .fl-thumbs img { height: 100%; aspect-ratio: 1; object-fit: cover; background: var(--bg3); }
 .fl-meta { font: 500 11px var(--f-mono); color: var(--faint); }
+.fl-new { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; font: 800 10px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; background: var(--accent); color: var(--accent-ink); white-space: nowrap; }
 .pgrid > .fldr { align-self: start; }
 .fback { display: inline-flex; align-items: center; gap: 6px; }
 html.phone .fgrid { padding: 12px 14px 0; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

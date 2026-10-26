@@ -185,7 +185,7 @@ export const folders = {
 let boardList = load('boards', []);
 const saveBoards = () => (save('boards', boardList), emit('boards'));
 const INBOX = 'pins';
-export const NEW_CAP = 8; // a board's check looks at its newest 8 posts, so "8 new" really means 8 or more
+export const NEW_CAP = 40; // a board's check looks at its newest 40 posts, so "40 new" really means 40 or more
 // repair boards saved by older builds (a cached Set was serialised into every pinned post as "{}")
 let repaired = false;
 for (const b of boardList) for (const p of b.posts || []) if (p && '_set' in p) (delete p._set, (repaired = true));
@@ -277,7 +277,7 @@ export const boards = {
   counts: (b) => b?.kind === 'smart' && S('boardCounters') !== false && !b.hideNew,
   /**
    * New posts across the live boards that show a counter, as the cards show them: a check only looks at the newest
-   * few posts, so one board counts 8 at most and is "8+". Same rule for the badge and the Boards header.
+   * few posts, so one board counts 40 at most and is "40+". Same rule for the badge and the Boards header.
    */
   unseen: (list = boardList) => list.reduce((t, b) => {
     const n = boards.counts(b) ? Math.min(b.newCount || 0, NEW_CAP) : 0;

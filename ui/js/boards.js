@@ -24,7 +24,7 @@ export async function checkBoard(b) {
     const prov = getProvider(b.provider);
     const ratings = S('filters').ratings;
     const feed = new Feed(prov, b.terms, { ...S('filters'), ...b.filters, order: '', ratings: { ...ratings, ...(b.filters || {}).ratings } });
-    feed.limit = 8;
+    feed.limit = NEW_CAP; // enough to count a busy board properly; a handful would read "8 new" when there are 20
     const posts = (await prov.page(feed)).filter((p) => feed.filters.ratings[p.rating]).sort((x, y) => y.id - x.id);
     const latest = posts[0];
     const patch = { checked: Date.now(), err: '' };
@@ -51,7 +51,7 @@ export async function refreshBoards({ force = false } = {}) {
   if (fresh) announce('boards');
 }
 
-const newLabel = (n) => `${n >= NEW_CAP ? NEW_CAP + '+' : n} new`;
+const newLabel = (n, more = n >= NEW_CAP) => `${n}${more ? '+' : ''} new`;
 
 /** The "N new" mark on a live board's card and its Mark seen button. Repainted in place when a check finds something. */
 function paintNew(el, b) {
@@ -62,6 +62,14 @@ function paintNew(el, b) {
   if (!n) return;
   el.prepend(h('span', { class: 'bc-new', title: `${n} new since you last looked`, html: icon('sparkle', 12) + newLabel(n) }));
   el.querySelector('.bc-act')?.prepend(h('button', { class: 'bc-seen', title: 'Mark seen', html: icon('check', 15), onclick: (e) => (e.stopPropagation(), boards.markSeen(b.id)) }));
+}
+
+/** A folder says how many new posts are waiting on the live boards inside it, so they can't hide in there. */
+function paintFolderNew(el, f) {
+  el.querySelector('.fl-new')?.remove();
+  const { n, more } = boards.unseen(boards.all().filter((b) => b.folder === f.id));
+  if (!n) return;
+  el.querySelector('.fl-top').append(h('span', { class: 'fl-new', title: `${n}${more ? '+' : ''} new posts in the live boards inside`, html: icon('sparkle', 12) + newLabel(n, more) }));
 }
 
 function tagline(b) {
@@ -173,8 +181,10 @@ export function renderBoards(root, ctx) {
   const live = list.filter((b) => b.kind === 'smart');
   const sub = h('p');
   const paintSub = () => {
-    const { n, more } = boards.unseen(live);
-    sub.textContent = `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}${n ? ` · ${n}${more ? '+' : ''} new post${n === 1 && !more ? '' : 's'}` : ''}`;
+    // at the top level this is every live board, folders included, so it adds up to the badge next to Boards
+    const { n, more } = boards.unseen(open ? live : boards.all());
+    const inFolders = open ? 0 : boards.unseen(boards.all().filter((b) => !inFolder(b))).n;
+    sub.textContent = `${pinBoards.length} pin board${pinBoards.length === 1 ? '' : 's'} · ${live.length} live search${live.length === 1 ? '' : 'es'}${n ? ` · ${n}${more ? '+' : ''} new post${n === 1 && !more ? '' : 's'}${inFolders ? ` (${inFolders} in folders)` : ''}` : ''}`;
   };
   paintSub();
   const head = h('div', { class: 'vhead' },
@@ -195,12 +205,14 @@ export function renderBoards(root, ctx) {
   ];
   const folderTiles = open ? [] : folders.all('boards').map((f) => {
     const inside = boards.all().filter((x) => x.folder === f.id);
-    return folderCard(f, {
+    const el = folderCard(f, {
       count: inside.length, noun: 'board',
       covers: inside.map((x) => (x.kind === 'pins' ? x.posts[0]?.thumb : (x.cover || [])[0])).filter(Boolean),
       onOpen: () => ctx.go('#/boards?f=' + f.id),
       onDrop: (id) => { boards.update(id, { folder: f.id }); ctx.refresh(); },
     });
+    paintFolderNew(el, f);
+    return el;
   });
   const grid = h('div', { class: 'bwrap' },
     ...(folderTiles.length ? [h('div', { class: 'bsec' }, h('h3', {}, 'Folders'), h('span', {}, 'drag a board onto a folder, or right-click it and choose Move to folder')), h('div', { class: 'fgrid' }, folderTiles)] : []),
@@ -213,6 +225,7 @@ export function renderBoards(root, ctx) {
     if (!grid.isConnected) return offs.forEach((off) => off());
     live.forEach((b, i) => (live[i] = boards.get(b.id) || b));
     grid.querySelectorAll('.bcard.live').forEach((el) => { const b = boards.get(el.dataset.id); if (b) paintNew(el, b); });
+    grid.querySelectorAll('.fldr').forEach((el) => { const f = folders.get(el.dataset.folder); if (f) paintFolderNew(el, f); });
     paintSub();
   };
   const offs = [on('boards', repaint), on('settings', (e) => e.detail.key === 'boardCounters' && repaint())];
