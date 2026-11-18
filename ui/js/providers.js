@@ -64,27 +64,46 @@ const e6thumb = (md5, kind, ext) => `https://static1.e621.net/data/${kind ? kind
 /* ------------------------------------------------------------------ normalizers */
 function normE6(p, prov) {
   if (!p || p.flags?.deleted) return null;
+  // e621 changed its JSON in Nov 2026 (`files` instead of `file`, flat `tags`, `stats`); read both shapes.
+  const files = p.files || {};
   const f = p.file || {};
-  const md5 = f.md5;
-  const full = f.url || (md5 ? e6thumb(md5, '', f.ext) : null);
+  const meta = files.meta || {};
+  const md5 = f.md5 || meta.md5;
+  const ext = f.ext || meta.ext;
+  const orig = files.original || {};
+  const w = f.width || orig.width, h = f.height || orig.height;
+  const full = f.url || orig.url || (md5 && ext ? e6thumb(md5, '', ext) : null);
   if (!full) return null;
-  const kind = mediaKind(f.ext);
+  const kind = mediaKind(ext);
   const tags = {};
-  for (const c of CATS) tags[c] = p.tags?.[c] ? [...p.tags[c]] : [];
+  for (const c of CATS) tags[c] = [];
+  if (Array.isArray(p.tags)) {
+    for (const t of p.tags) {
+      const k = tagc.get(prov.id, t);
+      (tags[k && k.cat !== 'general' && tags[k.cat] ? k.cat : 'general']).push(t);
+    }
+  } else for (const c of CATS) tags[c] = p.tags?.[c] ? [...p.tags[c]] : [];
   const artists = tags.artist.filter((a) => !SKIP_ARTISTS.has(a));
+  const hasSample = p.sample ? !!p.sample.has : !!(p.has?.sample ?? meta.has_sample);
+  const sampleUrl = p.sample?.url || files.sample?.jpg || files.sample?.webp;
+  const st = p.stats || {};
+  const sc = p.score || st.score || {};
   return {
-    provider: prov.id, id: p.id, rating: ratingOf(p.rating), w: f.width, h: f.height, ext: f.ext, kind, md5, size: f.size,
-    thumb: p.preview?.url || (md5 ? e6thumb(md5, 'preview', 'jpg') : full),
-    sample: p.sample?.has ? p.sample.url : kind === 'image' ? full : null,
+    provider: prov.id, id: p.id, rating: ratingOf(p.rating), w, h, ext, kind, md5, size: f.size || meta.size,
+    thumb: p.preview?.url || files.preview?.jpg || files.preview?.webp || (md5 ? e6thumb(md5, 'preview', 'jpg') : full),
+    sample: hasSample && sampleUrl ? sampleUrl : kind === 'image' ? full : null,
     full,
-    score: p.score?.total ?? 0, up: p.score?.up ?? 0, down: p.score?.down ?? 0, favs: p.fav_count ?? 0,
+    score: sc.total ?? 0, up: sc.up ?? 0, down: sc.down ?? 0, favs: p.fav_count ?? st.fav_count ?? 0,
     tags, artists, sources: p.sources || [], created: p.created_at, desc: p.description || '',
     parent: p.relationships?.parent_id || null, children: p.relationships?.children || [], pools: p.pools || [],
-    duration: p.duration || 0, comments: p.comment_count || 0, faved: !!p.is_favorited, url: `${prov.web}/posts/${p.id}`,
-    alts: kind === 'video' ? Object.entries(p.sample?.alternates || {}).filter(([, v]) => v?.urls?.some(Boolean)).map(([k, v]) => ({ label: k, url: v.urls.find(Boolean), w: v.width, h: v.height })) : [],
+    duration: p.duration || meta.duration || 0, comments: p.comment_count ?? st.comment_count ?? 0, faved: !!(p.is_favorited ?? st.is_favorited), url: `${prov.web}/posts/${p.id}`,
+    alts: kind === 'video' ? Object.entries(p.sample?.alternates || files.sample?.alternates || {}).filter(([, v]) => v?.urls?.some(Boolean)).map(([k, v]) => ({ label: k, url: v.urls.find(Boolean), w: v.width, h: v.height })) : [],
     isComic: tags.general.includes('comic') || tags.meta.includes('comic'),
   };
 }
+
+/** posts.json used to be {posts:[...]}; it is now a bare array. */
+const e6list = (j) => (Array.isArray(j) ? j : j?.posts || []);
 
 function normDb(p, prov) {
   const full = p.file_url || p.large_file_url;
@@ -217,15 +236,44 @@ const e6 = {
     if (useCursor) feed.cursor && (q.page = 'b' + feed.cursor);
     else q.page = feed.pageNo;
     const j = await call(this, `${this.web}/posts.json?${qs(q)}`);
-    const raw = j.posts || [];
+    const raw = e6list(j);
     if (useCursor && raw.length) feed.cursor = Math.min(...raw.map((p) => p.id));
     feed.pageNo++;
     if (!raw.length || (!useCursor && feed.pageNo > this.pageNumberCap)) feed.done = true;
-    return raw.map((p) => normE6(p, this)).filter(Boolean);
+    const posts = raw.map((p) => normE6(p, this)).filter(Boolean);
+    await this.resolveCats(posts, 5);
+    return posts;
   },
   async post(id) {
     const j = await call(this, `${this.web}/posts/${id}.json`);
-    return normE6(j.post, this);
+    const p = normE6(j.post || j, this);
+    if (p) await this.resolveCats([p], 2);
+    return p;
+  },
+  /** e621's post JSON no longer groups tags by category: look unknown ones up in batches (cached in tagc) and regroup. */
+  async resolveCats(posts, maxCalls = 3) {
+    const unknown = new Set();
+    for (const p of posts) for (const t of p.tags.general) if (!tagc.get(this.id, t)) unknown.add(t);
+    const names = [...unknown];
+    for (let i = 0, n = 0; i < names.length && n < maxCalls; i += 100, n++) {
+      try {
+        const j = await call(this, `${this.web}/tags.json?${qs({ 'search[name]': names.slice(i, i + 100).join(','), limit: 100 })}`);
+        for (const t of Array.isArray(j) ? j : []) tagc.set(this.id, t.name, { cat: E6_CAT[t.category] || 'general', count: t.post_count });
+      } catch {
+        break;
+      }
+    }
+    for (const p of posts) {
+      const keep = [];
+      for (const t of p.tags.general) {
+        const k = tagc.get(this.id, t);
+        if (k && k.cat !== 'general' && p.tags[k.cat]) p.tags[k.cat].push(t);
+        else keep.push(t);
+      }
+      p.tags.general = keep;
+      p.artists = p.tags.artist.filter((a) => !SKIP_ARTISTS.has(a));
+      p.isComic = p.tags.general.includes('comic') || p.tags.meta.includes('comic');
+    }
   },
   async autocomplete(q) {
     const j = await call(this, `${this.web}/tags/autocomplete.json?${qs({ 'search[name_matches]': q, expiry: 7 })}`);
@@ -256,7 +304,7 @@ const e6 = {
     const got = new Map();
     for (let page = 1; page <= 12 && got.size < pool.ids.length; page++) {
       const j = await call(this, `${this.web}/posts.json?${qs({ tags: `pool:${pool.id}`, limit: 320, page })}`);
-      const raw = j.posts || [];
+      const raw = e6list(j);
       for (const r of raw) {
         const n = normE6(r, this);
         if (n) got.set(n.id, n);
@@ -292,7 +340,7 @@ const e6 = {
       const chunk = ids.slice(i, i + 30);
       const tags = chunk.length === 1 ? `id:${chunk[0]}` : chunk.map((x) => `~id:${x}`).join(' ');
       const j = await call(this, `${this.web}/posts.json?${qs({ tags, limit: 40 })}`);
-      for (const r of j.posts || []) {
+      for (const r of e6list(j)) {
         const n = normE6(r, this);
         if (n) out.push(n);
       }
