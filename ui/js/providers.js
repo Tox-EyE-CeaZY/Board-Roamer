@@ -241,13 +241,14 @@ const e6 = {
     feed.pageNo++;
     if (!raw.length || (!useCursor && feed.pageNo > this.pageNumberCap)) feed.done = true;
     const posts = raw.map((p) => normE6(p, this)).filter(Boolean);
-    await this.resolveCats(posts, 5);
+    // Categories fill in behind the scenes (each lookup waits in e621's 2-requests-a-second queue); never hold the page for them.
+    this.resolveCats(posts, 2).catch(() => {});
     return posts;
   },
   async post(id) {
     const j = await call(this, `${this.web}/posts/${id}.json`);
     const p = normE6(j.post || j, this);
-    if (p) await this.resolveCats([p], 2);
+    if (p) await this.resolveCats([p], 1);
     return p;
   },
   /** e621's post JSON no longer groups tags by category: look unknown ones up in batches (cached in tagc) and regroup. */
