@@ -168,6 +168,7 @@ export function renderFollows(root, ctx) {
     return el;
   };
 
+  const order = () => [...host.querySelectorAll('.fcard')].map((e) => e.dataset.id); // what is on screen, top to bottom
   const card = (f) => {
     const prov = getProvider(f.p);
     const thumbs = (f.thumbs || []).slice(0, 4);
@@ -186,7 +187,7 @@ export function renderFollows(root, ctx) {
       st.selecting ? h('i', { class: 'fc-sel', html: icon('check', 14) }) : null);
     const open = () => {
       if (st.selecting) { st.sel.has(f.id) ? st.sel.delete(f.id) : st.sel.add(f.id); return paint(true); }
-      ctx.openFollow(f);
+      ctx.openFollow(f, order());
     };
     el.addEventListener('click', open);
     el.addEventListener('keydown', (e) => e.key === 'Enter' && open());
@@ -238,7 +239,7 @@ export function renderFollows(root, ctx) {
     const prov = getProvider(f.p);
     return [
       { header: pretty(f.t) },
-      { label: 'Open', icon: 'eye', run: () => ctx.openFollow(f) },
+      { label: 'Open', icon: 'eye', run: () => ctx.openFollow(f, order()) },
       ctx.tabsOn?.() && { label: 'Open in new tab', icon: 'plus', run: () => ctx.openTab(el.dataset.hash, pretty(f.t), f.thumbs?.[0]) },
       f.newCount && { label: 'Mark seen', icon: 'check', run: () => subs.markSeen(f.id) },
       { label: 'Check now', icon: 'refresh', run: () => checkSub(f).then(() => toast('Checked', { ms: 1000 })) },
