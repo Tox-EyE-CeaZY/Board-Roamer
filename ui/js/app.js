@@ -453,7 +453,7 @@ function applyRoute() {
   const k = shownPane._key;
   if (k?.startsWith('|') && activeTabId()) kept.delete(k), kept.set((shownPane._key = activeTabId() + k), shownPane); // the first tab only exists once noted
   onScreen = { key: entryKey(), view: parseHash().view };
-  paintWalk();
+  paintWalk(true);
 }
 
 function applyRouteCore() {
@@ -1040,8 +1040,13 @@ function walkLeave(toast_) {
   else go('#/follows');
 }
 
-function paintWalk() {
-  if (walk && !walkValid()) walk = null; // you searched for something else: the walk is over
+/** `strict` is a route change: if it no longer shows the walked artist the walk is over. A `subs` update (the background
+ *  checks fire constantly) must never end it, or it dies between starting the walk and the page switching to Roam. */
+function paintWalk(strict = false) {
+  if (walk && !walkValid()) {
+    if (!strict) return;
+    walk = null; // you searched for something else, or left: the walk is over
+  }
   document.body.classList.toggle('walking', !!walk);
   if (!walk) return void (walkBar.hidden = true);
   const f = subs.get(walk.ids[walk.i]);
