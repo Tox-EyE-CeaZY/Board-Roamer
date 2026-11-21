@@ -21,6 +21,9 @@ export const M = {
   enterPool: () => {},
   openPoolPage: () => {},
   readPool: () => {},
+  poolInfo: async () => null, // (provId, id) -> pool
+  poolInLibrary: () => false, // (provId, id)
+  toggleLibPool: () => {}, // (provId, pool, post)
   pin: () => {}, // (posts, x, y)
   share: () => {},
 };
@@ -100,11 +103,21 @@ export function postMenu(post, { gallery, open, viewer } = {}) {
   if (post.parent) rel.push({ label: `Parent  #${post.parent}`, icon: 'up', run: () => M.tagAction('parent:' + post.parent, 'only', post.provider) });
   if (post.children?.length || post.hasChildren) rel.push({ label: 'Children', icon: 'down', run: () => M.tagAction('parent:' + post.id, 'only', post.provider) });
   for (const id of post.pools || []) {
-    rel.push({ label: `Pool #${id}`, icon: post.isComic ? 'book' : 'pool', sub: [
-      { label: 'Browse pool', icon: 'pool', run: () => M.openPoolPage(id, post.provider) },
-      { label: 'Step through in viewer', icon: 'eye', run: () => M.enterPool(id, post.id, post.provider) },
-      post.isComic && { label: 'Read as comic', icon: 'book', run: () => M.readPool(id, post.id, post.provider) },
-    ] });
+    const pi = M.poolInfo(post.provider, id).catch(() => null);
+    rel.push({
+      label: `Pool #${id}`, icon: post.isComic ? 'book' : 'pool',
+      labelP: pi.then((pl) => pl && `${pl.name} (${pl.count})`),
+      get sub() {
+        const inLib = M.poolInLibrary(post.provider, id);
+        return [
+          { label: inLib ? 'Remove from library' : 'Add to library', icon: 'folder', run: () => pi.then((pl) => pl && M.toggleLibPool(post.provider, pl, post)) },
+          { sep: true },
+          { label: 'Browse pool', icon: 'pool', run: () => M.openPoolPage(id, post.provider) },
+          { label: 'Step through in viewer', icon: 'eye', run: () => M.enterPool(id, post.id, post.provider) },
+          post.isComic && { label: 'Read as comic', icon: 'book', run: () => M.readPool(id, post.id, post.provider) },
+        ];
+      },
+    });
   }
   if (rel.length) items.push({ sep: true }, ...rel);
   if (post.artists[0]) {
