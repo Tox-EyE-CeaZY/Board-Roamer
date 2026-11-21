@@ -155,6 +155,7 @@ const status = h('div', { class: 'status' });
 const routesEl = h('div', { class: 'routes' });
 const dossierEl = h('div', { class: 'dossier-host' });
 const boardBar = h('div', { class: 'boardbar', hidden: true });
+const walkBar = h('div', { class: 'walkbar', hidden: true });
 const layoutSeg = h('div', { class: 'layout-seg' }, [['masonry', 'masonry'], ['rows', 'rows'], ['grid', 'grid']].map(([v, ic]) =>
   h('button', { 'data-v': v, title: v[0].toUpperCase() + v.slice(1) + ' layout', html: icon(ic, 17), onclick: () => setS('layout', v) })));
 const sizeSlider = h('input', { type: 'range', min: 130, max: 520, step: 10, title: 'Tile size', value: S('density'), oninput: debounce((e) => setS('density', +e.target.value), 60) });
@@ -175,7 +176,7 @@ const bar = selBar(gal, [
 ]);
 roam.append(
   h('div', { class: 'tbar' }, status, h('div', { class: 'tools' }, layoutBtn, layoutSeg, sizeSlider, selBtn, topBtn)),
-  ptr, boardBar, routesEl, dossierEl, scroller, bar);
+  ptr, walkBar, boardBar, routesEl, dossierEl, scroller, bar);
 
 function toggleSelect() {
   const cur = currentGallery();
@@ -452,6 +453,7 @@ function applyRoute() {
   const k = shownPane._key;
   if (k?.startsWith('|') && activeTabId()) kept.delete(k), kept.set((shownPane._key = activeTabId() + k), shownPane); // the first tab only exists once noted
   onScreen = { key: entryKey(), view: parseHash().view };
+  paintWalk();
 }
 
 function applyRouteCore() {
@@ -944,7 +946,7 @@ function renderRoutes() {
   routesEl.replaceChildren(...chips, ...(smart.length ? [h('i', { class: 'route-sep' })] : []), ...smart);
 }
 on('boards', () => { paintBoardBadge(); if (!roam.hidden) renderRoutes(); updateBoardBar(); });
-on('subs', () => { paintFollowBadge(); if (!roam.hidden) renderRoutes(); });
+on('subs', () => { paintWalk(); paintFollowBadge(); if (!roam.hidden) renderRoutes(); });
 on('library', paintPoolBadge);
 
 bindContext(routesEl, (e) => {
@@ -981,17 +983,85 @@ function feedOf(list) {
   navigateRoam({ terms: pick.map((x) => ({ t: x.t, op: pick.length === 1 ? '+' : '~' })), filters: { ...defaultFilters(), order: '' }, provider: pv.id });
 }
 
-function openFollow(f) {
+/* ---------- walking through what's new
+   Opening an artist from Follows starts a walk: Next / Previous step through the artists with new posts, in the order
+   Follows shows them, in the direction with more still to see (open the bottom, oldest alert and you climb towards the
+   newest; open the top one and you go down). The list is fixed when you start, so marking things seen along the way
+   doesn't reshuffle it. Steps replace the history entry, so one Back returns to Follows. */
+let walk = null; // { ids: [follow id], i, seen: Map(id -> seenId when the walk began), pid }
+
+function openFollow(f, shown) {
+  const ids = (shown || [f.id]).filter((id) => id === f.id || subs.get(id)?.newCount);
+  let at = ids.indexOf(f.id);
+  if (at < 0) at = (ids.push(f.id), ids.length - 1);
+  if (at > ids.length - 1 - at) ids.reverse(), (at = ids.length - 1 - at); // more to see above than below: climb
+  walk = { ids, i: at, seen: new Map(ids.map((id) => [id, subs.get(id)?.seenId])), pid: f.p };
+  walkSet(walk.i, false);
+}
+
+function walkSet(i, replace) {
+  const f = subs.get(walk.ids[i]);
+  if (!f) return walkStep(i, replace); // unfollowed meanwhile: skip it
+  walk.i = i;
   const pv = getProvider(f.p);
-  const before = f.seenId;
+  const before = walk.seen.get(f.id);
   st.isNew = (post) => post.id > before;
   st.followMarks = [f.id];
   st.smartId = null;
-  navigateRoam({ terms: [{ t: f.t, op: '+' }], filters: defaultFilters(), provider: pv.id });
+  const terms = [{ t: f.t, op: '+' }];
+  if (!replace) return navigateRoam({ terms, filters: defaultFilters(), provider: pv.id });
+  const hash = roamHash(terms, defaultFilters(), pv.id);
+  viewerPushed = false;
+  history.replaceState({ n: navDepth, t: activeTabId() }, '', hash);
+  applyRoute();
+}
+
+/** Move one artist on (dir 1) or back (dir -1), skipping any that were unfollowed. */
+function walkStep(i, replace = true, dir = 1) {
+  const step = i - walk.i || dir;
+  while (i >= 0 && i < walk.ids.length && !subs.get(walk.ids[i])) i += step;
+  if (i < 0 || i >= walk.ids.length) return;
+  walkSet(i, replace);
+}
+
+function walkValid() {
+  const f = walk && subs.get(walk.ids[walk.i]);
+  return !!f && parseHash().view === 'roam' && st.terms.length === 1 && st.terms[0].t === f.t && prov.credKey === f.p && !st.multi;
+}
+
+function walkLeave(toast_) {
+  if (toast_) toast(toast_, { ms: 2200 });
+  const gone = walk;
+  walk = null;
+  paintWalk();
+  if (!gone) return;
+  if (navDepth > 0) history.back();
+  else if (canBackOut()) backOut();
+  else go('#/follows');
+}
+
+function paintWalk() {
+  if (walk && !walkValid()) walk = null; // you searched for something else: the walk is over
+  document.body.classList.toggle('walking', !!walk);
+  if (!walk) return void (walkBar.hidden = true);
+  const f = subs.get(walk.ids[walk.i]);
+  const after = walk.ids.slice(walk.i + 1).filter((id) => subs.get(id)?.newCount).length; // still unseen ahead
+  const last = walk.i >= walk.ids.length - 1;
+  const nextBtn = h('button', { class: 'btn primary wb-next', title: last ? 'You have reached the end' : 'Next artist with new posts (])', onclick: () => (last ? walkLeave('That’s everything new — all caught up') : walkStep(walk.i + 1)) },
+    h('span', {}, last ? 'Finish' : 'Next'), !last && after ? h('b', { class: 'wb-n' }, after) : h('i', { html: icon(last ? 'check' : 'right', 15) }));
+  walkBar.replaceChildren(
+    h('button', { class: 'btn wb-back', title: 'Back to Following', onclick: () => walkLeave(), html: icon('left', 15) + '<span>Following</span>' }),
+    h('div', { class: 'wb-mid' },
+      h('span', { class: 'wb-k' }, `${walk.i + 1} of ${walk.ids.length}`),
+      h('b', { class: 'wb-name' }, pretty(f.t))),
+    h('button', { class: 'btn wb-prev', title: 'Previous artist ([)', disabled: walk.i === 0, onclick: () => walkStep(walk.i - 1), html: icon('left', 15) + '<span>Previous</span>' }),
+    nextBtn);
+  walkBar.hidden = false;
 }
 
 /* ---------- dossier */
 async function renderDossier() {
+  if (walkValid()) return dossierEl.replaceChildren(); // walking through follows: no artist notes
   // a live board already says what this search is (and can be updated or saved), so no tag card on top of it
   if (boards.get(st.smartId)?.kind === 'smart') return dossierEl.replaceChildren();
   const real = st.terms.filter((t) => !t.t.includes(':'));
@@ -1297,6 +1367,8 @@ addEventListener('keydown', (e) => {
     case '3': go('#/follows'); break;
     case '4': go('#/pools'); break;
     case '5': go('#/trail'); break;
+    case ']': if (walk && walkValid()) (e.preventDefault(), walk.i < walk.ids.length - 1 && walkStep(walk.i + 1)); break;
+    case '[': if (walk && walkValid() && walk.i > 0) (e.preventDefault(), walkStep(walk.i - 1)); break;
     case ',': openSettings(); break;
     case '?': showHelp(); break;
     case 'ArrowRight': case 'ArrowLeft': case 'ArrowDown': case 'ArrowUp': {

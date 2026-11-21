@@ -1244,3 +1244,19 @@ html.phone .fgrid { padding: 12px 14px 0; grid-template-columns: repeat(auto-fil
 .srcrow { display: grid; gap: 6px; }
 .srcline { display: flex; gap: 8px; align-items: center; }
 .srcline select { flex: none; width: 130px; } .srcline input { flex: 1; min-width: 0; }
+
+/* walking through what's new in Follows: the walk bar stands in for the search bar and the artist notes */
+body.walking #strip, body.walking .dossier-host { display: none; }
+.walkbar { display: flex; align-items: center; gap: 10px; margin: 14px 22px 10px; padding: 8px 10px; background: var(--bg2); border-left: 4px solid var(--hot); animation: pop-in .3s var(--ease); flex: none; }
+.wb-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wb-k { font: 800 9.5px var(--f-mono); letter-spacing: .2em; color: var(--dim); text-transform: uppercase; }
+.wb-name { font: 700 17px var(--f-display); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.walkbar .btn { height: 36px; gap: 7px; }
+.walkbar .btn:disabled { opacity: .4; }
+.wb-n { min-width: 20px; height: 20px; padding: 0 6px; display: grid; place-items: center; font: 800 11px var(--f-mono); background: var(--hot); color: #000; }
+.wb-next i { display: grid; }
+html.phone .walkbar { margin: 8px 10px; flex-wrap: wrap; }
+html.phone .walkbar .wb-mid { order: -1; flex: 1 1 100%; }
+html.phone .walkbar .btn { flex: 1 1 0; justify-content: center; height: 44px; }
+html.phone .walkbar .wb-back span { display: none; }
+html.phone .walkbar .wb-back { flex: 0 0 52px; }

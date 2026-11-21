@@ -88,6 +88,10 @@ On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev li
   quietly in the background and the page sorts by latest activity (or unseen, A–Z, most posts, recently followed), grouped
   by Today / This week / This month…
 - Opening a followed artist marks their new posts with a **NEW** badge. Select several and open them as one blended feed.
+- Opening an artist from Follows starts a **walk through what's new**: the search bar and artist notes step aside and a bar gives you
+  **Previous** / **Next** (`[` and `]`), with a count of how many new artists are still ahead. It follows the order on the page and
+  heads towards whichever end has more left, so opening the oldest alert at the bottom climbs towards the newest. Artists are marked
+  seen as you go, **Finish** (or **Following**) returns to the page where you left it.
 
 **Pools & comics**
 - Pools are classified automatically: a pool whose pages carry the `comic` tag is a **Comic**, otherwise a Series or Collection.
