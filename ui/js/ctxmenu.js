@@ -5,6 +5,7 @@ import { dragToDismiss } from './ui.js';
 
 /**
  * Themed context menu.
+ * `labelP` (optional promise → string) swaps in a better label once it is known.
  * items: [{label, icon, kbd, run, danger, disabled, checked, sub:[...]}, {sep:true}, {header:'Text'}, falsy → skipped]
  */
 let stack = []; // open menu elements, root first
@@ -50,6 +51,7 @@ function build(items, level, anchorRow) {
     it.kbd ? h('kbd', { class: 'cm-k' }, it.kbd) : null,
     it.sub ? h('i', { class: 'cm-arrow', html: icon('right', 12) }) : null);
     row._it = it;
+    it.labelP?.then((t) => t && (row.querySelector('.cm-t').textContent = t));
     row.addEventListener('mouseenter', () => {
       if (it.disabled) return;
       focusRow(el, row);
@@ -128,7 +130,7 @@ function showSheetMenu(list) {
     body.replaceChildren(...rows.map((it) => {
       if (it.sep) return h('div', { class: 'cm-sep' });
       if (it.header) return h('div', { class: 'cm-head' }, it.header);
-      return h('button', {
+      const btn = h('button', {
         class: 'cm-i' + (it.danger ? ' danger' : '') + (it.disabled ? ' off' : '') + (it.checked ? ' chk' : ''), role: 'menuitem', type: 'button',
         onclick: (e) => {
           if (it.disabled) return;
@@ -138,6 +140,8 @@ function showSheetMenu(list) {
         },
       }, h('i', { class: 'cm-ic', html: it.checked ? icon('check', 18) : it.icon ? icon(it.icon, 18) : '' }), h('span', { class: 'cm-t' }, it.label),
       it.sub ? h('i', { class: 'cm-arrow', html: icon('right', 16) }) : null);
+      it.labelP?.then((t) => t && (btn.querySelector('.cm-t').textContent = t));
+      return btn;
     }));
     body.scrollTop = 0;
   }

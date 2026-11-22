@@ -1,7 +1,7 @@
 import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
 import { S, setS, on, emit, NEW_CAP, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
-import { refreshLib } from './library.js';
+import { refreshLib, toggleLibrary } from './library.js';
 import { startWatch } from './watch.js';
 import { startWidgets } from './widgets.js';
 import { renderLocal } from './local.js';
@@ -713,6 +713,13 @@ Object.assign(M, {
   enterPool: (id, postId, pv) => enterPool(id, postId, pv),
   openPoolPage: (id, pv) => go(`#/pool/${id}?p=${pv || prov.id}`),
   readPool: (id, postId, pv) => readPool(id, postId, pv),
+  poolInfo: (pv, id) => poolInfo(getProvider(pv), id),
+  poolInLibrary: (pv, id) => !!library.find(getProvider(pv).credKey, id),
+  toggleLibPool: (pv, pool, post) => {
+    const p = getProvider(pv);
+    const kind = post?.isComic ? 'comic' : pool.cat === 'series' ? 'series' : 'collection';
+    toggleLibrary(p, { pool, kind, cover: post && (post.sample || post.thumb) });
+  },
 });
 
 /* ================================================================== pools & the comic reader */
