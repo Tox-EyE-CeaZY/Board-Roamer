@@ -48,3 +48,9 @@ Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 
 - Pinch zoom (`attachZoom`): touch listeners are on the whole card (a second finger often lands on the buttons), zoom stays after release, one finger pans, the scroller is locked while zoomed, double-tap / the Reset zoom pill / moving to another card resets. ctrl+wheel zooms on desktop.
 - Download button (and D) uses `ctx.savePost`; the upvote button turns solid accent when voted.
 - Scrolling settles on a timer, not requestAnimationFrame (frames are not delivered to a background window).
+
+## 2.2.0: preloading
+- `AHEAD` = 14 cards lined up past the current one (was 4); pictures 3-6 cards down are prefetched with `new Image()`; `POOL_LOW` 45 / `POOL_MAX` 260 so the pool is topped up long before it runs dry (also on every card change). e621 pages are 75 posts (`pageFor`), so fewer requests carry more posts.
+- `recycle()`: if a site is slow or cooling down and fewer than 5 cards are lined up, an earlier card (12+ back) is shown again, so scrolling never dead-ends. Repeats are fine by design.
+- Cool-down is now 20 s doubling to 5 min (was 1 min to 15 min).
+- Tag categories: `feed.noCats` stops the provider's automatic two lookups per page; the Feed asks for the categories of the next ~4 cards in one paced request (`catsNear`), and redraws their text.

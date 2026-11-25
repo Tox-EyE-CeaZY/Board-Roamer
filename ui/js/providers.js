@@ -242,7 +242,7 @@ const e6 = {
     if (!raw.length || (!useCursor && feed.pageNo > this.pageNumberCap)) feed.done = true;
     const posts = raw.map((p) => normE6(p, this)).filter(Boolean);
     // Categories fill in behind the scenes (each lookup waits in e621's 2-requests-a-second queue); never hold the page for them.
-    this.resolveCats(posts, 2).catch(() => {});
+    if (!feed.noCats) this.resolveCats(posts, 2).catch(() => {}); // the Feed looks up categories itself, only for what it is about to show
     return posts;
   },
   async post(id) {

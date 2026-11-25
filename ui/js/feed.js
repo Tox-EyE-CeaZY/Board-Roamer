@@ -24,8 +24,10 @@ const GAP = { e621: 2400, e926: 2400 };
 const DEF_GAP = 1800;
 const BUDGET = 20; // requests per five minutes per site
 const PAGE = 40;
-const POOL_LOW = 18;
-const POOL_MAX = 160;
+/** Posts per request: bigger pages mean fewer requests, and a deeper pool to swipe through. */
+const pageFor = (prov) => (prov.engine === 'e6' ? 75 : Math.min(prov.pageSize || 40, 60));
+const POOL_LOW = 45; // top the pool up long before it runs out
+const POOL_MAX = 260;
 const FRESH_DAYS = 8;
 const FOLLOW_EVERY = 25 * 60000;
 const LEARN_EVERY = 12 * 3600000;
@@ -92,7 +94,7 @@ const filtersFor = (o = {}) => ({ order: o.order || '', score: o.score || 0, rat
 const trim = (set, max) => { while (set.size > max) set.delete(set.values().next().value); };
 
 /** One paced request. Cool-down on trouble, so a struggling site is left alone. */
-async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = PAGE, ratings } = {}) {
+async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = pageFor(src.prov), ratings } = {}) {
   const feed = new Feed(src.prov, terms, filtersFor({ order, score, age, ratings }));
   feed.limit = limit;
   if (page != null) feed.pageNo = page;
@@ -101,6 +103,7 @@ async function fetchPage(src, terms, { order = '', score = 0, age = '', page = n
 
 /** The next page of a feed object (which remembers its own cursor), paced. */
 async function pageOf(src, feed) {
+  feed.noCats = true; // no automatic tag-category lookups for a whole page (see ensureCats)
   if (src.cool > Date.now()) throw new Error('cooling');
   await gate(src);
   if (src.cool > Date.now()) throw new Error('cooling');
@@ -112,7 +115,7 @@ async function pageOf(src, feed) {
   } catch (e) {
     if (!e.status || e.status === 429 || e.status >= 500 || e.status === 403) {
       src.fails++;
-      src.cool = Date.now() + Math.min(15 * 60000, 60000 * 2 ** (src.fails - 1));
+      src.cool = Date.now() + Math.min(5 * 60000, 20000 * 2 ** (src.fails - 1));
     }
     throw e;
   }
@@ -249,7 +252,7 @@ function streamFeed(src, mode) {
     const o = prov.engine === 'db' ? { order: 'rank' } : { order: 'score', age: prov.ages ? ages[src.hotLevel] : '' };
     f = new Feed(prov, [], filtersFor(o));
   } else f = new Feed(prov, [], filtersFor({}));
-  f.limit = PAGE;
+  f.limit = pageFor(prov);
   src.streams[mode] = f;
   return f;
 }
@@ -385,12 +388,15 @@ function heaviestTags(post, model, limit = 5) {
 }
 
 /** e621 sends tags flat: look up the categories of what is about to be shown (the cache makes this rarer and rarer), so artists and weights are right. */
-async function ensureCats(post) {
-  const prov = getProvider(post.provider);
-  if (!prov.resolveCats || !post.tags.general.some((t) => !tagc.get(prov.id, t))) return;
+async function ensureCats(posts) {
+  const first = posts[0];
+  if (!first) return;
+  const prov = getProvider(first.provider);
+  const need = posts.filter((p) => p.tags.general.some((t) => !tagc.get(prov.id, t)));
+  if (!prov.resolveCats || !need.length) return;
   try {
     await gate(srcOf(prov));
-    await prov.resolveCats([post], 1);
+    await prov.resolveCats(need, 1); // one request covers about four posts, and the cache makes it rarer and rarer
   } catch {
     /* categories are a nicety: carry on without */
   }
@@ -718,7 +724,17 @@ export function renderFeed(root, ctx) {
   };
 
   /* --- keeping the queue stocked */
-  const AHEAD = 4;
+  const AHEAD = 14; // cards lined up past the one on screen, so a swipe never waits for the network
+  const MIN_AHEAD = 5;
+  /** An earlier card, far enough back to feel fresh, shown again. */
+  const recycle = () => {
+    if (view.items.length >= view.idx + MIN_AHEAD || (S('feedMode') || 'foryou') === 'follows') return null; // enough in hand: wait for real posts
+    const ahead = new Set(view.items.slice(view.idx).map((x) => x.post));
+    const old = view.items.slice(0, Math.max(0, view.idx - 12)).filter((x) => !ahead.has(x.post));
+    if (old.length < 8) return null;
+    const it = old[Math.floor(Math.random() * old.length)];
+    return { post: it.post, kind: it.kind };
+  };
   const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
   async function fill() {
     if (view.busy) return void (view.again = true); // run once more when the current round ends
@@ -729,7 +745,8 @@ export function renderFeed(root, ctx) {
         while (view.items.length < view.idx + AHEAD) {
           if (!root.isConnected) return;
           if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
-          const got = await withTimeout(nextPost(view), 40000);
+          let got = await withTimeout(nextPost(view), 40000);
+          if (!got) got = recycle(); // the site is slow or cooling down: never dead-end, repeats are fine
           if (!got) break;
           const { post, kind } = got;
           const it = { post, kind, why: whyOf(post, modelOf(post.provider), kind) };
@@ -739,13 +756,13 @@ export function renderFeed(root, ctx) {
           paintEmpty();
           if (view.items.length === 1) activate(0);
           else syncWindow();
-          ensureCats(post).then(() => refreshInfo(it)); // categories (artist, weights) fill in without holding the feed up
         }
       } while (view.again && root.isConnected);
     } finally {
       view.busy = false;
       paintEmpty();
     }
+    catsNear();
     if (view.items.length < view.idx + AHEAD) retry();
   }
   let retryT = 0;
@@ -763,17 +780,38 @@ export function renderFeed(root, ctx) {
     empty.replaceChildren(h('div', { class: 'fd-loading' }, h('i'), h('b', {}, blocked ? 'Add an API key for this site' : cool ? 'The site asked us to slow down' : 'Tuning your feed…'), h('small', {}, blocked ? 'Open Settings > Accounts, or pick another site above.' : cool ? 'Trying again shortly. Requests are spaced out on purpose.' : 'Fetching a first batch.')));
   };
 
+  const warmed = new Set();
+  const prefetch = (i) => {
+    const p = view.items[i]?.post;
+    if (!p || p.kind === 'video' || warmed.has(p.id)) return;
+    warmed.add(p.id);
+    if (warmed.size > 400) warmed.delete(warmed.values().next().value);
+    new Image().src = mediaSrc(p);
+  };
   const syncWindow = () => {
     for (let i = 0; i < cards.length; i++) {
       if (Math.abs(i - view.idx) <= 2) mountCard(i);
       else unmountCard(i);
     }
     for (let k = 0; k <= 2; k++) loadMedia(view.idx + k, k === 0);
+    for (let k = 3; k <= 6; k++) prefetch(view.idx + k); // pictures a few cards down are fetched ahead of time, videos only on arrival
     // the pictures just behind are kept, the ones far behind are dropped with their card
   };
 
   /* --- what is on screen now: learn from it */
-  let since = 0, shownT = 0;
+  let since = 0, shownT = 0, catBusy = false;
+  /** Categories for the cards about to be seen (not the whole queue): a single paced request, then their text is redrawn. */
+  async function catsNear() {
+    if (catBusy) return;
+    catBusy = true;
+    try {
+      const near = view.items.slice(view.idx, view.idx + 4);
+      await ensureCats(near.map((x) => x.post));
+      near.forEach(refreshInfo);
+    } finally {
+      catBusy = false;
+    }
+  }
   function activate(i) {
     leave();
     if (i !== view.idx) cards[view.idx]?.firstChild?._zoom?.reset();
@@ -794,6 +832,11 @@ export function renderFeed(root, ctx) {
       }, 700);
     }
     fill();
+    catsNear();
+    for (const p of enabled()) { // keep the pool deep: one refill at a time, paced by the gate
+      const src = srcOf(p);
+      if (!needsKeyMissing(p) && src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now() && view.active()) refill(src, view);
+    }
     scrollSaved = i;
   }
   let scrollSaved = 0;
