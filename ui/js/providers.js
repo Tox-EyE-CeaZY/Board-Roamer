@@ -94,7 +94,7 @@ function normE6(p, prov) {
     sample: hasSample && sampleUrl ? sampleUrl : kind === 'image' ? full : null,
     full,
     score: sc.total ?? 0, up: sc.up ?? 0, down: sc.down ?? 0, favs: p.fav_count ?? st.fav_count ?? 0,
-    tags, artists, sources: p.sources || [], created: p.created_at, desc: p.description || '',
+    tags, artists, flat: Array.isArray(p.tags), sources: p.sources || [], created: p.created_at, desc: p.description || '',
     parent: p.relationships?.parent_id || null, children: p.relationships?.children || [], pools: p.pools || [],
     duration: p.duration || meta.duration || 0, comments: p.comment_count ?? st.comment_count ?? 0, faved: !!(p.is_favorited ?? st.is_favorited), url: `${prov.web}/posts/${p.id}`,
     alts: kind === 'video' ? e6alts(p, files) : [], sampleSmall: files.sample?.webp || null,
@@ -240,7 +240,8 @@ const e6 = {
   },
   async page(feed) {
     const useCursor = !feed.tags.some((t) => /^order:/.test(t));
-    const q = { tags: feed.tags.join(' '), limit: feed.limit || this.pageSize };
+    // mode=extended: tags come grouped by category, so artists are known at once with no extra tag lookups
+    const q = { tags: feed.tags.join(' '), limit: feed.limit || this.pageSize, mode: 'extended' };
     if (useCursor) feed.cursor && (q.page = 'b' + feed.cursor);
     else q.page = feed.pageNo;
     const j = await call(this, `${this.web}/posts.json?${qs(q)}`);
@@ -254,13 +255,14 @@ const e6 = {
     return posts;
   },
   async post(id) {
-    const j = await call(this, `${this.web}/posts/${id}.json`);
+    const j = await call(this, `${this.web}/posts/${id}.json?mode=extended`);
     const p = normE6(j.post || j, this);
     if (p) await this.resolveCats([p], 1);
     return p;
   },
   /** e621's post JSON no longer groups tags by category: look unknown ones up in batches (cached in tagc) and regroup. */
   async resolveCats(posts, maxCalls = 3) {
+    posts = posts.filter((p) => p.flat !== false); // posts that arrived with categories need nothing
     const unknown = new Set();
     for (const p of posts) for (const t of p.tags.general) if (!tagc.get(this.id, t)) unknown.add(t);
     const names = [...unknown];
@@ -312,7 +314,7 @@ const e6 = {
   async poolPosts(pool, onProgress) {
     const got = new Map();
     for (let page = 1; page <= 12 && got.size < pool.ids.length; page++) {
-      const j = await call(this, `${this.web}/posts.json?${qs({ tags: `pool:${pool.id}`, limit: 320, page })}`);
+      const j = await call(this, `${this.web}/posts.json?${qs({ tags: `pool:${pool.id}`, limit: 320, page, mode: 'extended' })}`);
       const raw = e6list(j);
       for (const r of raw) {
         const n = normE6(r, this);
@@ -348,7 +350,7 @@ const e6 = {
     for (let i = 0; i < ids.length; i += 30) {
       const chunk = ids.slice(i, i + 30);
       const tags = chunk.length === 1 ? `id:${chunk[0]}` : chunk.map((x) => `~id:${x}`).join(' ');
-      const j = await call(this, `${this.web}/posts.json?${qs({ tags, limit: 40 })}`);
+      const j = await call(this, `${this.web}/posts.json?${qs({ tags, limit: 40, mode: 'extended' })}`);
       for (const r of e6list(j)) {
         const n = normE6(r, this);
         if (n) out.push(n);

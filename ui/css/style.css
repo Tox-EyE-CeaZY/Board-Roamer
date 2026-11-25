@@ -1352,3 +1352,14 @@ html.phone .fd-btn { width: 48px; min-height: 48px; }
 .fd-zoomreset[hidden] { display: none; }
 .fd-media { transform-origin: 50% 50%; will-change: transform; }
 .fd-stage { touch-action: pan-y; }
+
+.fd-who { display: inline-flex; align-items: center; gap: 8px; }
+.fd-info .fd-follow { padding: 3px 9px; font: 800 11px var(--f-mono); color: #fff; background: rgb(0 0 0 / .5); border: 1px solid #fff6; }
+.fd-info .fd-follow.keen { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.fd-suggest { position: absolute; top: 84px; left: 10px; z-index: 6; padding: 5px 11px; background: rgb(0 0 0 / .6); border: 1px solid var(--accent); color: var(--accent); font: 800 11px var(--f-mono); }
+.fd-suggest[hidden] { display: none; }
+.fd-sugg-list { display: grid; gap: 8px; }
+.fd-sugg { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-left: 3px solid hsl(var(--ph, 128) 70% 55%); background: var(--bg3); }
+.fd-sugg-name { flex: 1; min-width: 0; text-align: left; display: grid; }
+.fd-sugg-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-artist); }
+.fd-sugg-name small { opacity: .65; font-size: 11px; }
