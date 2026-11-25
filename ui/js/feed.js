@@ -25,9 +25,9 @@ const DEF_GAP = 1800;
 const BUDGET = 20; // requests per five minutes per site
 const PAGE = 40;
 /** Posts per request: bigger pages mean fewer requests, and a deeper pool to swipe through. */
-const pageFor = (prov) => (prov.engine === 'e6' ? 75 : Math.min(prov.pageSize || 40, 60));
-const POOL_LOW = 45; // top the pool up long before it runs out
-const POOL_MAX = 260;
+const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] || prov.pageSize || 40); // the most each site hands out at once (e621 allows 320)
+const POOL_LOW = 80; // top the pool up long before it runs out
+const POOL_MAX = 700; // a big pool to rank from: the best of hundreds, not of a handful
 const FRESH_DAYS = 8;
 const FOLLOW_EVERY = 25 * 60000;
 const LEARN_EVERY = 12 * 3600000;
@@ -168,7 +168,7 @@ async function learnAccount(prov, { force = false } = {}) {
     for (const q of LEARN[prov.engine](c)) {
       const pages = first ? 6 : 2;
       const feed = new Feed(prov, [{ t: q.t, op: '+' }], filtersFor({ ratings: ALL_RATINGS }));
-      feed.limit = prov.engine === 'e6' ? 75 : PAGE;
+      feed.limit = pageFor(prov);
       for (let i = 0; i < pages && !feed.done; i++) {
         const posts = await pageOf(src, feed);
         if (!posts.length) break;
@@ -388,18 +388,22 @@ function heaviestTags(post, model, limit = 5) {
 }
 
 /** e621 sends tags flat: look up the categories of what is about to be shown (the cache makes this rarer and rarer), so artists and weights are right. */
-async function ensureCats(posts) {
+const unknownTags = (prov, posts) => new Set(posts.flatMap((p) => p.tags.general).filter((t) => !tagc.get(prov.id, t)));
+async function ensureCats(posts, { urgent = false } = {}) {
   const first = posts[0];
-  if (!first) return;
+  if (!first) return false;
   const prov = getProvider(first.provider);
+  if (!prov.resolveCats) return false;
   const need = posts.filter((p) => p.tags.general.some((t) => !tagc.get(prov.id, t)));
-  if (!prov.resolveCats || !need.length) return;
+  // only when the card on screen is missing its categories, or a good number of tags have piled up: one request then covers several cards
+  if (!need.length || !(need.includes(first) || unknownTags(prov, need).size >= 70)) return false;
   try {
     await gate(srcOf(prov));
-    await prov.resolveCats(need, 1); // one request covers about four posts, and the cache makes it rarer and rarer
+    await prov.resolveCats(need, 1); // one paced request of up to 100 tags
   } catch {
     /* categories are a nicety: carry on without */
   }
+  return true;
 }
 
 /** Take the next post for the view: a follow's new post every third card, otherwise taste or a deliberate wander. */
@@ -805,9 +809,8 @@ export function renderFeed(root, ctx) {
     if (catBusy) return;
     catBusy = true;
     try {
-      const near = view.items.slice(view.idx, view.idx + 4);
-      await ensureCats(near.map((x) => x.post));
-      near.forEach(refreshInfo);
+      const near = view.items.slice(view.idx, view.idx + 7);
+      if (await ensureCats(near.map((x) => x.post))) near.forEach(refreshInfo);
     } finally {
       catBusy = false;
     }

@@ -54,3 +54,4 @@ Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 
 - `recycle()`: if a site is slow or cooling down and fewer than 5 cards are lined up, an earlier card (12+ back) is shown again, so scrolling never dead-ends. Repeats are fine by design.
 - Cool-down is now 20 s doubling to 5 min (was 1 min to 15 min).
 - Tag categories: `feed.noCats` stops the provider's automatic two lookups per page; the Feed asks for the categories of the next ~4 cards in one paced request (`catsNear`), and redraws their text.
+- Big pool to rank from: pages are as big as each site allows (`pageFor`: e621 200, Danbooru and Gelbooru 100, Derpibooru 50), `POOL_LOW` 80, `POOL_MAX` 700. One request therefore carries hundreds of candidates, and the best of them is picked (softmax by taste, with a lean to newer/hotter). Category lookups: one paced request (<=100 tags) when the card on screen is missing categories or 70+ tags have piled up.
