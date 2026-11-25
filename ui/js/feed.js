@@ -5,6 +5,7 @@ import { getProvider, providerList, Feed, compileBlacklist, blacklistHit, isBlur
 import { Taste, softPick, features } from './taste.js';
 import { toast, popover, closePopover, confirmDlg, segmented } from './ui.js';
 import { quickPin } from './pins.js';
+import { follow } from './follows.js';
 import { haptic, isPhone } from './platform.js';
 
 /* ==========================================================================================================================
@@ -28,6 +29,7 @@ const LANE_GAP = { tags: 2500, learn: 3000, follow: 4000 }; // chores have their
 const PAGE = 40;
 /** Posts per request: bigger pages mean fewer requests, and a deeper pool to swipe through. */
 const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] || prov.pageSize || 40); // the most each site hands out at once (e621 allows 320)
+const SUGGEST_AT = 3; // liked this many times (favorite 1, upvote about 0.8): worth suggesting
 const POOL_LOW = 80; // top the pool up long before it runs out
 const POOL_MAX = 700; // a big pool to rank from: the best of hundreds, not of a handful
 const FRESH_DAYS = 8;
@@ -75,7 +77,8 @@ addEventListener('visibilitychange', () => document.hidden && models.forEach((m)
 /* ------------------------------------------------------------------ per-site state: pool of candidates, pacing, cool-down */
 const srcs = new Map();
 /** The last pool of candidates is kept on the device, so opening the app shows cards at once while a fresh batch is fetched behind them. */
-const poolKey = (prov) => 'feed:pool:' + prov.id;
+const poolKey = (prov) => 'feed:pool2:' + prov.id;
+for (const id of ['e621', 'e926', 'danbooru', 'gelbooru', 'safebooru', 'derpibooru']) kv.del('feed:pool:' + id); // the old format
 const loadPool = (prov) => {
   const list = kv.get(poolKey(prov), []);
   if (!Array.isArray(list)) return [];
@@ -155,10 +158,11 @@ function learnCats(posts) {
   for (const p of posts) for (const c of Object.keys(p.tags)) if (c !== 'general' && c !== 'meta') for (const t of p.tags[c]) tagc.set(p.provider, t, { cat: c });
 }
 
-/** Repeats are fine, so "seen" only keeps the most recent few hundred out of For you; New and Hot ignore it. */
+/** Repeats are fine, so "seen" only keeps the most recent few hundred out of For you; New and Hot ignore it. What is already a favorite (or liked) is left out. */
 function acceptable(post, model, queued, mode = S('feedMode') || 'foryou') {
   if (!post || !post.full || post.kind === 'flash' || post.isComic) return false;
   if (!S('filters').ratings[post.rating]) return false;
+  if (post.faved || model.likes.has(post.id)) return false;
   if (queued.has(postKey(post)) || (mode === 'foryou' && model.seen.has(post.id))) return false;
   if (S('blacklistMode') !== 'off' && blacklistHit(post, hideRules())) return false;
   return true;
@@ -176,41 +180,57 @@ const canLearn = (prov) => {
 };
 
 const learning = new Set();
+const LEARN_VERSION = 2; // 2: artists are counted too (one more read of the favorites for those learned before)
+const LEARN_PAGES = 6;
+/**
+ * Reads favorites / upvotes into the stored weights. The full read happens once: where it got to is saved after every page, so closing
+ * the app continues from there instead of starting over. Later runs only look at the newest page and add what is new.
+ */
 async function learnAccount(prov, { force = false } = {}) {
   const model = modelOf(prov), src = srcOf(prov);
   if (!canLearn(prov) || learning.has(prov.credKey)) return;
-  const info = model.learnInfo;
-  if (!force && info.ts && Date.now() - info.ts < LEARN_EVERY) return;
-  learning.add(prov.credKey);
-  const first = !info.ts || force;
+  let info = model.learnInfo;
+  if (info.v !== LEARN_VERSION) info = model.learnInfo = { v: LEARN_VERSION, q: {}, base: info.base, recount: model.likes.size > 0 };
+  const unfinished = () => LEARN[prov.engine](c).some((q) => !info.q[q.t]?.done);
   const c = (S('creds') || {})[prov.credKey] || {};
+  if (!force && !unfinished() && info.ts && Date.now() - info.ts < LEARN_EVERY) return;
+  learning.add(prov.credKey);
   let added = 0;
   try {
     emit('feed-learn', { running: true, cred: prov.credKey, n: 0 });
     for (const q of LEARN[prov.engine](c)) {
-      const pages = first ? 6 : 2;
+      const st = (info.q[q.t] ||= { done: false, pages: 0, cursor: null, pageNo: null });
+      const full = !st.done;
       const feed = new Feed(prov, [{ t: q.t, op: '+' }], filtersFor({ ratings: ALL_RATINGS }));
       feed.limit = pageFor(prov);
-      for (let i = 0; i < pages && !feed.done; i++) {
+      if (full && st.pages) (feed.cursor = st.cursor), (feed.pageNo = st.pageNo);
+      for (let i = full ? st.pages : 0; i < (full ? LEARN_PAGES : 2) && !feed.done; i++) {
         const posts = await pageOf(src, feed, 'learn');
         if (!posts.length) break;
         learnCats(posts);
         let fresh = 0;
         for (const p of posts) {
-          if (model.likes.has(p.id)) continue;
+          if (model.likes.has(p.id)) {
+            // learned before artists were counted: count them now, once, without learning the tags twice
+            if (full && info.recount) model.taste.countArtists(p, q.w);
+            continue;
+          }
           model.likes.add(p.id);
           model.taste.learn(p, { l: q.w, n: 1 });
           fresh++;
           added++;
         }
+        if (full) Object.assign(st, { pages: i + 1, cursor: feed.cursor, pageNo: feed.pageNo });
         model.save();
         emit('feed-learn', { running: true, cred: prov.credKey, n: added });
-        if (!first && !fresh) break;
+        if (!full && !fresh) break;
       }
+      st.done = true;
     }
-    if (first || !info.base) await baseline(prov, model, src);
-    info.ts = Date.now();
+    info.recount = false;
+    if (!info.base) await baseline(prov, model, src);
     info.base = true;
+    info.ts = Date.now();
     model.save();
   } catch (e) {
     if (e.message !== 'cooling') emit('toast', { msg: `Could not read ${prov.name} favorites: ${e.message}`, kind: 'err' });
@@ -241,9 +261,15 @@ function exploreOpts(prov, half = false) {
 
 function interestQuery(prov, model) {
   const t = model.taste;
-  const list = t.interests(undefined, 24, (f) => tagc.get(prov.id, f)?.cat ?? null);
-  if (list.length < 3) return null;
-  const first = list[Math.max(0, softPick(list.slice(0, 14).map((x) => x.rank), 1.6))];
+  const all = t.interests(undefined, 40, (f) => tagc.get(prov.id, f)?.cat ?? null);
+  if (all.length < 3) return null;
+  const src = srcOf(prov);
+  const used = (src.searched ||= []); // the last few subjects searched for are left alone for a while
+  let list = all.filter((x) => !used.includes(x.tag));
+  if (list.length < 3) list = all;
+  const first = list[Math.max(0, softPick(list.slice(0, 20).map((x) => x.rank), 2.5))];
+  used.push(first.tag);
+  if (used.length > 8) used.shift();
   const terms = [{ t: first.tag, op: '+' }];
   if (prov.maxTags >= 3 && Math.random() < 0.4) {
     const isArt = (f) => tagc.get(prov.id, f)?.cat === 'artist';
@@ -384,6 +410,29 @@ const lean = (p) => {
   return 0.5 * Math.exp(-age / 45) + 0.35 * Math.min(1, Math.log10(1 + Math.max(0, p.score || 0)) / 3);
 };
 
+/**
+ * How much a post repeats what was just shown: the same artist, the same leading tag, the same characters. Taken off its score, so a
+ * strong taste still comes through but cannot take over the whole Feed.
+ */
+function sameness(view, model) {
+  const recent = view.items.slice(-14).map((x) => x.post);
+  const artists = new Map(), lead = new Map(), chars = new Map();
+  const bump = (m, k, v = 1) => k && m.set(k, (m.get(k) || 0) + v);
+  recent.forEach((p, i) => {
+    const near = i >= recent.length - 5 ? 2 : 1; // the last few count double
+    for (const a of p.artists) bump(artists, a, near);
+    bump(lead, model.taste.rate(p).why?.f);
+    for (const c of p.tags.character) bump(chars, c);
+  });
+  return (p, why) => {
+    let pen = 0;
+    for (const a of p.artists) pen += Math.min(3, artists.get(a) || 0) * 0.8;
+    if (why) pen += Math.max(0, (lead.get(why.f) || 0) - 1) * 0.3;
+    for (const c of p.tags.character) pen += Math.min(3, chars.get(c) || 0) * 0.2;
+    return pen;
+  };
+}
+
 function takeFrom(src, view, explore) {
   const model = modelOf(src.prov);
   const q = queued(view);
@@ -394,12 +443,16 @@ function takeFrom(src, view, explore) {
   let idx;
   if (!model.taste.ready) idx = softPick(src.pool.map(lean), 0.5);
   else {
-    const rated = src.pool.map((p) => ({ p, ...model.taste.rate(p) }));
+    const dull = sameness(view, model);
+    const rated = src.pool.map((p) => {
+      const r = model.taste.rate(p);
+      return { p, ...r, score: r.score - dull(p, r.why) };
+    });
     if (explore) {
       // off the beaten path, but not off a cliff: unfamiliar posts that are at least not disliked
-      const sc = rated.map((r) => r.novelty * 1.4 + Math.min(1, r.score) * 0.3 + (r.p._kind === 'explore' ? 0.3 : 0) + lean(r.p) * 0.6);
+      const sc = rated.map((r) => r.novelty * 1.4 + Math.max(-2, Math.min(1, r.score)) * 0.3 + (r.p._kind === 'explore' ? 0.3 : 0) + lean(r.p) * 0.6);
       idx = softPick(sc, 0.35);
-    } else idx = softPick(rated.map((r) => r.score + lean(r.p)), 0.55);
+    } else idx = softPick(rated.map((r) => r.score + lean(r.p)), 0.7);
   }
   const [post] = src.pool.splice(idx, 1);
   return post;
@@ -419,13 +472,13 @@ async function ensureCats(posts, { urgent = false } = {}) {
   if (!first) return false;
   const prov = getProvider(first.provider);
   if (!prov.resolveCats) return false;
-  const need = posts.filter((p) => p.tags.general.some((t) => !tagc.get(prov.id, t)));
+  const need = posts.filter((p) => p.flat !== false && p.tags.general.some((t) => !tagc.get(prov.id, t)));
   // only when the card on screen is missing its categories, or a good number of tags have piled up: one request then covers several cards
   if (!need.length || !(need.includes(first) || unknownTags(prov, need).size >= 70)) return false;
   if (srcOf(prov).reqs.length > BUDGET * 0.7) return false; // short on budget: posts come first
   try {
     await gate(srcOf(prov), 'tags');
-    const asked = [...unknownTags(prov, need)].slice(0, 100); // the same ones resolveCats will send
+    const asked = [...unknownTags(prov, need)].slice(0, prov.engine === 'gb' ? 60 : 100); // the same ones resolveCats will send
     await prov.resolveCats(need, 1); // one paced request of up to 100 tags
     // a few tags never come back (renamed, empty): once the answer arrived, stop asking about them
     if (asked.some((t) => tagc.get(prov.id, t))) for (const t of asked) if (!tagc.get(prov.id, t)) tagc.set(prov.id, t, { cat: 'general' });
@@ -513,7 +566,8 @@ export function renderFeed(root, ctx) {
   };
   const pullEl = h('div', { class: 'fd-pull', html: icon('refresh', 20) });
   const head = h('div', { class: 'fd-head' }, chips, h('button', { class: 'ibtn', title: 'Refresh the feed', 'aria-label': 'Refresh the feed', html: icon('refresh', 19), onclick: () => refreshFeed() }), h('button', { class: 'ibtn', title: 'Feed settings', 'aria-label': 'Feed settings', html: icon('sliders', 19), onclick: (e) => feedSettings(e.currentTarget) }));
-  const el = h('div', { class: 'fd' }, head, modes, pullEl, scroller, empty);
+  const suggestChip = h('button', { class: 'fd-suggest', hidden: true, onclick: (e) => suggestPopover(e.currentTarget) });
+  const el = h('div', { class: 'fd' }, head, modes, suggestChip, pullEl, scroller, empty);
   root.replaceChildren(el);
 
   const cards = []; // DOM per item
@@ -585,10 +639,49 @@ export function renderFeed(root, ctx) {
     const desc = String(p.desc || '').replace(/\[\/?[a-z]+(=[^\]]*)?\]|"([^"]+)":\S+/gi, '$2').replace(/\s+/g, ' ').trim().slice(0, 140);
     return h('div', { class: 'fd-info' },
       h('div', { class: 'fd-why ' + it.kind }, it.why, h('i', {}, prov.short)),
-      art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
+      art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
       desc ? h('div', { class: 'fd-desc' }, desc) : null,
       tagBox(p, model, heaviestTags(p, model)));
   };
+  const isFollowed = (prov, name) => !!subs.find(prov.credKey, name);
+  /** "Follow" next to an artist you don't follow yet; it says so when you keep liking their work. */
+  const followButton = (p, name) => {
+    const prov = getProvider(p.provider);
+    if (isFollowed(prov, name)) return null;
+    const keen = (modelOf(prov).taste.a[name] || 0) >= SUGGEST_AT;
+    return h('button', { class: 'fd-follow' + (keen ? ' keen' : ''), onclick: (e) => { e.stopPropagation(); follow(name, prov.id); e.currentTarget.remove(); paintSuggest(); } }, keen ? 'Follow · you like them' : 'Follow');
+  };
+  /** Artists whose work keeps getting liked, not followed and not dismissed. */
+  const suggestions = () => {
+    const out = [], dismissed = new Set(kv.get('feed:nofollow', []));
+    for (const prov of enabled()) {
+      const m = modelOf(prov);
+      for (const a of m.taste.topArtists(SUGGEST_AT)) {
+        const key = prov.credKey + ':' + a.name;
+        if (!dismissed.has(key) && !isFollowed(prov, a.name) && !out.some((o) => o.key === key)) out.push({ key, prov, ...a });
+      }
+    }
+    return out.sort((x, y) => y.v - x.v).slice(0, 12);
+  };
+  const paintSuggest = () => {
+    const n = suggestions().length;
+    suggestChip.hidden = !n;
+    suggestChip.textContent = n === 1 ? '1 artist to follow' : `${n} artists to follow`;
+  };
+  const suggestList = () => {
+    const list = h('div', { class: 'fd-sugg-list' });
+    const paint = () => {
+      const items = suggestions();
+      list.replaceChildren(...(items.length ? items.map((s) => h('div', { class: 'fd-sugg', style: `--ph:${s.prov.color}` },
+        h('button', { class: 'fd-sugg-name', onclick: () => (closePopover(), ctx.go(ctx.roamHash([{ t: s.name, op: '+' }], null, s.prov.id))) }, h('b', {}, pretty(s.name)), h('small', {}, `${s.prov.name} · liked ${Math.round(s.v)}`)),
+        h('button', { class: 'btn primary', onclick: () => { follow(s.name, s.prov.id); paint(); paintSuggest(); } }, 'Follow'),
+        h('button', { class: 'ibtn', title: 'Not this one', 'aria-label': 'Dismiss', html: icon('close', 16), onclick: () => { kv.set('feed:nofollow', [...kv.get('feed:nofollow', []), s.key].slice(-300)); paint(); paintSuggest(); } }))) : [h('small', {}, 'Nobody to suggest right now.')]));
+    };
+    paint();
+    return list;
+  };
+  const suggestPopover = (anchor) => popover(anchor, h('div', { class: 'fd-set' }, h('h4', {}, 'Artists you keep liking'), suggestList()), { align: 'left', cls: 'fd-pop' });
+
   const refreshInfo = (it) => {
     it.why = whyOf(it.post, modelOf(it.post.provider), it.kind);
     const slot = cards[view.items.indexOf(it)];
@@ -772,7 +865,7 @@ export function renderFeed(root, ctx) {
   const recycle = () => {
     if (view.items.length >= view.idx + MIN_AHEAD || (S('feedMode') || 'foryou') === 'follows') return null; // enough in hand: wait for real posts
     const ahead = new Set(view.items.slice(view.idx).map((x) => x.post));
-    const old = view.items.slice(0, Math.max(0, view.idx - 12)).filter((x) => !ahead.has(x.post));
+    const old = view.items.slice(0, Math.max(0, view.idx - 12)).filter((x) => !ahead.has(x.post) && !x.post.faved && !modelOf(x.post.provider).likes.has(x.post.id));
     if (old.length < 8) return null;
     const it = old[Math.floor(Math.random() * old.length)];
     return { post: it.post, kind: it.kind };
@@ -884,6 +977,7 @@ export function renderFeed(root, ctx) {
     }
     fill();
     catsNear();
+    if (i % 5 === 0) paintSuggest();
     for (const p of enabled()) { // keep the pool deep: one refill at a time, paced by the gate
       const src = srcOf(p);
       if (!needsKeyMissing(p) && src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now() && view.active()) refill(src, view);
@@ -1012,6 +1106,8 @@ export function renderFeed(root, ctx) {
     card?.querySelector(vote ? '.fd-btn.up' : '.fd-btn.like')?.classList.toggle('on', !!yes);
   });
 
+  const offLearn = on('feed-learn', (e) => !e.detail.running && paintSuggest());
+
   /* --- keys (arrows / J K / L / X / Enter) while the Feed is what you are looking at */
   const onKey = (e) => {
     if (!view.active() || e.ctrlKey || e.metaKey || e.altKey || e.target.matches('input,textarea,select,[contenteditable]')) return;
@@ -1059,6 +1155,8 @@ export function renderFeed(root, ctx) {
       row('New from follows jump the queue', 'Fresh posts from artists you follow, about one card in three', tgl('feedFollows')),
       row('Likes go to the site', 'A heart also favorites and upvotes there when you are signed in', tgl('feedSyncLikes')),
       row('Learn from my favorites', 'Reads your favorites and upvotes (a few requests, then a quick top-up every 12 hours)', tgl('feedLearn', () => autoLearn())),
+      suggestions().length ? h('h4', {}, 'Artists you keep liking') : null,
+      suggestions().length ? suggestList() : null,
       stats,
       h('button', { class: 'btn danger', onclick: async () => {
         if (!await confirmDlg('Forget what the Feed learned?', 'This clears taste and the list of posts already shown, on this device. Favorites on the sites are not touched.', 'Forget')) return;
@@ -1148,7 +1246,7 @@ export function renderFeed(root, ctx) {
   document.addEventListener('visibilitychange', onVis);
   // pause video when the viewer or another page covers the feed, and resume when it comes back
   const watch = setInterval(() => {
-    if (!root.isConnected) { clearInterval(watch); clearInterval(upkeep); unsub(); offLike(); removeEventListener('keydown', onKey); document.removeEventListener('visibilitychange', onVis); leave(); return; }
+    if (!root.isConnected) { clearInterval(watch); clearInterval(upkeep); unsub(); offLike(); offLearn(); removeEventListener('keydown', onKey); document.removeEventListener('visibilitychange', onVis); leave(); return; }
     const v = cards[view.idx]?.querySelector('video');
     if (v) (view.active() && v.paused && !v.dataset.userPaused ? v.play().catch(() => {}) : !view.active() && v.pause());
   }, 1500);
@@ -1157,6 +1255,7 @@ export function renderFeed(root, ctx) {
   paintChips();
   paintModes();
   paintEmpty();
+  paintSuggest();
   setTimeout(autoLearn, 15000); // reading favorites can wait: the first cards come first
   setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 8000);
   fill();

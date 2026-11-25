@@ -39,13 +39,17 @@ export class Taste {
     this.pn = d.pn || 0; // posts shown (weighted)
     this.ts = d.ts || Date.now();
     this.likes = d.likes || 0; // real likes, never faded: for "have we learned anything yet"
+    this.a = d.a || {}; // artist -> how much of their work was liked (for suggesting who to follow)
+    this._calls = 0;
     this._decay();
   }
 
   toJSON() {
     const t = {};
     for (const [k, [l, n]] of Object.entries(this.t)) t[k] = [Math.round(l * 1000) / 1000, Math.round(n * 1000) / 1000];
-    return { t, pl: Math.round(this.pl * 1000) / 1000, pn: Math.round(this.pn * 1000) / 1000, ts: this.ts, likes: this.likes };
+    const a = {};
+    for (const [k, v] of Object.entries(this.a)) if (v >= 0.2) a[k] = Math.round(v * 100) / 100;
+    return { t, a, pl: Math.round(this.pl * 1000) / 1000, pn: Math.round(this.pn * 1000) / 1000, ts: this.ts, likes: this.likes };
   }
 
   _decay(now = Date.now()) {
@@ -60,6 +64,7 @@ export class Taste {
     }
     this.pl *= f;
     this.pn *= f;
+    for (const k of Object.keys(this.a)) this.a[k] *= f;
     this.ts = now;
   }
 
@@ -80,7 +85,22 @@ export class Taste {
     this.pl = Math.max(0, this.pl + l);
     this.pn += post_n;
     if (l >= 1) this.likes++;
-    if (Object.keys(this.t).length > MAX_TAGS + 400) this._prune();
+    if (l) this.countArtists(post, l);
+    if (++this._calls % 100 === 0) this._prune();
+  }
+
+  /** Add to (or with a negative amount take from) how much an artist is liked. Weights are kept and nudged, never recomputed. */
+  countArtists(post, amount) {
+    for (const name of post.artists || []) {
+      const v = Math.max(0, (this.a[name] || 0) + amount);
+      if (v) this.a[name] = v;
+      else delete this.a[name];
+    }
+  }
+
+  /** Artists liked at least `min` times, most liked first. */
+  topArtists(min = 3) {
+    return Object.entries(this.a).filter(([, v]) => v >= min).sort((x, y) => y[1] - x[1]).map(([name, v]) => ({ name, v }));
   }
 
   /** How often posts in general are liked. */
@@ -135,6 +155,7 @@ export class Taste {
 
   reset() {
     this.t = {};
+    this.a = {};
     this.pl = this.pn = this.likes = 0;
     this.ts = Date.now();
   }
