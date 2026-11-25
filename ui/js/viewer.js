@@ -1,6 +1,6 @@
 import { h, clamp, fmtNum, fmtBytes, fmtDate, ago, copyText, pretty } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, boards, postKey, tagc, saved, voted } from './store.js';
+import { S, setS, boards, postKey, tagc, saved, voted, emit } from './store.js';
 import { CATS, CAT_LABEL, getProvider, isBlurred } from './providers.js';
 import { toast, stamp, closePopover } from './ui.js';
 import { pinContent, pinPopover, quickPin } from './pins.js';
@@ -784,6 +784,7 @@ export class Viewer {
     if (!jobs.length) return;
     try {
       await Promise.all(jobs);
+      emit('post-like', { post: p, on: true });
       if (!this._likedHint) { this._likedHint = true; toast('Liked: added to your favorites and upvoted', { ms: 1800 }); }
     } catch (e) {
       toast(e.message, { kind: 'err' });
@@ -975,6 +976,7 @@ export class Viewer {
       await prov.setFav(p, want);
       p.faved = want;
       p.favs += want ? 1 : -1;
+      emit('post-like', { post: p, on: want });
       toast(want ? 'Added to your favorites' : 'Removed from favorites', { ms: 1400 });
       this._paintToggles();
       this._renderPanel();
@@ -991,6 +993,7 @@ export class Viewer {
       const r = await prov.setVote(p, 1);
       const on = r?.our_score != null ? r.our_score > 0 : !voted.has(p);
       voted.set(p, on);
+      emit('post-like', { post: p, on, vote: true });
       toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1200 });
       this._paintToggles();
     } catch (e) {

@@ -281,9 +281,10 @@ export function openSettings(section) {
       h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'User-Agent'), h('small', {}, 'e621 asks for a descriptive one')),
         h('input', { class: 'input', value: S('ua'), placeholder: 'BoardRoamer/0.1 (by yourname on e621)', spellcheck: 'false', oninput: (e) => setS('ua', e.target.value.trim()) }))),
     sec('look', 'Look', themeRow, slider('Accent hue', 'hue', 0, 360, 1, (v) => v + '°'), toggle('Topographic backdrop', 'topo'), toggle('Film grain', 'grain'),
+      seg('Home screen', 'homeView', [['feed', 'Feed'], ['roam', 'Roam'], ['follows', 'Follows'], ['boards', 'Boards'], ['pools', 'Pools'], ['trail', 'Trail']], 'Where Board Roamer opens. Applies on this device'),
       seg('Tabs', 'tabs', [['off', 'Off'], ['auto', 'Auto'], ['always', 'Always']], 'Auto shows the tab bar once you open a second tab: right-click or long-press anything and choose Open in new tab, middle-click a section, or press Ctrl+T'),
       toggle('Reopen my tabs when the app starts', 'restoreTabs'),
-      ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Roam, Boards, Follows, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')]),
+      ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Feed, Roam, Follows, Boards, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')]),
       toggle('New-post counters on live boards', 'boardCounters', 'The “N new” mark on live board cards, on their chips above the gallery, and the count next to Boards. To hide it for just one board, right-click or long-press that board')),
     sec('notifications', 'Notifications',
       toggle('Notify me about new content', 'notify', 'A system notification when a check finds something new while the app is in the background. Words only, never a picture', async (on) => {
@@ -365,7 +366,8 @@ export function openSettings(section) {
 
 /* ------------------------------------------------------------------ shortcuts sheet */
 const SHORTCUTS = [
-  ['Everywhere', [['/', 'Focus the search'], ['1 – 5', 'Roam · Boards · Follows · Pools · Trail'], [',', 'Settings'], ['Ctrl+T', 'New tab'], ['Ctrl+W', 'Close tab'], ['Ctrl+Tab', 'Next tab (Ctrl+Shift+Tab: previous)'], ['Ctrl+Shift+T', 'Reopen closed tab'], ['Middle-click', 'Open a section or card in a new tab'], ['`', 'Cloak the screen (panic)'], ['?', 'This sheet'], ['Right-click', 'Menu for whatever is under the pointer']]],
+  ['Feed', [['↓ / J  ·  ↑ / K', 'Next · previous'], ['L', 'Like (and teach the Feed)'], ['X', 'Not interested'], ['Enter', 'Open the post'], ['Double-click', 'Like']]],
+  ['Everywhere', [['/', 'Focus the search'], ['1 – 6', 'Feed · Roam · Follows · Boards · Pools · Trail'], [',', 'Settings'], ['Ctrl+T', 'New tab'], ['Ctrl+W', 'Close tab'], ['Ctrl+Tab', 'Next tab (Ctrl+Shift+Tab: previous)'], ['Ctrl+Shift+T', 'Reopen closed tab'], ['Middle-click', 'Open a section or card in a new tab'], ['`', 'Cloak the screen (panic)'], ['?', 'This sheet'], ['Right-click', 'Menu for whatever is under the pointer']]],
   ['Gallery', [['Click', 'Open in viewer'], ['Arrows + Enter', 'Move and open'], ['Ctrl / Shift click', 'Select (range)'], ['Middle click', 'Open on site'], ['S', 'Toggle selection mode'], ['Esc', 'Leave selection']]],
   ['Viewer', [['← → / A D / J K', 'Previous / next'], ['PgUp / PgDn', 'Previous / next page in the pool'], ['Home / End', 'First / last'], ['Scroll / + −', 'Zoom (smooth)'], ['Z / double-click', 'Fit ⇄ 100%'], ['0', 'Reset view'], ['R', 'Rotate'], ['F', 'True fullscreen'], ['P', 'Slideshow']]],
   ['Viewer actions', [['B', 'Pin to a board'], ['V', 'Favorite'], ['U', 'Upvote'], ['S', 'Save to Downloads'], ['C', 'Copy link'], ['O', 'Open on site'], ['I', 'Info panel'], ['T', 'Filmstrip']]],

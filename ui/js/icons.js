@@ -1,6 +1,7 @@
 // Hand-drawn icon set: 24px grid, square caps + miter joins to match the angular UI.
 const P = {
   roam: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z" fill="currentColor"/>',
+  feed: '<rect x="6" y="3" width="12" height="18"/><path d="M9.500 9h5M9.500 13h3"/><path d="M3 9l-1 3 1 3M21 9l1 3-1 3"/>',
   boards: '<path d="M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z"/>',
   trail: '<circle cx="5" cy="19" r="2"/><circle cx="12" cy="9" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.4 17.4 10.6 10.6M13.6 7.7 17.4 6"/>',
   settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
