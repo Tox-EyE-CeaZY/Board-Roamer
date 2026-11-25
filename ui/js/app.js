@@ -22,7 +22,7 @@ import { openSettings, closeSettings, showHelp } from './settings.js';
 import { startAutoSync } from './sync.js';
 import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute, setTitle as setTabTitle, open as openTab, focusMain, mainActive, activeTabId, canBackOut, backOut } from './tabs.js';
 import { startAutoUpdateCheck } from './updates.js';
-import { toast, popover, closePopover, promptText } from './ui.js';
+import { toast, popover, closePopover, promptText, dialog } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
 import { downloadMany, selBar, openExternal, savePost } from './actions.js';
 import * as actions from './actions.js';
@@ -64,7 +64,7 @@ const tabBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const boardTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const appbar = h('header', { id: 'appbar' },
-  h('a', { class: 'ab-brand', href: '#/feed', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
+  h('a', { class: 'ab-brand', href: '#/', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
@@ -75,7 +75,7 @@ document.body.append(appbar, tabbar, fab);
 
 function buildRail() {
   rail.append(
-    h('a', { class: 'brand', href: '#/feed', title: 'Board Roamer' },
+    h('a', { class: 'brand', href: '#/', title: 'Board Roamer' },
       h('svg', { class: 'mark', viewBox: '0 0 40 40', width: 34, height: 34, html: '<rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 3"/><path class="needle" d="M20 7 24 20 20 33 16 20z" fill="var(--accent)"/><circle cx="20" cy="20" r="2.2" fill="var(--bg)"/>' }),
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
@@ -223,11 +223,15 @@ function parseFilters(p) {
   return f;
 }
 
+/** The screen the app opens on (Settings > Look > Home screen). */
+const homeView = () => (['feed', 'roam', 'follows', 'boards', 'pools', 'trail'].includes(S('homeView')) ? S('homeView') : 'feed');
+const homeHash = () => (homeView() === 'roam' ? '#/roam?p=' + prov.id : '#/' + homeView());
+
 function parseHash() {
-  const raw = location.hash.slice(1) || '/feed';
+  const raw = location.hash.slice(1) || '/' + homeView();
   const [path, qstr = ''] = raw.split('?');
   const seg = path.split('/').filter(Boolean);
-  return { view: seg[0] || 'feed', id: seg[1], p: new URLSearchParams(qstr) };
+  return { view: seg[0] || homeView(), id: seg[1], p: new URLSearchParams(qstr) };
 }
 
 function roamHash(terms, filters, provId, post, mb) {
@@ -304,10 +308,10 @@ const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title,
 let pendingRestore = null;
 
 function parseHashStr(hash) {
-  const raw = String(hash || '').replace(/^#/, '') || '/feed';
+  const raw = String(hash || '').replace(/^#/, '') || '/' + homeView();
   const [path, qstr = ''] = raw.split('?');
   const seg = path.split('/').filter(Boolean);
-  return { view: seg[0] || 'feed', id: seg[1], p: new URLSearchParams(qstr) };
+  return { view: seg[0] || homeView(), id: seg[1], p: new URLSearchParams(qstr) };
 }
 
 function tabTitleFor(hash) {
@@ -397,7 +401,7 @@ function noteTabRoute() {
   const sp = new URLSearchParams(q);
   sp.delete('post');
   sp.delete('read');
-  const hash = '#' + (path || '/feed') + (sp.toString() ? '?' + sp.toString() : '');
+  const hash = '#' + (path || '/' + homeView()) + (sp.toString() ? '?' + sp.toString() : '');
   const live = view === 'roam' ? boards.get(st.smartId) : null;
   tabNoteRoute({ hash, title: live ? live.name : tabTitleFor(hash), thumb: view === 'roam' ? st.loaded[0]?.thumb : view === 'board' ? boards.get(id)?.posts?.[0]?.thumb : '' });
 }
@@ -1550,10 +1554,10 @@ function boot() {
     applyRoute();
     if (returning && KEEP_SCROLL.includes(parseHash().view)) restoreScroll(pageScroll.get(entryKey()));
   });
-  if (!location.hash) history.replaceState(history.state, '', '#/roam?p=' + prov.id);
+  if (!location.hash) history.replaceState(history.state, '', homeHash());
   setupTabs($('#tabs'), { titleFor: tabTitleFor, newHash: () => '#/roam?p=' + prov.id, snapshot: snapshotView, show: showTab, mainOn });
   const lastTab = bootHash();
-  if (lastTab && location.hash === '#/roam?p=' + prov.id) history.replaceState(history.state, '', lastTab); // reopen where the last tab was
+  if (lastTab && location.hash === homeHash()) history.replaceState(history.state, '', lastTab); // reopen where the last tab was
   on('tab-title', (e) => setTabTitle(e.detail.title));
   onLayout(() => applyPhoneLayout());
   applyPhoneLayout();
@@ -1565,5 +1569,17 @@ function boot() {
   // quietly keep followed artists fresh
   setTimeout(() => refreshAll(), parseHash().view === 'feed' ? 40000 : 4500); // the Feed is first in line for e621's request queue on launch
   setInterval(() => refreshAll(), 30 * 60 * 1000);
+  setTimeout(askHome, 900);
+}
+
+/** First launch after the update: let the person pick where Board Roamer opens (it can be changed in Settings > Look). */
+async function askHome() {
+  if (S('homeAsked')) return;
+  const pick = await dialog({ title: 'Where should Board Roamer open?', body: h('div', {}, h('p', {}, 'The new Feed shows one post at a time and learns what you like, on this device. Pick your home screen. You can change it any time in Settings > Look.')),
+    actions: [{ label: 'Feed', value: 'feed', cls: 'primary' }, { label: 'Roam (search)', value: 'roam' }, { label: 'Follows', value: 'follows' }, { label: 'Boards', value: 'boards' }] });
+  setS('homeView', pick || 'feed');
+  setS('homeAsked', true);
+  const cur = parseHash();
+  if (pick && pick !== cur.view && ['feed', 'roam'].includes(cur.view) && !cur.p.get('q') && !cur.p.get('post')) go(pick === 'roam' ? '#/roam?p=' + prov.id : '#/' + pick);
 }
 boot();

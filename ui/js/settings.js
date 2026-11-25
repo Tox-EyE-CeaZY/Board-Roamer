@@ -281,6 +281,7 @@ export function openSettings(section) {
       h('div', { class: 'st-row col' }, h('div', { class: 'st-line' }, h('b', {}, 'User-Agent'), h('small', {}, 'e621 asks for a descriptive one')),
         h('input', { class: 'input', value: S('ua'), placeholder: 'BoardRoamer/0.1 (by yourname on e621)', spellcheck: 'false', oninput: (e) => setS('ua', e.target.value.trim()) }))),
     sec('look', 'Look', themeRow, slider('Accent hue', 'hue', 0, 360, 1, (v) => v + '°'), toggle('Topographic backdrop', 'topo'), toggle('Film grain', 'grain'),
+      seg('Home screen', 'homeView', [['feed', 'Feed'], ['roam', 'Roam'], ['follows', 'Follows'], ['boards', 'Boards'], ['pools', 'Pools'], ['trail', 'Trail']], 'Where Board Roamer opens. Applies on this device'),
       seg('Tabs', 'tabs', [['off', 'Off'], ['auto', 'Auto'], ['always', 'Always']], 'Auto shows the tab bar once you open a second tab: right-click or long-press anything and choose Open in new tab, middle-click a section, or press Ctrl+T'),
       toggle('Reopen my tabs when the app starts', 'restoreTabs'),
       ...(isPhone() ? [] : [toggle('Pinned Main tab', 'mainTab', 'The first tab is your home: Feed, Roam, Follows, Boards, Pools and Trail open there. Artists, boards and pools you open from it get their own tabs'), seg('Follows freshness', 'followsFresh', [[2, '2 min'], [10, '10 min'], [30, '30 min']], 'How old the last check can be before Follows looks for new posts again when you open or return to it')]),

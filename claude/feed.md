@@ -1,6 +1,6 @@
 # Feed (TikTok-style tab)
 
-Feed is the home screen: `#/feed` is the default route, and the tab order is Feed, Roam, Follows, Boards, Pools, Trail (keys 1-6). The first Follows refresh after launch waits 40 s when Feed is the landing page, so e621's queue serves the Feed first.
+Feed is the default home screen (setting `homeView`, per device; a one-time dialog `askHome()` in app.js lets people pick on first launch after the update, flag `homeAsked`): `#/feed` is the default route, and the tab order is Feed, Roam, Follows, Boards, Pools, Trail (keys 1-6). The first Follows refresh after launch waits 40 s when Feed is the landing page, so e621's queue serves the Feed first.
 
 Modes (`feedMode`, synced): **For you** (taste), **Following** (fresh posts from followed artists only, last 30 days), **New** (site order, newest) and **Hot** (site order by score, `date:day`, widening to week then month when exhausted; Danbooru uses `order:rank`). New/Hot/Following ignore the taste model. Repeats are fine: For you only avoids the last ~400 shown posts, New/Hot only avoid duplicates within the open view. For you leans gently to newer and hotter posts (`lean()`), but a strong taste match beats it. Pull down on the first card (or tap the refresh icon) for a fresh feed; at most one per 8 s.
 

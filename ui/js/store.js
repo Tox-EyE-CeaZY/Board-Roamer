@@ -85,6 +85,8 @@ export const DEFAULTS = {
   subSort: 'latest',
   subGroup: true,
   feedSources: ['e621'], // which sites the Feed draws from
+  homeView: 'feed', // the screen Board Roamer opens on (per device)
+  homeAsked: false, // the one-time "pick your home screen" question has been answered
   feedMode: 'foryou', // foryou | follows | new | hot
   feedExplore: 25, // % of the Feed that is deliberately off your usual taste
   feedFollows: true, // new posts from followed artists jump the queue

@@ -57,7 +57,7 @@ const make = (hash, extra = {}) => ({ id: uid(), hash, title: hooks.titleFor(has
 
 function ensure() {
   if (!tabs.length) {
-    const t = make(location.hash || '#/feed');
+    const t = make(location.hash || '#/');
     tabs.push(t);
     activeId = t.id;
   }
