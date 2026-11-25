@@ -32,8 +32,13 @@ Until the model is `ready` (4 likes, 12 shown) everything is a random popular pi
 Candidate queries: interest (1-2 liked tags, random order / random page on Danbooru) or explore (random, min score per site in `MIN_SCORE`).
 
 ## Request politeness (all in feed.js, on top of the proxy's own limiter)
-One request at a time per site, >= 2.4 s apart (e621/e926) or 1.8 s, <= 20 per 5 min, 40 posts per request, refill only when the pool is under 18 and the
-Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 15 min cool-down (`src.cool`). Media is only loaded for the card on screen and the next two.
+`gate(src, lane)`: lanes `posts` (1.5 s apart on e621/e926, 1.2 s others), `tags` (2.5 s), `learn` (3 s), `follow` (4 s); never closer than 0.7 s across lanes; safety ceiling 120 requests per 5 min per site (category lookups stop at 70% of it). The old 20-per-5-min budget stalled the Feed for minutes once category lookups ran: do not bring it back. Errors / 429 / 5xx: 20 s cool-down doubling to 5 min.
+
+## Loading (2.2.0)
+- `warm()` downloads the pictures (video posters) of the next `feedPreload` cards (default 20; 8/20/40 in the popover), 4 at a time, nearest first. `ahead()` keeps at least preload+4 cards assembled.
+- e621 new JSON: video re-encodes are under `files.video.samples/variants` (`e6alts` in providers.js); without reading them the original (30-100 MB) played. Phones take the smallest, computers 720p. Phones use `sampleSmall` (webp, about half the size).
+- Only the current and next video get a source; the next one buffers ahead only if under 8 MB.
+- Tags that tags.json never returns are cached as general after one asked lookup, so they are not requested forever.
 
 ## Gotchas
 - e621 sends tags flat (no categories). `ensureCats()` looks up categories (one gated request, usually none thanks to the `tagc` cache) for the post about to be shown, so the artist label and category weights are right. The model counts by tag name, so learning does not depend on categories.

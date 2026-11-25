@@ -88,6 +88,7 @@ export const DEFAULTS = {
   homeView: 'feed', // the screen Board Roamer opens on (per device)
   homeAsked: false, // the one-time "pick your home screen" question has been answered
   feedMode: 'foryou', // foryou | follows | new | hot
+  feedPreload: 20, // posts downloaded ahead of the one on screen (per device)
   feedExplore: 25, // % of the Feed that is deliberately off your usual taste
   feedFollows: true, // new posts from followed artists jump the queue
   feedSyncLikes: true, // a like in the Feed also favorites + upvotes on the site when you are signed in

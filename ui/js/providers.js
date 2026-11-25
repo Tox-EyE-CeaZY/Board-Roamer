@@ -97,9 +97,17 @@ function normE6(p, prov) {
     tags, artists, sources: p.sources || [], created: p.created_at, desc: p.description || '',
     parent: p.relationships?.parent_id || null, children: p.relationships?.children || [], pools: p.pools || [],
     duration: p.duration || meta.duration || 0, comments: p.comment_count ?? st.comment_count ?? 0, faved: !!(p.is_favorited ?? st.is_favorited), url: `${prov.web}/posts/${p.id}`,
-    alts: kind === 'video' ? Object.entries(p.sample?.alternates || files.sample?.alternates || {}).filter(([, v]) => v?.urls?.some(Boolean)).map(([k, v]) => ({ label: k, url: v.urls.find(Boolean), w: v.width, h: v.height })) : [],
+    alts: kind === 'video' ? e6alts(p, files) : [], sampleSmall: files.sample?.webp || null,
     isComic: tags.general.includes('comic') || tags.meta.includes('comic'),
   };
+}
+
+/** The smaller re-encodes of a video, from either JSON shape (the new one keeps them under files.video; without them the original, often 30-100 MB, plays). */
+function e6alts(p, files) {
+  const old = Object.entries(p.sample?.alternates || files.sample?.alternates || {}).filter(([, v]) => v?.urls?.some(Boolean)).map(([k, v]) => ({ label: k, url: v.urls.find(Boolean), w: v.width, h: v.height }));
+  const v = files.video || {};
+  const now = [...Object.entries(v.samples || {}), ...Object.entries(v.variants || {})].filter(([, x]) => x?.url).map(([k, x]) => ({ label: k, url: x.url, w: x.width, h: x.height, size: x.size }));
+  return [...old, ...now];
 }
 
 /** posts.json used to be {posts:[...]}; it is now a bare array. */
