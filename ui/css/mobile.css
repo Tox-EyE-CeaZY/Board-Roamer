@@ -411,4 +411,13 @@ html.phone .tabs-btn span { line-height: 1; }
 .pop.sheet.fd-pop { width: 100%; max-width: none; }
 .sheet .fd-set { width: 100%; max-width: none; max-height: none; overflow: visible; border: 0; background: transparent; padding: 0 16px 12px; box-sizing: border-box; }
 .sheet .fd-row small { max-width: none; }
-.sheet .fd-sugg-list { grid-template-columns: minmax(0, 1fr); }
+
+/* the Feed takes the whole screen: no title bar, its own top bar under the status bar */
+html.phone body[data-view="feed"] #appbar { display: none; }
+html.phone body[data-view="feed"] #app { margin-top: 0; height: calc(100% - var(--tabbar) - var(--safe-b)); }
+/* sideways: the rail steps aside whenever the buttons do */
+html.phone.landscape body[data-view="feed"] #app { height: 100%; }
+html.phone.landscape body[data-view="feed"] #app:has(.fd.idle, .fd.clean) { grid-template-columns: minmax(0, 1fr); }
+html.phone.landscape body[data-view="feed"] #app:has(.fd.idle, .fd.clean) .rail { display: none; }
+html.phone.landscape .fd-info { padding-bottom: 8px; } html.phone.landscape .fd-rail { bottom: 4px; gap: 0; grid-auto-flow: column; right: 8px; }
+html.phone.landscape .fd-info { right: 40%; }

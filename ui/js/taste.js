@@ -13,6 +13,8 @@ const HALF_LIFE_DAYS = 120;
 const SMOOTH = 3; // pseudo-observations at the global rate: how much evidence a tag needs before its own rate counts
 const MAX_TAGS = 4500;
 const LIFT_MIN = -1.5, LIFT_MAX = 3;
+/** What your own rating of a tag adds on top of what was learned: Love, More, Less, Never. */
+const SAID = { 2: 1.9, 1: 0.9, '-1': -1.3, '-2': -4 };
 
 /** [feature, weight] pairs for a post: its tags by category, plus its kind and rating (as "~kind:video"). */
 export function features(post) {
@@ -40,6 +42,7 @@ export class Taste {
     this.ts = d.ts || Date.now();
     this.likes = d.likes || 0; // real likes, never faded: for "have we learned anything yet"
     this.a = d.a || {}; // artist -> how much of their work was liked (for suggesting who to follow)
+    this.r = d.r || {}; // tag -> what you said about it: 2 love, 1 more, -1 less, -2 never. Does not fade.
     this._calls = 0;
     this._decay();
   }
@@ -49,7 +52,7 @@ export class Taste {
     for (const [k, [l, n]] of Object.entries(this.t)) t[k] = [Math.round(l * 1000) / 1000, Math.round(n * 1000) / 1000];
     const a = {};
     for (const [k, v] of Object.entries(this.a)) if (v >= 0.2) a[k] = Math.round(v * 100) / 100;
-    return { t, a, pl: Math.round(this.pl * 1000) / 1000, pn: Math.round(this.pn * 1000) / 1000, ts: this.ts, likes: this.likes };
+    return { t, a, r: this.r, pl: Math.round(this.pl * 1000) / 1000, pn: Math.round(this.pn * 1000) / 1000, ts: this.ts, likes: this.likes };
   }
 
   _decay(now = Date.now()) {
@@ -89,6 +92,29 @@ export class Taste {
     if (++this._calls % 100 === 0) this._prune();
   }
 
+  /** Say what you think of a tag (0 takes it back). */
+  say(tag, value) {
+    if (value) this.r[tag] = value;
+    else delete this.r[tag];
+  }
+
+  /** Does this post carry a tag you never want to see? */
+  banned(post) {
+    return features(post).some(([f]) => this.r[f] === -2);
+  }
+
+  /** Tags with an opinion attached: the ones you rated first, then what was learned most strongly either way. */
+  opinions(limit = 60) {
+    const said = Object.keys(this.r).map((tag) => ({ tag, said: this.r[tag], lift: this.lift(tag) }));
+    // with only a like or two, "you skip this" would be noise: say nothing until there is something to go on
+    const learned = Object.entries(this.likes >= 4 ? this.t : {})
+      .filter(([f, [, n]]) => f[0] !== '~' && !this.r[f] && n >= 4 && Math.abs(this.lift(f)) > 0.2)
+      .map(([tag, [l, n]]) => ({ tag, said: 0, lift: this.lift(tag), weight: Math.abs(this.lift(tag)) * Math.sqrt(l > 0.5 ? l : n / 4) }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, limit);
+    return [...said.sort((a, b) => b.said - a.said), ...learned.sort((a, b) => b.lift - a.lift)];
+  }
+
   /** Add to (or with a negative amount take from) how much an artist is liked. Weights are kept and nudged, never recomputed. */
   countArtists(post, amount) {
     for (const name of post.artists || []) {
@@ -118,7 +144,7 @@ export class Taste {
 
   /** Is there enough to go on to rank by taste at all? */
   get ready() {
-    return this.likes >= 4 && this.pn >= 12;
+    return (this.likes >= 4 && this.pn >= 12) || Object.keys(this.r).length > 0;
   }
 
   /** score, how unfamiliar it is (0..1), and the feature that pulled it up the most. */
@@ -126,6 +152,12 @@ export class Taste {
     const fs = features(post);
     let sum = 0, unknown = 0, best = null, bestV = 0;
     for (const [f, w, cat] of fs) {
+      const said = this.r[f];
+      if (said) {
+        const v = SAID[said] * w;
+        sum += v;
+        if (v > bestV && cat !== 'kind') (bestV = v), (best = { f, cat });
+      }
       const e = this.t[f];
       if (!e || e[1] < 2) {
         if (cat !== 'meta' && cat !== 'kind') unknown++;
@@ -142,8 +174,12 @@ export class Taste {
   /** The tags worth searching for: liked a fair amount and clearly above average. */
   interests(cats = ['artist', 'character', 'species', 'general', 'copyright'], limit = 30, tagCat = () => null) {
     const out = [];
+    for (const [f, v] of Object.entries(this.r)) {
+      const cat = tagCat(f);
+      if (v > 0 && (!cat || cats.includes(cat))) out.push({ tag: f, lift: SAID[v], l: 4, n: 4, rank: SAID[v] * 2.5 });
+    }
     for (const [f, [l, n]] of Object.entries(this.t)) {
-      if (f[0] === '~' || l < 1.2) continue;
+      if (f[0] === '~' || l < 1.2 || this.r[f]) continue;
       const cat = tagCat(f);
       if (cat && !cats.includes(cat)) continue;
       const lf = this.lift(f);
@@ -156,6 +192,7 @@ export class Taste {
   reset() {
     this.t = {};
     this.a = {};
+    this.r = {};
     this.pl = this.pn = this.likes = 0;
     this.ts = Date.now();
   }
