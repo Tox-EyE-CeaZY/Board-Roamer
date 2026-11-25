@@ -42,3 +42,9 @@ Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 
 - `fetchPage` builds a `Feed` per call; `pageOf` takes an existing one (needed for e621 cursor paging when reading favorites).
 - DOM is windowed: slots for every card, content only within 2 of the current one.
 - Not synced between devices on purpose (models are big and per-site); the settings are.
+
+## 2.1.0 fixes
+- `fill()` used to skip a round if one was already running and waited on category lookups before showing a card; with a long e621 queue (signed-in learning, follow checks) the Feed stalled after ~4 posts. Now a skipped round sets `view.again`, category lookups run in the background (`ensureCats(...).then(refreshInfo)`), `nextPost` has a 40 s timeout and the retry timer is 6 s.
+- Pinch zoom (`attachZoom`): touch listeners are on the whole card (a second finger often lands on the buttons), zoom stays after release, one finger pans, the scroller is locked while zoomed, double-tap / the Reset zoom pill / moving to another card resets. ctrl+wheel zooms on desktop.
+- Download button (and D) uses `ctx.savePost`; the upvote button turns solid accent when voted.
+- Scrolling settles on a timer, not requestAnimationFrame (frames are not delivered to a background window).

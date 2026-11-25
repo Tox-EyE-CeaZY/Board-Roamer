@@ -503,9 +503,6 @@ export function renderFeed(root, ctx) {
     const model = modelOf(prov);
     const liked = () => model.likes.has(p.id) || p.faved;
     const likeBtn = h('button', { class: 'fd-btn like' + (liked() ? ' on' : ''), title: 'Like (L)', 'aria-label': 'Like', html: icon('heart', 26) + `<small>${fmtNum(p.favs)}</small>`, onclick: (e) => (e.stopPropagation(), toggleLike(p, likeBtn)) });
-    const art = p.artists.slice(0, 2);
-    const topTags = heaviestTags(p, model);
-    const desc = String(p.desc || '').replace(/\[\/?[a-z]+(=[^\]]*)?\]|"([^"]+)":\S+/gi, '$2').replace(/\s+/g, ' ').trim().slice(0, 140);
     const blurred = isBlurred(p);
     let media;
     if (p.kind === 'video') {
@@ -520,21 +517,115 @@ export function renderFeed(root, ctx) {
       h('img', { class: 'fd-bg', src: p.thumb, alt: '', draggable: 'false' }),
       stage,
       h('div', { class: 'fd-shade' }),
-      h('div', { class: 'fd-info' },
-        h('div', { class: 'fd-why ' + it.kind }, it.why, h('i', {}, prov.short)),
-        art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
-        desc ? h('div', { class: 'fd-desc' }, desc) : null,
-        tagBox(p, model, topTags)),
+      buildInfo(it),
       h('div', { class: 'fd-rail' },
         likeBtn,
-        h('button', { class: 'fd-btn' + (voted.has(p) ? ' on' : ''), title: 'Upvote (U)', 'aria-label': 'Upvote', html: icon('up', 24), onclick: (e) => (e.stopPropagation(), upvote(p, e.currentTarget)) }),
+        h('button', { class: 'fd-btn up' + (voted.has(p) ? ' on' : ''), title: 'Upvote (U)', 'aria-label': 'Upvote', html: icon('up', 24), onclick: (e) => (e.stopPropagation(), upvote(p, e.currentTarget)) }),
         h('button', { class: 'fd-btn', title: 'Downvote / not interested (X)', 'aria-label': 'Downvote', html: icon('down', 24), onclick: (e) => (e.stopPropagation(), dislike(i, true)) }),
         h('button', { class: 'fd-btn', title: 'Open (Enter)', 'aria-label': 'Open', html: icon('eye', 24), onclick: (e) => (e.stopPropagation(), openIt(i)) }),
+        h('button', { class: 'fd-btn', title: 'Download (D)', 'aria-label': 'Download', html: icon('download', 24), onclick: (e) => (e.stopPropagation(), ctx.savePost?.(p)) }),
         h('button', { class: 'fd-btn', title: 'Pin', 'aria-label': 'Pin', html: icon('pin', 24), onclick: (e) => (e.stopPropagation(), quickPin([p])) }),
         soundBtn),
+      h('button', { class: 'fd-zoomreset', hidden: true, onclick: (e) => (e.stopPropagation(), card._zoom?.reset()) }, 'Reset zoom'),
       blurred ? h('button', { class: 'fd-reveal', onclick: (e) => (e.stopPropagation(), stage.classList.remove('blur'), e.currentTarget.remove()) }, 'Blurred: tap to show') : null);
     attachTaps(card, stage, media, p, likeBtn);
+    attachZoom(card, stage, media);
     return card;
+  };
+
+  /** Description and the heaviest tags: redrawn once e621's tag categories arrive. */
+  const buildInfo = (it) => {
+    const p = it.post, prov = getProvider(p.provider), model = modelOf(prov);
+    const art = p.artists.slice(0, 2);
+    const desc = String(p.desc || '').replace(/\[\/?[a-z]+(=[^\]]*)?\]|"([^"]+)":\S+/gi, '$2').replace(/\s+/g, ' ').trim().slice(0, 140);
+    return h('div', { class: 'fd-info' },
+      h('div', { class: 'fd-why ' + it.kind }, it.why, h('i', {}, prov.short)),
+      art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
+      desc ? h('div', { class: 'fd-desc' }, desc) : null,
+      tagBox(p, model, heaviestTags(p, model)));
+  };
+  const refreshInfo = (it) => {
+    it.why = whyOf(it.post, modelOf(it.post.provider), it.kind);
+    const slot = cards[view.items.indexOf(it)];
+    const old = slot?.querySelector('.fd-info');
+    if (old && !old.querySelector('.fd-tags.open')) old.replaceWith(buildInfo(it));
+  };
+
+  /** Pinch to zoom (images and video), drag to pan while zoomed. It stays where you leave it; "Reset zoom", a double-tap or moving to another card puts it back. */
+  const attachZoom = (card, stage, media) => {
+    const z = { s: 1, x: 0, y: 0, moved: false };
+    const pill = card.querySelector('.fd-zoomreset');
+    const apply = () => {
+      media.style.transform = z.s === 1 && !z.x && !z.y ? '' : `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+      pill.hidden = z.s <= 1.02;
+      scroller.style.overflowY = z.s > 1.02 ? 'hidden' : '';
+    };
+    const clampPan = () => {
+      const r = stage.getBoundingClientRect();
+      const mx = ((z.s - 1) * r.width) / 2, my = ((z.s - 1) * r.height) / 2;
+      z.x = Math.max(-mx, Math.min(mx, z.x));
+      z.y = Math.max(-my, Math.min(my, z.y));
+    };
+    const rel = (t) => { const r = stage.getBoundingClientRect(); return { x: t.clientX - r.left - r.width / 2, y: t.clientY - r.top - r.height / 2 }; };
+    let pinch = null, pan = null; // listeners sit on the whole card: a second finger often lands on the buttons
+    const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    card.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        scroller.style.overflowY = 'hidden'; // a swipe that had just begun must not carry on
+        const [a, b] = e.touches, ma = rel(a), mb = rel(b);
+        pinch = { d: dist(a, b), s: z.s, x: z.x, y: z.y, mid: { x: (ma.x + mb.x) / 2, y: (ma.y + mb.y) / 2 } };
+        pan = null;
+        z.moved = true;
+      } else if (e.touches.length === 1 && z.s > 1.02) {
+        pan = { px: e.touches[0].clientX, py: e.touches[0].clientY, x: z.x, y: z.y };
+        z.moved = false;
+      }
+    }, { passive: true });
+    card.addEventListener('touchmove', (e) => {
+      if (pinch && e.touches.length === 2) {
+        e.preventDefault();
+        const [a, b] = e.touches, ma = rel(a), mb = rel(b), mid = { x: (ma.x + mb.x) / 2, y: (ma.y + mb.y) / 2 };
+        const s = Math.max(1, Math.min(8, (pinch.s * dist(a, b)) / pinch.d));
+        const k = s / pinch.s;
+        z.s = s;
+        z.x = mid.x - (pinch.mid.x - pinch.x) * k;
+        z.y = mid.y - (pinch.mid.y - pinch.y) * k;
+        clampPan();
+        apply();
+      } else if (pan && e.touches.length === 1 && z.s > 1.02) {
+        e.preventDefault();
+        const t = e.touches[0];
+        if (Math.abs(t.clientX - pan.px) + Math.abs(t.clientY - pan.py) > 4) z.moved = true;
+        z.x = pan.x + t.clientX - pan.px;
+        z.y = pan.y + t.clientY - pan.py;
+        clampPan();
+        apply();
+      }
+    }, { passive: false });
+    card.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) pinch = null;
+      if (e.touches.length === 0) pan = null;
+      if (z.s <= 1.02) z.reset();
+    }, { passive: true });
+    card.addEventListener('touchcancel', () => { pinch = null; pan = null; }, { passive: true });
+    // a drag or pinch is not a tap
+    stage.addEventListener('click', (e) => { if (z.moved) (e.stopImmediatePropagation(), e.preventDefault(), (z.moved = false)); }, true);
+    // desktop: ctrl + wheel (or a trackpad pinch) zooms, plain wheel pans while zoomed
+    stage.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && z.s <= 1.02) return;
+      e.preventDefault();
+      if (e.ctrlKey) {
+        const m = rel(e), s = Math.max(1, Math.min(8, z.s * Math.exp(-e.deltaY * 0.01))), k = s / z.s;
+        z.x = m.x - (m.x - z.x) * k;
+        z.y = m.y - (m.y - z.y) * k;
+        z.s = s;
+      } else (z.x -= e.deltaX), (z.y -= e.deltaY);
+      clampPan();
+      apply();
+    }, { passive: false });
+    z.reset = () => { z.s = 1; z.x = 0; z.y = 0; z.moved = false; apply(); };
+    z.zoomed = () => z.s > 1.02;
+    card._zoom = z;
   };
 
   /** The heaviest few tags like hashtags, and a button that opens the full list (grouped by category, in a scroll box). */
@@ -562,6 +653,11 @@ export function renderFeed(root, ctx) {
     stage.addEventListener('click', (e) => {
       if (stage.classList.contains('blur')) return;
       const now = Date.now();
+      if (card._zoom?.zoomed()) {
+        if (now - t < 300) (card._zoom.reset(), (t = 0));
+        else t = now;
+        return;
+      }
       if (now - t < 300) {
         clearTimeout(timer);
         t = 0;
@@ -623,35 +719,39 @@ export function renderFeed(root, ctx) {
 
   /* --- keeping the queue stocked */
   const AHEAD = 4;
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
   async function fill() {
-    if (view.busy) return;
+    if (view.busy) return void (view.again = true); // run once more when the current round ends
     view.busy = true;
     try {
-      while (view.items.length < view.idx + AHEAD) {
-        if (!root.isConnected) return;
-        if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
-        const got = await nextPost(view);
-        if (!got) break;
-        const { post, kind } = got;
-        await ensureCats(post);
-        const it = { post, kind, why: whyOf(post, modelOf(post.provider), kind) };
-        view.items.push(it);
-        view.picks++;
-        addSlot();
-        paintEmpty();
-        if (view.items.length === 1) activate(0);
-        else syncWindow();
-      }
+      do {
+        view.again = false;
+        while (view.items.length < view.idx + AHEAD) {
+          if (!root.isConnected) return;
+          if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
+          const got = await withTimeout(nextPost(view), 40000);
+          if (!got) break;
+          const { post, kind } = got;
+          const it = { post, kind, why: whyOf(post, modelOf(post.provider), kind) };
+          view.items.push(it);
+          view.picks++;
+          addSlot();
+          paintEmpty();
+          if (view.items.length === 1) activate(0);
+          else syncWindow();
+          ensureCats(post).then(() => refreshInfo(it)); // categories (artist, weights) fill in without holding the feed up
+        }
+      } while (view.again && root.isConnected);
     } finally {
       view.busy = false;
       paintEmpty();
     }
-    if (!view.items.length || view.items.length < view.idx + 2) retry();
+    if (view.items.length < view.idx + AHEAD) retry();
   }
   let retryT = 0;
   function retry() {
     clearTimeout(retryT);
-    retryT = setTimeout(() => root.isConnected && (view.active() || !view.items.length) && fill(), 12000);
+    retryT = setTimeout(() => root.isConnected && (view.active() || !view.items.length) && fill(), 6000);
   }
   const paintEmpty = () => {
     const list = enabled();
@@ -676,6 +776,7 @@ export function renderFeed(root, ctx) {
   let since = 0, shownT = 0;
   function activate(i) {
     leave();
+    if (i !== view.idx) cards[view.idx]?.firstChild?._zoom?.reset();
     view.idx = i;
     const it = view.items[i];
     syncWindow();
@@ -713,14 +814,13 @@ export function renderFeed(root, ctx) {
   }
 
   let ticking = 0;
-  scroller.addEventListener('scroll', () => {
-    cancelAnimationFrame(ticking);
-    ticking = requestAnimationFrame(() => {
-      const hgt = scroller.clientHeight || 1;
-      const i = Math.round(scroller.scrollTop / hgt);
-      if (i !== view.idx && i >= 0 && i < view.items.length) activate(i);
-    });
-  }, { passive: true });
+  const settle = () => {
+    const hgt = scroller.clientHeight || 1;
+    const i = Math.round(scroller.scrollTop / hgt);
+    if (i !== view.idx && i >= 0 && i < view.items.length) activate(i);
+  };
+  // a short timer rather than a frame callback: frames are not delivered while the window is in the background
+  scroller.addEventListener('scroll', () => { clearTimeout(ticking); ticking = setTimeout(settle, 60); }, { passive: true });
 
   /* --- actions */
   const goTo = (i) => {
@@ -815,7 +915,7 @@ export function renderFeed(root, ctx) {
     if (yes && !m.likes.has(post.id)) { m.likes.add(post.id); m.taste.learn(post, { l: vote ? 0.7 : 1, n: 0, post_n: 0 }); m.save(); }
     else if (!yes && m.likes.has(post.id)) { m.likes.delete(post.id); m.taste.learn(post, { l: -1, n: 0, post_n: 0 }); m.save(); }
     const card = cards[view.items.findIndex((x) => x.post === post)];
-    card?.querySelector('.fd-btn.like')?.classList.toggle('on', !!yes);
+    card?.querySelector(vote ? '.fd-btn.up' : '.fd-btn.like')?.classList.toggle('on', !!yes);
   });
 
   /* --- keys (arrows / J K / L / X / Enter) while the Feed is what you are looking at */
@@ -829,6 +929,7 @@ export function renderFeed(root, ctx) {
     else if (k === 'x' || k === 'X') dislike(view.idx, true);
     else if (k === 'u' || k === 'U') p && upvote(p, cards[view.idx]?.querySelector('.fd-btn[aria-label=Upvote]'));
     else if (k === 'Enter') (e.preventDefault(), openIt(view.idx));
+    else if (k === 'd' || k === 'D') p && ctx.savePost?.(p);
     else if (k === ' ') {
       const v = cards[view.idx]?.querySelector('video');
       if (v) (e.preventDefault(), togglePlay(v));
