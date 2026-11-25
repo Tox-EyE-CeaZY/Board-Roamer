@@ -84,6 +84,12 @@ export const DEFAULTS = {
   libSort: 'updates',
   subSort: 'latest',
   subGroup: true,
+  feedSources: ['e621'], // which sites the Feed draws from
+  feedMode: 'foryou', // foryou | follows | new | hot
+  feedExplore: 25, // % of the Feed that is deliberately off your usual taste
+  feedFollows: true, // new posts from followed artists jump the queue
+  feedSyncLikes: true, // a like in the Feed also favorites + upvotes on the site when you are signed in
+  feedLearn: true, // read your favorites / upvotes from the site to learn your taste
   filters: { order: '', score: 0, ratings: { s: true, q: true, e: true }, media: '', shape: '', age: '' },
 };
 
@@ -92,7 +98,7 @@ settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEF
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
 export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'poolMostly', 'poolWarn', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
-  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters'];
+  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters', 'feedSources', 'feedMode', 'feedExplore', 'feedFollows', 'feedSyncLikes', 'feedLearn'];
 let settingsT = load('settingsT', {}); // when each synced setting was last changed here
 
 export const S = (k) => settings[k];
@@ -160,6 +166,8 @@ export const voted = {
     save('voted', [...votedSet]);
   },
 };
+/* ---------- small per-device storage for the Feed (taste model, what was seen / liked): not synced, not in backups ---------- */
+export const kv = { get: (k, def) => load(k, def), set: (k, v) => save(k, v), del: (k) => { try { localStorage.removeItem(NS + k); } catch {} } };
 
 /* ---------- post helpers ---------- */
 export const postKey = (p) => `${p.provider}:${p.id}`;

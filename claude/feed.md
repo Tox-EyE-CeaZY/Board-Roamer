@@ -1,0 +1,44 @@
+# Feed (TikTok-style tab)
+
+Feed is the home screen: `#/feed` is the default route, and the tab order is Feed, Roam, Follows, Boards, Pools, Trail (keys 1-6). The first Follows refresh after launch waits 40 s when Feed is the landing page, so e621's queue serves the Feed first.
+
+Modes (`feedMode`, synced): **For you** (taste), **Following** (fresh posts from followed artists only, last 30 days), **New** (site order, newest) and **Hot** (site order by score, `date:day`, widening to week then month when exhausted; Danbooru uses `order:rank`). New/Hot/Following ignore the taste model. Repeats are fine: For you only avoids the last ~400 shown posts, New/Hot only avoid duplicates within the open view. For you leans gently to newer and hotter posts (`lean()`), but a strong taste match beats it. Pull down on the first card (or tap the refresh icon) for a fresh feed; at most one per 8 s.
+
+One post at a time, full screen, swipe (or arrow keys / J K) for the next. Route `#/feed`, second item in `NAV`, kept alive like Follows/Pools
+(`KEEP_ALIVE.feed`). Opening the viewer over it (`openViewer` with a stand-in gallery) and closing it does NOT re-render the Feed: see the
+`view === 'feed' && wasUp` early return in `applyRouteCore`.
+
+## Files
+- `ui/js/taste.js` – pure model (runs in node). Per tag `[liked, shown]`; lift = ln(smoothed like rate / global like rate), clipped. A post scores
+  the sum of its tags' lifts times a category weight (`CAT_W`, artists 2.2) over sqrt(tag count). Counts fade with a 120-day half-life. `rate()` also
+  returns novelty (share of unfamiliar tags) and the best tag (used for the "You like X" label). `interests()` = tags worth querying for.
+- `ui/js/feed.js` – engine + view. Per account (credKey, so e621 and e926 share) `Model`: taste, seen ids, liked ids, learn info, follow check times,
+  persisted through `kv` in `store.js` (`br1:feed:*`, per device, not synced, not in backups). Per site `src`: candidate pool, fresh follow posts, pacing, cool-down.
+- Settings (synced, `store.js`): `feedSources` (sites, remembered), `feedExplore` (% wandering, default 25), `feedFollows`, `feedSyncLikes`, `feedLearn`.
+  All live in the sliders icon popover at the top right of the Feed.
+- `viewer.js` emits `post-like {post, on, vote}`; the Feed listens, so a heart/upvote anywhere teaches it.
+
+## Where the signal comes from
+1. Account: e621 `fav:USER` + `votedup:USER`, Danbooru `ordfav:USER`, Derpibooru `my:faves` + `my:upvotes` (needs key). First run reads up to 6 pages per query,
+   then a top-up of 2 pages every 12 h. Then two pages of ordinary posts as a baseline ("shown, not liked") so lifts mean something.
+   Gelbooru/Safebooru have no favorites: only hearts teach them.
+2. Hearts in the Feed (and double-tap): always recorded locally; also favorite + upvote on the site when signed in and `feedSyncLikes`.
+3. Soft signals: shown >700 ms = impression; lingering ~7 s (or ~90% of a video) = +0.25 like; flicked past <1.1 s = small penalty; X = strong penalty.
+
+## What is shown
+Every 3rd card (index % 3 == 1) is a fresh post (<8 days) from a followed artist when one is waiting (`followTick`, one e621 request covers 8 artists with `~`,
+each artist re-checked at most every 25 min). Otherwise, with probability `feedExplore` a deliberate wander (novel, random), else a softmax pick by score.
+Until the model is `ready` (4 likes, 12 shown) everything is a random popular pick.
+Candidate queries: interest (1-2 liked tags, random order / random page on Danbooru) or explore (random, min score per site in `MIN_SCORE`).
+
+## Request politeness (all in feed.js, on top of the proxy's own limiter)
+One request at a time per site, >= 2.4 s apart (e621/e926) or 1.8 s, <= 20 per 5 min, 40 posts per request, refill only when the pool is under 18 and the
+Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 15 min cool-down (`src.cool`). Media is only loaded for the card on screen and the next two.
+
+## Gotchas
+- e621 sends tags flat (no categories). `ensureCats()` looks up categories (one gated request, usually none thanks to the `tagc` cache) for the post about to be shown, so the artist label and category weights are right. The model counts by tag name, so learning does not depend on categories.
+- Smooth `scrollTo` can be dropped by a web view when snap points interrupt it; `goTo()` finishes the scroll by hand after 650 ms.
+- `fd-pop`/`fd-set` need a solid background (popover is over a photo).
+- `fetchPage` builds a `Feed` per call; `pageOf` takes an existing one (needed for e621 cursor paging when reading favorites).
+- DOM is windowed: slots for every card, content only within 2 of the current one.
+- Not synced between devices on purpose (models are big and per-site); the settings are.

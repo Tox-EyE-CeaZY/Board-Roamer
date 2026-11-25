@@ -15,6 +15,7 @@ import { Viewer } from './viewer.js';
 import { ComicReader } from './reader.js';
 import { renderBoards, renderBoard, updateCover, refreshBoards } from './boards.js';
 import { renderTrail } from './trail.js';
+import { renderFeed } from './feed.js';
 import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
@@ -50,7 +51,7 @@ const fSig = (f = {}) => JSON.stringify({ o: f.order || '', s: f.score || 0, r: 
 
 /* ================================================================== shell */
 const rail = $('#rail');
-const NAV = [['roam', 'Roam', 'roam'], ['boards', 'Boards', 'boards'], ['follows', 'Follows', 'bell'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
+const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolBadge = h('b', { class: 'nav-badge', hidden: true });
@@ -63,7 +64,7 @@ const tabBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const boardTabBadge = h('b', { class: 'nav-badge', hidden: true });
 const appbar = h('header', { id: 'appbar' },
-  h('a', { class: 'ab-brand', href: '#/roam', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
+  h('a', { class: 'ab-brand', href: '#/feed', 'aria-label': 'Board Roamer', html: markSvg }), appbarTitle, h('div', { class: 'vw-spacer' }), dialMini, tabsButton,
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
@@ -74,7 +75,7 @@ document.body.append(appbar, tabbar, fab);
 
 function buildRail() {
   rail.append(
-    h('a', { class: 'brand', href: '#/roam', title: 'Board Roamer' },
+    h('a', { class: 'brand', href: '#/feed', title: 'Board Roamer' },
       h('svg', { class: 'mark', viewBox: '0 0 40 40', width: 34, height: 34, html: '<rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 3"/><path class="needle" d="M20 7 24 20 20 33 16 20z" fill="var(--accent)"/><circle cx="20" cy="20" r="2.2" fill="var(--bg)"/>' }),
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
@@ -99,7 +100,7 @@ function paintPoolBadge() {
 function paintLocalNav() {
   const onn = !!S('localOn');
   document.querySelectorAll('[data-view="local"]').forEach((a) => (a.hidden = !onn));
-  tabbar.style.setProperty('--tabs', onn ? 6 : 5);
+  tabbar.style.setProperty('--tabs', onn ? NAV.length : NAV.length - 1);
   setActiveNav(parseHash().view);
 }
 
@@ -145,7 +146,7 @@ function setActiveNav(view) {
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
   tabbar.style.setProperty('--i', Math.max(0, i));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));
-  appbarTitle.textContent = { roam: 'Roam', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local' }[view] || 'Roam';
+  appbarTitle.textContent = { roam: 'Roam', feed: 'Feed', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local' }[view] || 'Roam';
 }
 
 /* ================================================================== roam view */
@@ -223,10 +224,10 @@ function parseFilters(p) {
 }
 
 function parseHash() {
-  const raw = location.hash.slice(1) || '/roam';
+  const raw = location.hash.slice(1) || '/feed';
   const [path, qstr = ''] = raw.split('?');
   const seg = path.split('/').filter(Boolean);
-  return { view: seg[0] || 'roam', id: seg[1], p: new URLSearchParams(qstr) };
+  return { view: seg[0] || 'feed', id: seg[1], p: new URLSearchParams(qstr) };
 }
 
 function roamHash(terms, filters, provId, post, mb) {
@@ -263,7 +264,7 @@ function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.
 /* The Main tab (Settings > Look > Pinned Main tab, computers only): the first tab is where you move between Roam, Boards,
    Follows, Pools and Trail. Anything you open from one of those pages (an artist, a board, a pool) gets a tab of its own. */
 const mainOn = () => !isPhone() && tabsEnabled() && S('mainTab') !== false;
-const PAGES = ['roam', 'boards', 'follows', 'pools', 'trail', 'local'];
+const PAGES = ['roam', 'feed', 'boards', 'follows', 'pools', 'trail', 'local'];
 
 function routeToTab(hash) {
   if (!mainOn()) return false;
@@ -303,10 +304,10 @@ const viewCtx = () => ({ openTab: (hash, title, thumb) => openTab(hash, { title,
 let pendingRestore = null;
 
 function parseHashStr(hash) {
-  const raw = String(hash || '').replace(/^#/, '') || '/roam';
+  const raw = String(hash || '').replace(/^#/, '') || '/feed';
   const [path, qstr = ''] = raw.split('?');
   const seg = path.split('/').filter(Boolean);
-  return { view: seg[0] || 'roam', id: seg[1], p: new URLSearchParams(qstr) };
+  return { view: seg[0] || 'feed', id: seg[1], p: new URLSearchParams(qstr) };
 }
 
 function tabTitleFor(hash) {
@@ -319,7 +320,7 @@ function tabTitleFor(hash) {
   }
   if (view === 'board') return boards.get(id)?.name || 'Board';
   if (view === 'local') return (p.get('d') || '').split('/').pop() || 'Local';
-  return { boards: 'Boards', follows: 'Follows', pools: 'Pools', trail: 'Trail', pool: 'Pool' }[view] || 'Roam';
+  return { feed: 'Feed', boards: 'Boards', follows: 'Follows', pools: 'Pools', trail: 'Trail', pool: 'Pool' }[view] || 'Roam';
 }
 
 /** The element whose scroll position belongs to what is on screen. */
@@ -396,7 +397,7 @@ function noteTabRoute() {
   const sp = new URLSearchParams(q);
   sp.delete('post');
   sp.delete('read');
-  const hash = '#' + (path || '/roam') + (sp.toString() ? '?' + sp.toString() : '');
+  const hash = '#' + (path || '/feed') + (sp.toString() ? '?' + sp.toString() : '');
   const live = view === 'roam' ? boards.get(st.smartId) : null;
   tabNoteRoute({ hash, title: live ? live.name : tabTitleFor(hash), thumb: view === 'roam' ? st.loaded[0]?.thumb : view === 'board' ? boards.get(id)?.posts?.[0]?.thumb : '' });
 }
@@ -411,7 +412,7 @@ const entryKey = () => `${activeTabId() || ''}|${navDepth}|${location.hash}`;
 /* Pools and Follows stay alive while you look at what you opened from them (a pool, an artist), so going back finds them
    exactly as they were: every page that was loaded, the same scroll, nothing fetched again. Each lives in its own pane in
    #v-other (per tab; Pools also per site); every other view shares the scratch pane, which is emptied when a kept one returns. */
-const KEEP_ALIVE = { pools: () => prov.id, follows: () => '' };
+const KEEP_ALIVE = { pools: () => prov.id, follows: () => '', feed: () => '' };
 const kept = new Map(); // `${tabId}|${view}` -> pane, oldest first
 const scratch = h('div', { class: 'pane' });
 other.append(scratch);
@@ -497,6 +498,7 @@ function applyRouteCore() {
   st.smartId = null; // leaving Roam ends the "you are inside this board" state
   document.title = 'Board Roamer';
   const ctx = viewCtx();
+  if (view === 'feed' && wasUp && onScreen?.view === 'feed' && shownPane._key?.endsWith('|feed')) return handlePost(null); // only the viewer over the Feed changed: the Feed itself stays as it is
   const { root, alive } = mountPane(view, wasUp);
   if (alive) {
     boardGal = null;
@@ -537,6 +539,7 @@ function applyRouteCore() {
     return handlePost(p.get('post'), boardGal);
   } else if (view === 'trail') (boardGal = null), renderTrail(root, ctx);
   else if (view === 'follows') (boardGal = null), renderFollows(root, ctx);
+  else if (view === 'feed') (boardGal = null), renderFeed(root, ctx);
   else if (view === 'pools') (boardGal = null), renderPools(root, ctx);
   if (view !== 'board') handlePost(null);
 }
@@ -1374,11 +1377,12 @@ addEventListener('keydown', (e) => {
   const view = parseHash().view;
   switch (e.key) {
     case '/': e.preventDefault(); if (view !== 'roam') go('#/roam'); setTimeout(() => searchBar.focus(), 30); break;
-    case '1': go('#/roam'); break;
-    case '2': go('#/boards'); break;
+    case '1': go('#/feed'); break;
+    case '2': go('#/roam'); break;
     case '3': go('#/follows'); break;
-    case '4': go('#/pools'); break;
-    case '5': go('#/trail'); break;
+    case '4': go('#/boards'); break;
+    case '5': go('#/pools'); break;
+    case '6': go('#/trail'); break;
     case ']': if (walk && walkValid()) (e.preventDefault(), walk.i < walk.ids.length - 1 && walkStep(walk.i + 1)); break;
     case '[': if (walk && walkValid() && walk.i > 0) (e.preventDefault(), walkStep(walk.i - 1)); break;
     case ',': openSettings(); break;
@@ -1559,7 +1563,7 @@ function boot() {
   applyRoute();
   history.replaceState({ n: 0, t: activeTabId() }, '');
   // quietly keep followed artists fresh
-  setTimeout(() => refreshAll(), 4500);
+  setTimeout(() => refreshAll(), parseHash().view === 'feed' ? 40000 : 4500); // the Feed is first in line for e621's request queue on launch
   setInterval(() => refreshAll(), 30 * 60 * 1000);
 }
 boot();

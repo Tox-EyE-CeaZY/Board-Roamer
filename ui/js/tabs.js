@@ -18,7 +18,7 @@ import { toast, popover, closePopover } from './ui.js';
 import { showMenu } from './ctxmenu.js';
 
 const KEY = 'br1:tabs';
-const VIEW_ICON = { roam: 'roam', boards: 'boards', board: 'pin', follows: 'bell', pools: 'book', pool: 'pool', trail: 'trail', local: 'folder' };
+const VIEW_ICON = { feed: 'feed', roam: 'roam', boards: 'boards', board: 'pin', follows: 'bell', pools: 'book', pool: 'pool', trail: 'trail', local: 'folder' };
 
 let tabs = [];
 let activeId = null;
@@ -33,7 +33,7 @@ export const tabsButton = h('button', { class: 'tabs-btn', 'aria-label': 'Tabs',
 const mode = () => S('tabs') || 'auto';
 export const tabsEnabled = () => mode() !== 'off';
 const shown = () => tabsEnabled() && (mode() === 'always' || tabs.length > 1);
-const kindOf = (hash) => String(hash || '').replace(/^#\/?/, '').split(/[/?]/)[0] || 'roam';
+const kindOf = (hash) => String(hash || '').replace(/^#\/?/, '').split(/[/?]/)[0] || 'feed';
 const cur = () => tabs.find((t) => t.id === activeId);
 
 const pinned = () => !!hooks?.mainOn?.() && tabs.length > 0;
@@ -57,7 +57,7 @@ const make = (hash, extra = {}) => ({ id: uid(), hash, title: hooks.titleFor(has
 
 function ensure() {
   if (!tabs.length) {
-    const t = make(location.hash || '#/roam');
+    const t = make(location.hash || '#/feed');
     tabs.push(t);
     activeId = t.id;
   }
