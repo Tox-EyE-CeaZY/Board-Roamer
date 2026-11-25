@@ -72,8 +72,23 @@ addEventListener('visibilitychange', () => document.hidden && models.forEach((m)
 
 /* ------------------------------------------------------------------ per-site state: pool of candidates, pacing, cool-down */
 const srcs = new Map();
+/** The last pool of candidates is kept on the device, so opening the app shows cards at once while a fresh batch is fetched behind them. */
+const poolKey = (prov) => 'feed:pool:' + prov.id;
+const loadPool = (prov) => {
+  const list = kv.get(poolKey(prov), []);
+  if (!Array.isArray(list)) return [];
+  for (const p of list) Object.defineProperty(p, '_kind', { value: 'explore', enumerable: false, writable: true, configurable: true });
+  return list.filter((p) => p && p.id && p.full && p.tags);
+};
+const savePool = (src) => {
+  src.savePool ||= debounce(() => {
+    if ((S('feedMode') || 'foryou') !== 'foryou') return;
+    kv.set(poolKey(src.prov), src.pool.slice(-90).map((p) => ({ ...p, desc: String(p.desc || '').slice(0, 300) })));
+  }, 4000);
+  src.savePool();
+};
 const srcOf = (prov) => {
-  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: [], fresh: [], last: 0, reqs: [], chain: Promise.resolve(), cool: 0, fails: 0, filling: null, followBusy: false, told: false });
+  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: loadPool(prov), fresh: [], last: 0, reqs: [], chain: Promise.resolve(), cool: 0, fails: 0, filling: null, followBusy: false, told: false });
   return srcs.get(prov.id);
 };
 
@@ -279,7 +294,9 @@ function refill(src, view) {
       if (model.taste.ready && Math.random() > pExplore) plan = interestQuery(prov, model);
       for (let attempt = 0; attempt < 2; attempt++) {
         const q = plan || { terms: [], opts: exploreOpts(prov), kind: 'explore' };
-        let posts = await fetchPage(src, q.terms, q.opts);
+        const small = !src.warmed && src.pool.length < 20; // the very first request of a session is a small one, so the first cards show quickly
+        src.warmed = true;
+        let posts = await fetchPage(src, q.terms, small ? { ...q.opts, limit: 40 } : q.opts);
         learnCats(posts);
         const have = new Set(src.pool.map((p) => p.id));
         const q2 = queued(view);
@@ -287,6 +304,7 @@ function refill(src, view) {
         for (const p of posts) Object.defineProperty(p, '_kind', { value: q.kind, enumerable: false, writable: true, configurable: true });
         src.pool.push(...posts);
         if (src.pool.length > POOL_MAX) src.pool.splice(0, src.pool.length - POOL_MAX);
+        savePool(src);
         if (posts.length >= 6) break;
         plan = null; // a thin answer (a rare tag pair, a blacklist that ate the page): try a plain wander next
       }
@@ -1029,14 +1047,20 @@ export function renderFeed(root, ctx) {
     if (!force && Date.now() - lastRefresh < 8000) return toast('Just refreshed', { ms: 1200 });
     lastRefresh = Date.now();
     leave();
-    for (const s of srcs.values()) (s.pool = []), (s.streams = null), (s.hotLevel = 0);
-    dropUpcoming(true);
+    // pulling down in For you reuses the pool already in hand (new picks, instantly); switching mode starts from scratch
+    const keepPool = !force && (S('feedMode') || 'foryou') === 'foryou';
+    for (const s of srcs.values()) (keepPool ? 0 : ((s.pool = []), (s.streams = null), (s.hotLevel = 0)));
+    dropUpcoming(true, keepPool);
     view.picks = 0;
     view.idx = 0;
     scroller.scrollTop = 0;
     paintEmpty();
     for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view);
     fill();
+    for (const p of enabled()) { // and a fresh batch behind the cards already on screen
+      const src = srcOf(p);
+      if (!needsKeyMissing(p) && !src.filling && src.cool <= Date.now()) refill(src, view);
+    }
   }
 
   /* pull down on the first card to refresh */
@@ -1061,14 +1085,14 @@ export function renderFeed(root, ctx) {
 
 
   /** Posts picked ahead from sites that are no longer on, or after a reset. */
-  function dropUpcoming(all = false) {
+  function dropUpcoming(all = false, keepPool = false) {
     const keep = new Set(enabled().map((p) => p.id));
     const tail = view.items.splice(view.idx + 1).filter((x) => !all && keep.has(x.post.provider));
     while (cards.length > view.idx + 1) (unmountCard(cards.length - 1), cards.pop().remove());
     if (all && view.items.length) { view.items.length = 0; while (cards.length) cards.pop().remove(); view.idx = 0; }
     for (const x of tail) (view.items.push(x), addSlot());
     syncWindow();
-    for (const s of srcs.values()) if (all || !keep.has(s.prov.id)) (s.pool = []), (s.fresh = []);
+    for (const s of srcs.values()) if ((all && !keepPool) || !keep.has(s.prov.id)) (s.pool = []), (s.fresh = []);
     paintEmpty();
   }
 
@@ -1102,8 +1126,8 @@ export function renderFeed(root, ctx) {
   paintChips();
   paintModes();
   paintEmpty();
-  autoLearn();
-  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 2500);
+  setTimeout(autoLearn, 15000); // reading favorites can wait: the first cards come first
+  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 8000);
   fill();
 }
 
