@@ -1336,3 +1336,12 @@ html.phone .fd-btn { width: 48px; min-height: 48px; }
 .fd-pop, .fd-set { background: var(--bg2); color: var(--ink); }
 .fd-set { border: 1px solid var(--line2); }
 .fd-pop { backdrop-filter: none; }
+.fd-more { background: var(--accent) !important; color: var(--accent-ink) !important; border-color: transparent !important; font-weight: 800 !important; }
+.fd-tags.open { display: grid; gap: 8px; max-width: 520px; padding: 10px; background: rgb(8 12 13 / .88); border: 1px solid #fff2; }
+.fd-allscroll { display: grid; gap: 8px; max-height: 34vh; overflow-y: auto; overscroll-behavior: contain; }
+.fd-tg small { display: block; margin-bottom: 4px; font: 700 10px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: #fff9; }
+.fd-tg > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.fd-tags.open .fd-more { justify-self: start; }
+.fd-tags button.c-character { color: var(--c-character); } .fd-tags button.c-species { color: var(--c-species); } .fd-tags button.c-copyright { color: var(--c-copyright); }
+.fd-tags button.c-lore { color: var(--c-lore); } .fd-tags button.c-meta { color: var(--c-meta); } .fd-tags button.c-contributor { color: var(--c-contributor); }
+.fd-tags.open, .fd-allscroll { pointer-events: auto; }

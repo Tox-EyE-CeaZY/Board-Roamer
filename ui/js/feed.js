@@ -1,7 +1,7 @@
 import { h, pretty, fmtNum, debounce, sleep } from './util.js';
 import { icon } from './icons.js';
 import { S, setS, on, emit, subs, tagc, kv, postKey, voted } from './store.js';
-import { getProvider, providerList, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
+import { getProvider, providerList, Feed, compileBlacklist, blacklistHit, isBlurred, CATS, CAT_LABEL } from './providers.js';
 import { Taste, softPick, features } from './taste.js';
 import { toast, popover, closePopover, confirmDlg } from './ui.js';
 import { quickPin } from './pins.js';
@@ -378,10 +378,10 @@ function takeFrom(src, view, explore) {
 }
 
 /** The few tags that weigh most for this post: what the person likes first, then the telling ones (characters, species). */
-function heaviestTags(post, model) {
+function heaviestTags(post, model, limit = 5) {
   const t = model.taste, fs = features(post).filter(([f, , cat]) => cat !== 'meta' && cat !== 'kind' && cat !== 'artist');
   const base = { character: 0.5, species: 0.4, copyright: 0.2, general: 0, lore: -0.2 };
-  return fs.map(([f, w, cat]) => ({ f, v: (t.ready ? t.lift(f) * w : 0) + (base[cat] ?? 0) + (t.t[f] ? 0.1 : 0) })).sort((a, b) => b.v - a.v).slice(0, 5).map((x) => x.f);
+  return fs.map(([f, w, cat]) => ({ f, v: (t.ready ? t.lift(f) * w : 0) + (base[cat] ?? 0) + (t.t[f] ? 0.1 : 0) })).sort((a, b) => b.v - a.v).slice(0, limit).map((x) => x.f);
 }
 
 /** e621 sends tags flat: look up the categories of what is about to be shown (the cache makes this rarer and rarer), so artists and weights are right. */
@@ -524,7 +524,7 @@ export function renderFeed(root, ctx) {
         h('div', { class: 'fd-why ' + it.kind }, it.why, h('i', {}, prov.short)),
         art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
         desc ? h('div', { class: 'fd-desc' }, desc) : null,
-        h('div', { class: 'fd-tags' }, topTags.map((t) => h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, t)) }, pretty(t))))),
+        tagBox(p, model, topTags)),
       h('div', { class: 'fd-rail' },
         likeBtn,
         h('button', { class: 'fd-btn' + (voted.has(p) ? ' on' : ''), title: 'Upvote (U)', 'aria-label': 'Upvote', html: icon('up', 24), onclick: (e) => (e.stopPropagation(), upvote(p, e.currentTarget)) }),
@@ -535,6 +535,26 @@ export function renderFeed(root, ctx) {
       blurred ? h('button', { class: 'fd-reveal', onclick: (e) => (e.stopPropagation(), stage.classList.remove('blur'), e.currentTarget.remove()) }, 'Blurred: tap to show') : null);
     attachTaps(card, stage, media, p, likeBtn);
     return card;
+  };
+
+  /** The heaviest few tags like hashtags, and a button that opens the full list (grouped by category, in a scroll box). */
+  const tagBox = (p, model, top) => {
+    const box = h('div', { class: 'fd-tags' });
+    const chip = (t, cat) => h('button', { class: cat ? 'c-' + cat : '', onclick: (e) => (e.stopPropagation(), openSearch(p, t)) }, pretty(t));
+    const total = Object.entries(p.tags).filter(([c]) => c !== 'artist').reduce((n, [, l]) => n + l.length, 0);
+    let all = false;
+    const paint = () => {
+      box.classList.toggle('open', all);
+      if (!all) {
+        box.replaceChildren(...top.map((t) => chip(t)), total > top.length ? h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = true), paint()) }, `View all ${total}`) : null);
+        return;
+      }
+      const groups = CATS.filter((c) => c !== 'artist' && p.tags[c]?.length).map((c) => h('div', { class: 'fd-tg' }, h('small', {}, CAT_LABEL[c] || c), h('div', {}, p.tags[c].map((t) => chip(t, c)))));
+      box.replaceChildren(h('div', { class: 'fd-allscroll' }, groups), h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = false), paint()) }, 'Show fewer'));
+    };
+    paint();
+    box.addEventListener('click', (e) => e.stopPropagation());
+    return box;
   };
 
   const attachTaps = (card, stage, media, p, likeBtn) => {
