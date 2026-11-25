@@ -32,8 +32,13 @@ Until the model is `ready` (4 likes, 12 shown) everything is a random popular pi
 Candidate queries: interest (1-2 liked tags, random order / random page on Danbooru) or explore (random, min score per site in `MIN_SCORE`).
 
 ## Request politeness (all in feed.js, on top of the proxy's own limiter)
-One request at a time per site, >= 2.4 s apart (e621/e926) or 1.8 s, <= 20 per 5 min, 40 posts per request, refill only when the pool is under 18 and the
-Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 15 min cool-down (`src.cool`). Media is only loaded for the card on screen and the next two.
+`gate(src, lane)`: lanes `posts` (1.5 s apart on e621/e926, 1.2 s others), `tags` (2.5 s), `learn` (3 s), `follow` (4 s); never closer than 0.7 s across lanes; safety ceiling 120 requests per 5 min per site (category lookups stop at 70% of it). The old 20-per-5-min budget stalled the Feed for minutes once category lookups ran: do not bring it back. Errors / 429 / 5xx: 20 s cool-down doubling to 5 min.
+
+## Loading (2.2.0)
+- `warm()` downloads the pictures (video posters) of the next `feedPreload` cards (default 20; 8/20/40 in the popover), 4 at a time, nearest first. `ahead()` keeps at least preload+4 cards assembled.
+- e621 new JSON: video re-encodes are under `files.video.samples/variants` (`e6alts` in providers.js); without reading them the original (30-100 MB) played. Phones take the smallest, computers 720p. Phones use `sampleSmall` (webp, about half the size).
+- Only the current and next video get a source; the next one buffers ahead only if under 8 MB.
+- Tags that tags.json never returns are cached as general after one asked lookup, so they are not requested forever.
 
 ## Gotchas
 - e621 sends tags flat (no categories). `ensureCats()` looks up categories (one gated request, usually none thanks to the `tagc` cache) for the post about to be shown, so the artist label and category weights are right. The model counts by tag name, so learning does not depend on categories.
@@ -48,3 +53,11 @@ Feed is on screen and visible. Errors / 429 / 5xx put the site on a 1, 2, 4 ... 
 - Pinch zoom (`attachZoom`): touch listeners are on the whole card (a second finger often lands on the buttons), zoom stays after release, one finger pans, the scroller is locked while zoomed, double-tap / the Reset zoom pill / moving to another card resets. ctrl+wheel zooms on desktop.
 - Download button (and D) uses `ctx.savePost`; the upvote button turns solid accent when voted.
 - Scrolling settles on a timer, not requestAnimationFrame (frames are not delivered to a background window).
+
+## 2.2.0: preloading
+- `AHEAD` = 14 cards lined up past the current one (was 4); pictures 3-6 cards down are prefetched with `new Image()`; `POOL_LOW` 45 / `POOL_MAX` 260 so the pool is topped up long before it runs dry (also on every card change). e621 pages are 75 posts (`pageFor`), so fewer requests carry more posts.
+- `recycle()`: if a site is slow or cooling down and fewer than 5 cards are lined up, an earlier card (12+ back) is shown again, so scrolling never dead-ends. Repeats are fine by design.
+- Cool-down is now 20 s doubling to 5 min (was 1 min to 15 min).
+- Tag categories: `feed.noCats` stops the provider's automatic two lookups per page; the Feed asks for the categories of the next ~4 cards in one paced request (`catsNear`), and redraws their text.
+- Big pool to rank from: pages are as big as each site allows (`pageFor`: e621 200, Danbooru and Gelbooru 100, Derpibooru 50), `POOL_LOW` 80, `POOL_MAX` 700. One request therefore carries hundreds of candidates, and the best of them is picked (softmax by taste, with a lean to newer/hotter). Category lookups: one paced request (<=100 tags) when the card on screen is missing categories or 70+ tags have piled up.
+- Reload speed: the pool is saved per site (`feed:pool:<site>`, last 90 posts, For you only) and loaded on start, so cards show at once while a fresh batch is fetched. The first request of a session is a small one (40 posts). Pull to refresh in For you reuses the pool (new picks instantly) and fetches a fresh batch behind it; switching mode starts from scratch. Reading favorites waits 15 s, the first follow check 8 s.

@@ -3,7 +3,7 @@ import { icon } from './icons.js';
 import { S, setS, on, emit, subs, tagc, kv, postKey, voted } from './store.js';
 import { getProvider, providerList, Feed, compileBlacklist, blacklistHit, isBlurred, CATS, CAT_LABEL } from './providers.js';
 import { Taste, softPick, features } from './taste.js';
-import { toast, popover, closePopover, confirmDlg } from './ui.js';
+import { toast, popover, closePopover, confirmDlg, segmented } from './ui.js';
 import { quickPin } from './pins.js';
 import { haptic, isPhone } from './platform.js';
 
@@ -20,12 +20,16 @@ import { haptic, isPhone } from './platform.js';
    - pictures come from the sites' CDN, loaded only for the card on screen and the next two.
    ========================================================================================================================== */
 
-const GAP = { e621: 2400, e926: 2400 };
-const DEF_GAP = 1800;
-const BUDGET = 20; // requests per five minutes per site
+const GAP = { e621: 1500, e926: 1500 };
+const DEF_GAP = 1200;
+const BUDGET = 120; // safety ceiling: requests per five minutes per site (0.4 a second)
+const EVERY = 700; // never closer than this to the Feed's previous request to the same site, whatever it is for
+const LANE_GAP = { tags: 2500, learn: 3000, follow: 4000 }; // chores have their own, slower queues so they never hold up the posts
 const PAGE = 40;
-const POOL_LOW = 18;
-const POOL_MAX = 160;
+/** Posts per request: bigger pages mean fewer requests, and a deeper pool to swipe through. */
+const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] || prov.pageSize || 40); // the most each site hands out at once (e621 allows 320)
+const POOL_LOW = 80; // top the pool up long before it runs out
+const POOL_MAX = 700; // a big pool to rank from: the best of hundreds, not of a handful
 const FRESH_DAYS = 8;
 const FOLLOW_EVERY = 25 * 60000;
 const LEARN_EVERY = 12 * 3600000;
@@ -70,20 +74,40 @@ addEventListener('visibilitychange', () => document.hidden && models.forEach((m)
 
 /* ------------------------------------------------------------------ per-site state: pool of candidates, pacing, cool-down */
 const srcs = new Map();
+/** The last pool of candidates is kept on the device, so opening the app shows cards at once while a fresh batch is fetched behind them. */
+const poolKey = (prov) => 'feed:pool:' + prov.id;
+const loadPool = (prov) => {
+  const list = kv.get(poolKey(prov), []);
+  if (!Array.isArray(list)) return [];
+  for (const p of list) Object.defineProperty(p, '_kind', { value: 'explore', enumerable: false, writable: true, configurable: true });
+  return list.filter((p) => p && p.id && p.full && p.tags);
+};
+const savePool = (src) => {
+  src.savePool ||= debounce(() => {
+    if ((S('feedMode') || 'foryou') !== 'foryou') return;
+    kv.set(poolKey(src.prov), src.pool.slice(-90).map((p) => ({ ...p, desc: String(p.desc || '').slice(0, 300) })));
+  }, 4000);
+  src.savePool();
+};
 const srcOf = (prov) => {
-  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: [], fresh: [], last: 0, reqs: [], chain: Promise.resolve(), cool: 0, fails: 0, filling: null, followBusy: false, told: false });
+  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: loadPool(prov), fresh: [], last: 0, reqs: [], chain: Promise.resolve(), cool: 0, fails: 0, filling: null, followBusy: false, told: false });
   return srcs.get(prov.id);
 };
 
-function gate(src) {
-  const gap = GAP[src.prov.id] || DEF_GAP;
-  return (src.chain = src.chain.then(async () => {
-    const now = Date.now();
-    src.reqs = src.reqs.filter((t) => now - t < 300000);
-    let wait = Math.max(0, src.last + gap - now);
-    if (src.reqs.length >= BUDGET) wait = Math.max(wait, src.reqs[0] + 300000 - now);
-    if (wait) await sleep(wait);
-    src.last = Date.now();
+/** Wait for this site's turn. Each kind of request ("lane") queues on its own, so a chore never sits in front of the next batch of posts. */
+function gate(src, lane = 'posts') {
+  const gap = LANE_GAP[lane] || GAP[src.prov.id] || DEF_GAP;
+  const L = ((src.lanes ||= {})[lane] ||= { last: 0, chain: Promise.resolve() });
+  return (L.chain = L.chain.then(async () => {
+    for (;;) {
+      const now = Date.now();
+      src.reqs = src.reqs.filter((t) => now - t < 300000);
+      let wait = Math.max(0, L.last + gap - now, src.last + EVERY - now);
+      if (src.reqs.length >= BUDGET) wait = Math.max(wait, src.reqs[0] + 300000 - now);
+      if (wait <= 0) break;
+      await sleep(wait); // another lane may have gone meanwhile: look again
+    }
+    L.last = src.last = Date.now();
     src.reqs.push(src.last);
   }));
 }
@@ -92,17 +116,18 @@ const filtersFor = (o = {}) => ({ order: o.order || '', score: o.score || 0, rat
 const trim = (set, max) => { while (set.size > max) set.delete(set.values().next().value); };
 
 /** One paced request. Cool-down on trouble, so a struggling site is left alone. */
-async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = PAGE, ratings } = {}) {
+async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = pageFor(src.prov), ratings, lane } = {}) {
   const feed = new Feed(src.prov, terms, filtersFor({ order, score, age, ratings }));
   feed.limit = limit;
   if (page != null) feed.pageNo = page;
-  return pageOf(src, feed);
+  return pageOf(src, feed, lane);
 }
 
 /** The next page of a feed object (which remembers its own cursor), paced. */
-async function pageOf(src, feed) {
+async function pageOf(src, feed, lane = 'posts') {
+  feed.noCats = true; // no automatic tag-category lookups for a whole page (see ensureCats)
   if (src.cool > Date.now()) throw new Error('cooling');
-  await gate(src);
+  await gate(src, lane);
   if (src.cool > Date.now()) throw new Error('cooling');
   const prov = src.prov;
   try {
@@ -112,7 +137,7 @@ async function pageOf(src, feed) {
   } catch (e) {
     if (!e.status || e.status === 429 || e.status >= 500 || e.status === 403) {
       src.fails++;
-      src.cool = Date.now() + Math.min(15 * 60000, 60000 * 2 ** (src.fails - 1));
+      src.cool = Date.now() + Math.min(5 * 60000, 20000 * 2 ** (src.fails - 1));
     }
     throw e;
   }
@@ -165,9 +190,9 @@ async function learnAccount(prov, { force = false } = {}) {
     for (const q of LEARN[prov.engine](c)) {
       const pages = first ? 6 : 2;
       const feed = new Feed(prov, [{ t: q.t, op: '+' }], filtersFor({ ratings: ALL_RATINGS }));
-      feed.limit = prov.engine === 'e6' ? 75 : PAGE;
+      feed.limit = pageFor(prov);
       for (let i = 0; i < pages && !feed.done; i++) {
-        const posts = await pageOf(src, feed);
+        const posts = await pageOf(src, feed, 'learn');
         if (!posts.length) break;
         learnCats(posts);
         let fresh = 0;
@@ -198,7 +223,7 @@ async function learnAccount(prov, { force = false } = {}) {
 /** A sample of ordinary posts from the same pool the Feed draws on, counted as "shown, not liked", so a tag's lift has something to compare with. */
 async function baseline(prov, model, src) {
   for (let i = 0; i < 2; i++) {
-    const posts = await fetchPage(src, [], { ...exploreOpts(prov), ratings: ALL_RATINGS });
+    const posts = await fetchPage(src, [], { ...exploreOpts(prov), ratings: ALL_RATINGS, lane: 'learn' });
     learnCats(posts);
     for (const p of posts) model.taste.learn(p, { l: 0, n: 1 });
   }
@@ -249,7 +274,7 @@ function streamFeed(src, mode) {
     const o = prov.engine === 'db' ? { order: 'rank' } : { order: 'score', age: prov.ages ? ages[src.hotLevel] : '' };
     f = new Feed(prov, [], filtersFor(o));
   } else f = new Feed(prov, [], filtersFor({}));
-  f.limit = PAGE;
+  f.limit = pageFor(prov);
   src.streams[mode] = f;
   return f;
 }
@@ -276,7 +301,9 @@ function refill(src, view) {
       if (model.taste.ready && Math.random() > pExplore) plan = interestQuery(prov, model);
       for (let attempt = 0; attempt < 2; attempt++) {
         const q = plan || { terms: [], opts: exploreOpts(prov), kind: 'explore' };
-        let posts = await fetchPage(src, q.terms, q.opts);
+        const small = !src.warmed && src.pool.length < 20; // the very first request of a session is a small one, so the first cards show quickly
+        src.warmed = true;
+        let posts = await fetchPage(src, q.terms, small ? { ...q.opts, limit: 40 } : q.opts);
         learnCats(posts);
         const have = new Set(src.pool.map((p) => p.id));
         const q2 = queued(view);
@@ -284,6 +311,7 @@ function refill(src, view) {
         for (const p of posts) Object.defineProperty(p, '_kind', { value: q.kind, enumerable: false, writable: true, configurable: true });
         src.pool.push(...posts);
         if (src.pool.length > POOL_MAX) src.pool.splice(0, src.pool.length - POOL_MAX);
+        savePool(src);
         if (posts.length >= 6) break;
         plan = null; // a thin answer (a rare tag pair, a blacklist that ate the page): try a plain wander next
       }
@@ -311,7 +339,7 @@ async function followTick(src, view) {
   try {
     const batch = due.slice(0, prov.engine === 'e6' ? 8 : 1);
     const terms = batch.map((f) => ({ t: f.t, op: batch.length > 1 ? '~' : '+' }));
-    const posts = await fetchPage(src, terms, { limit: PAGE, ratings: S('filters').ratings });
+    const posts = await fetchPage(src, terms, { limit: PAGE, ratings: S('filters').ratings, lane: 'follow' });
     learnCats(posts);
     for (const f of batch) model.fchk[f.t] = Date.now();
     const q = queued(view);
@@ -385,15 +413,26 @@ function heaviestTags(post, model, limit = 5) {
 }
 
 /** e621 sends tags flat: look up the categories of what is about to be shown (the cache makes this rarer and rarer), so artists and weights are right. */
-async function ensureCats(post) {
-  const prov = getProvider(post.provider);
-  if (!prov.resolveCats || !post.tags.general.some((t) => !tagc.get(prov.id, t))) return;
+const unknownTags = (prov, posts) => new Set(posts.flatMap((p) => p.tags.general).filter((t) => !tagc.get(prov.id, t)));
+async function ensureCats(posts, { urgent = false } = {}) {
+  const first = posts[0];
+  if (!first) return false;
+  const prov = getProvider(first.provider);
+  if (!prov.resolveCats) return false;
+  const need = posts.filter((p) => p.tags.general.some((t) => !tagc.get(prov.id, t)));
+  // only when the card on screen is missing its categories, or a good number of tags have piled up: one request then covers several cards
+  if (!need.length || !(need.includes(first) || unknownTags(prov, need).size >= 70)) return false;
+  if (srcOf(prov).reqs.length > BUDGET * 0.7) return false; // short on budget: posts come first
   try {
-    await gate(srcOf(prov));
-    await prov.resolveCats([post], 1);
+    await gate(srcOf(prov), 'tags');
+    const asked = [...unknownTags(prov, need)].slice(0, 100); // the same ones resolveCats will send
+    await prov.resolveCats(need, 1); // one paced request of up to 100 tags
+    // a few tags never come back (renamed, empty): once the answer arrived, stop asking about them
+    if (asked.some((t) => tagc.get(prov.id, t))) for (const t of asked) if (!tagc.get(prov.id, t)) tagc.set(prov.id, t, { cat: 'general' });
   } catch {
     /* categories are a nicety: carry on without */
   }
+  return true;
 }
 
 /** Take the next post for the view: a follow's new post every third card, otherwise taste or a deliberate wander. */
@@ -440,10 +479,16 @@ async function nextPost(view) {
 
 /* ================================================================== the view */
 const mediaSrc = (p) => {
-  if (p.kind === 'video') return (p.alts || []).find((a) => /720/.test(a.label))?.url || p.full;
+  if (p.kind === 'video') {
+    const alts = (p.alts || []).filter((a) => a.url);
+    // phones take the smallest re-encode, computers 720p
+    const pick = isPhone() ? [...alts].sort((a, b) => (a.size || 1e12) - (b.size || 1e12))[0] : alts.find((a) => /720/.test(a.label)) || alts[0];
+    return pick?.url || p.full;
+  }
   if (p.kind === 'anim') return p.full;
-  return (isPhone() ? p.sample || p.full : p.full || p.sample) || p.thumb;
+  return (isPhone() ? p.sampleSmall || p.sample || p.full : p.full || p.sample) || p.thumb;
 };
+const smallVideo = (p) => !!p && (p.alts || []).some((a) => a.url === mediaSrc(p) && a.size && a.size < 8e6);
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
 
 export function renderFeed(root, ctx) {
@@ -702,8 +747,11 @@ export function renderFeed(root, ctx) {
   const loadMedia = (i, play) => {
     const m = cards[i]?.querySelector('.fd-media');
     if (!m || !m.dataset.src) return;
+    if (m.tagName === 'VIDEO' && i > view.idx + 1) return; // only this video and the next one: the others would just compete for the connection
     if (!m.getAttribute('src')) m.src = m.dataset.src;
     if (m.tagName === 'VIDEO') {
+      // the next video starts buffering early, but only a small one: a big file would crowd out the pictures and burn mobile data
+      if (i === view.idx + 1 && smallVideo(view.items[i]?.post)) m.preload = 'auto';
       if (play && view.active()) m.play().catch(() => {});
       else m.pause();
     }
@@ -718,7 +766,17 @@ export function renderFeed(root, ctx) {
   };
 
   /* --- keeping the queue stocked */
-  const AHEAD = 4;
+  const ahead = () => Math.max(14, (S('feedPreload') || 20) + 4); // cards lined up past the one on screen, so a swipe never waits for the network
+  const MIN_AHEAD = 5;
+  /** An earlier card, far enough back to feel fresh, shown again. */
+  const recycle = () => {
+    if (view.items.length >= view.idx + MIN_AHEAD || (S('feedMode') || 'foryou') === 'follows') return null; // enough in hand: wait for real posts
+    const ahead = new Set(view.items.slice(view.idx).map((x) => x.post));
+    const old = view.items.slice(0, Math.max(0, view.idx - 12)).filter((x) => !ahead.has(x.post));
+    if (old.length < 8) return null;
+    const it = old[Math.floor(Math.random() * old.length)];
+    return { post: it.post, kind: it.kind };
+  };
   const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
   async function fill() {
     if (view.busy) return void (view.again = true); // run once more when the current round ends
@@ -726,10 +784,11 @@ export function renderFeed(root, ctx) {
     try {
       do {
         view.again = false;
-        while (view.items.length < view.idx + AHEAD) {
+        while (view.items.length < view.idx + ahead()) {
           if (!root.isConnected) return;
           if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
-          const got = await withTimeout(nextPost(view), 40000);
+          let got = await withTimeout(nextPost(view), 40000);
+          if (!got) got = recycle(); // the site is slow or cooling down: never dead-end, repeats are fine
           if (!got) break;
           const { post, kind } = got;
           const it = { post, kind, why: whyOf(post, modelOf(post.provider), kind) };
@@ -739,14 +798,14 @@ export function renderFeed(root, ctx) {
           paintEmpty();
           if (view.items.length === 1) activate(0);
           else syncWindow();
-          ensureCats(post).then(() => refreshInfo(it)); // categories (artist, weights) fill in without holding the feed up
         }
       } while (view.again && root.isConnected);
     } finally {
       view.busy = false;
       paintEmpty();
     }
-    if (view.items.length < view.idx + AHEAD) retry();
+    catsNear();
+    if (view.items.length < view.idx + ahead()) retry();
   }
   let retryT = 0;
   function retry() {
@@ -763,17 +822,47 @@ export function renderFeed(root, ctx) {
     empty.replaceChildren(h('div', { class: 'fd-loading' }, h('i'), h('b', {}, blocked ? 'Add an API key for this site' : cool ? 'The site asked us to slow down' : 'Tuning your feed…'), h('small', {}, blocked ? 'Open Settings > Accounts, or pick another site above.' : cool ? 'Trying again shortly. Requests are spaced out on purpose.' : 'Fetching a first batch.')));
   };
 
+  /* Pictures are downloaded well before they are needed, nearest first, a few at a time (they come from the sites' file servers, not the API). */
+  const warmed = new Map(); // url -> Image, kept so the download is not dropped
+  let warming = 0;
+  const preloadCount = () => S('feedPreload') || 20;
+  function warm() {
+    if (!root.isConnected) return;
+    const next = view.items.slice(view.idx + 1, view.idx + 1 + preloadCount()).map((x) => (x.post.kind === 'video' ? x.post.thumb : mediaSrc(x.post)));
+    while (warming < 4) {
+      const url = next.find((u) => u && !warmed.has(u));
+      if (!url) break;
+      const img = new Image();
+      warmed.set(url, img);
+      warming++;
+      img.onload = img.onerror = () => { warming--; warm(); };
+      img.src = url;
+    }
+    while (warmed.size > 120) warmed.delete(warmed.keys().next().value);
+  }
   const syncWindow = () => {
     for (let i = 0; i < cards.length; i++) {
       if (Math.abs(i - view.idx) <= 2) mountCard(i);
       else unmountCard(i);
     }
     for (let k = 0; k <= 2; k++) loadMedia(view.idx + k, k === 0);
+    warm();
     // the pictures just behind are kept, the ones far behind are dropped with their card
   };
 
   /* --- what is on screen now: learn from it */
-  let since = 0, shownT = 0;
+  let since = 0, shownT = 0, catBusy = false;
+  /** Categories for the cards about to be seen (not the whole queue): a single paced request, then their text is redrawn. */
+  async function catsNear() {
+    if (catBusy) return;
+    catBusy = true;
+    try {
+      const near = view.items.slice(view.idx, view.idx + 7);
+      if (await ensureCats(near.map((x) => x.post))) near.forEach(refreshInfo);
+    } finally {
+      catBusy = false;
+    }
+  }
   function activate(i) {
     leave();
     if (i !== view.idx) cards[view.idx]?.firstChild?._zoom?.reset();
@@ -794,6 +883,11 @@ export function renderFeed(root, ctx) {
       }, 700);
     }
     fill();
+    catsNear();
+    for (const p of enabled()) { // keep the pool deep: one refill at a time, paced by the gate
+      const src = srcOf(p);
+      if (!needsKeyMissing(p) && src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now() && view.active()) refill(src, view);
+    }
     scrollSaved = i;
   }
   let scrollSaved = 0;
@@ -961,6 +1055,7 @@ export function renderFeed(root, ctx) {
     body.append(
       h('h4', {}, 'Your Feed'),
       row('Exploring', 'How much is deliberately outside your taste', h('div', { class: 'fd-slide' }, sl, out)),
+      row('Preload ahead', 'How many posts download before you reach them (more uses more data)', segmented([[8, '8'], [20, '20'], [40, '40']], S('feedPreload') || 20, (v) => { setS('feedPreload', v); fill(); warm(); })),
       row('New from follows jump the queue', 'Fresh posts from artists you follow, about one card in three', tgl('feedFollows')),
       row('Likes go to the site', 'A heart also favorites and upvotes there when you are signed in', tgl('feedSyncLikes')),
       row('Learn from my favorites', 'Reads your favorites and upvotes (a few requests, then a quick top-up every 12 hours)', tgl('feedLearn', () => autoLearn())),
@@ -983,14 +1078,20 @@ export function renderFeed(root, ctx) {
     if (!force && Date.now() - lastRefresh < 8000) return toast('Just refreshed', { ms: 1200 });
     lastRefresh = Date.now();
     leave();
-    for (const s of srcs.values()) (s.pool = []), (s.streams = null), (s.hotLevel = 0);
-    dropUpcoming(true);
+    // pulling down in For you reuses the pool already in hand (new picks, instantly); switching mode starts from scratch
+    const keepPool = !force && (S('feedMode') || 'foryou') === 'foryou';
+    for (const s of srcs.values()) (keepPool ? 0 : ((s.pool = []), (s.streams = null), (s.hotLevel = 0)));
+    dropUpcoming(true, keepPool);
     view.picks = 0;
     view.idx = 0;
     scroller.scrollTop = 0;
     paintEmpty();
     for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view);
     fill();
+    for (const p of enabled()) { // and a fresh batch behind the cards already on screen
+      const src = srcOf(p);
+      if (!needsKeyMissing(p) && !src.filling && src.cool <= Date.now()) refill(src, view);
+    }
   }
 
   /* pull down on the first card to refresh */
@@ -1015,14 +1116,14 @@ export function renderFeed(root, ctx) {
 
 
   /** Posts picked ahead from sites that are no longer on, or after a reset. */
-  function dropUpcoming(all = false) {
+  function dropUpcoming(all = false, keepPool = false) {
     const keep = new Set(enabled().map((p) => p.id));
     const tail = view.items.splice(view.idx + 1).filter((x) => !all && keep.has(x.post.provider));
     while (cards.length > view.idx + 1) (unmountCard(cards.length - 1), cards.pop().remove());
     if (all && view.items.length) { view.items.length = 0; while (cards.length) cards.pop().remove(); view.idx = 0; }
     for (const x of tail) (view.items.push(x), addSlot());
     syncWindow();
-    for (const s of srcs.values()) if (all || !keep.has(s.prov.id)) (s.pool = []), (s.fresh = []);
+    for (const s of srcs.values()) if ((all && !keepPool) || !keep.has(s.prov.id)) (s.pool = []), (s.fresh = []);
     paintEmpty();
   }
 
@@ -1041,7 +1142,7 @@ export function renderFeed(root, ctx) {
       followTick(src, view);
       if (src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now()) refill(src, view);
     }
-    if (view.items.length < view.idx + AHEAD) fill();
+    if (view.items.length < view.idx + ahead()) fill();
   }, 20000);
   const onVis = () => { if (!document.hidden) { fill(); loadMedia(view.idx, true); } else cards[view.idx]?.querySelector('video')?.pause(); };
   document.addEventListener('visibilitychange', onVis);
@@ -1056,8 +1157,8 @@ export function renderFeed(root, ctx) {
   paintChips();
   paintModes();
   paintEmpty();
-  autoLearn();
-  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 2500);
+  setTimeout(autoLearn, 15000); // reading favorites can wait: the first cards come first
+  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 8000);
   fill();
 }
 
