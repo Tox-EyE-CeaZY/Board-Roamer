@@ -1381,6 +1381,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-mi { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 6px 4px; text-align: left; border-bottom: 1px solid var(--line); }
 .fd-mi div { display: grid; } .fd-mi small { opacity: .6; font-size: 11.5px; }
 .fd-add { display: flex; gap: 8px; } .fd-add .input { flex: 1; min-width: 0; }
+.fd-tr[hidden], .fd-trs .fd-sub[hidden] { display: none; }
+.fd-trs .fd-sub { margin: 4px 0 -2px; }
 .fd-tr { display: grid; gap: 6px; padding: 8px; background: var(--bg3); }
 .fd-tr-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
 .fd-tr-name b { overflow-wrap: anywhere; } .fd-tr-name small { opacity: .6; font-size: 11px; }

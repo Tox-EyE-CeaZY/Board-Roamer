@@ -744,7 +744,7 @@ export function renderFeed(root, ctx) {
   const SAYS = [[-2, 'Never'], [-1, 'Less'], ['n', 'Neutral'], [1, 'More'], [2, 'Love']];
   /** One row per tag: what was learned about it, and buttons to overrule that. */
   const tagRow = (prov, tag) => {
-    const m = modelOf(prov), row = h('div', { class: 'fd-tr' });
+    const m = modelOf(prov), row = h('div', { class: 'fd-tr', 'data-tag': tag });
     const paint = () => {
       const said = m.taste.r[tag] || 0, lift = m.taste.lift(tag);
       const cat = tagc.get(prov.id, tag)?.cat || 'general';
@@ -757,33 +757,46 @@ export function renderFeed(root, ctx) {
     paint();
     return row;
   };
-  /** The tags sheet: everything the Feed has an opinion on (or just the tags of one post), and a box to add any other tag. */
+  /** The tags sheet: everything the Feed has an opinion on, or every tag of one post (by category), and a box to find or add a tag. */
   function tagSheet(anchor, post) {
     el.classList.remove('idle');
     const provs = post ? [getProvider(post.provider)] : enabled().filter((p, i, a) => a.findIndex((x) => x.credKey === p.credKey) === i);
     let prov = provs[0];
     const list = h('div', { class: 'fd-trs' });
+    const total = post ? Object.values(post.tags).reduce((n, l) => n + l.length, 0) : 0;
     const paint = () => {
-      const m = modelOf(prov);
-      const tags = post ? [...new Set([...post.artists, ...heaviestTags(post, 40)])] : m.taste.opinions().map((x) => x.tag);
+      if (post) {
+        return list.replaceChildren(...CATS.filter((c) => post.tags[c]?.length).flatMap((c) => [h('div', { class: 'fd-sub' }, CAT_LABEL[c] || c), ...post.tags[c].map((t) => tagRow(prov, t))]));
+      }
+      const tags = modelOf(prov).taste.opinions().map((x) => x.tag);
       list.replaceChildren(...(tags.length ? tags.map((t) => tagRow(prov, t)) : [h('small', {}, 'Nothing learned yet. Add a tag above, or like a few posts.')]));
     };
-    const input = h('input', { class: 'input', placeholder: 'Add any tag, e.g. dragon', spellcheck: 'false', autocapitalize: 'off' });
+    const input = h('input', { class: 'input', placeholder: 'Find or add a tag, e.g. dragon', spellcheck: 'false', autocapitalize: 'off' });
+    const typed = () => input.value.trim().toLowerCase().replace(/\s+/g, '_');
+    /** Typing narrows the list; the category headings go while it does. */
+    const filter = () => {
+      const q = typed();
+      list.querySelectorAll('.fd-tr').forEach((row) => (row.hidden = !!q && !row.dataset.tag.includes(q)));
+      list.querySelectorAll('.fd-sub').forEach((head) => (head.hidden = !!q));
+    };
     const add = () => {
-      const t = input.value.trim().toLowerCase().replace(/\s+/g, '_');
+      const t = typed();
       if (!t) return;
       input.value = '';
       list.querySelector(':scope > small')?.remove(); // the "nothing yet" line
+      [...list.querySelectorAll('.fd-tr')].find((row) => row.dataset.tag === t)?.remove();
       list.prepend(tagRow(prov, t));
+      filter();
     };
+    input.addEventListener('input', filter);
     input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), add()));
     const pickSite = provs.length > 1 ? segmented(provs.map((p) => [p.id, p.name]), prov.id, (v) => { prov = getProvider(v); paint(); }) : null;
     paint();
     popover(anchor, h('div', { class: 'fd-set' },
-      h('h4', {}, post ? 'Tags on this post' : 'Your tags'),
+      h('h4', {}, post ? `All ${total} tags on this post` : 'Your tags'),
       h('small', { class: 'fd-hint' }, 'Never hides every post with the tag. Less and More nudge the Feed. Neutral means the tag does not count either way. Tap again to take it back.'),
       pickSite,
-      post ? null : h('div', { class: 'fd-add' }, input, h('button', { class: 'btn', onclick: add }, 'Add')),
+      h('div', { class: 'fd-add' }, input, h('button', { class: 'btn', onclick: add }, 'Add')),
       list), { align: 'right', cls: 'fd-pop' });
   }
 
