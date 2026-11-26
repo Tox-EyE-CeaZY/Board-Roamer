@@ -3,7 +3,7 @@
 //!
 //! Folders are handed out as "roots" (id + name + path) and every request names a root id and a path *inside* it, so a page
 //! can never ask for anything outside the folders you picked. Other devices reach `/local/list|file|thumb` only through the
-//! sync listener (pairing code required) and only while sharing is on; the app's own window uses the same routes on loopback.
+//! sync listener (paired devices only) and only while sharing is on; the app's own window uses the same routes on loopback.
 
 use sha2::{Digest, Sha256};
 use std::{
@@ -398,7 +398,7 @@ pub fn local_request(rq: Request, path: &str, query: &str) {
 }
 
 /* ------------------------------------------------------------------ another device's folders, fetched on the window's behalf */
-/// `/remote/<device>/local/...`: ask that device (with the pairing code) and hand its answer back, ranges included.
+/// `/remote/<device>/local/...`: ask that device (with the code derived from its pairing) and hand its answer back, ranges included.
 pub fn remote(rq: Request, path: &str, query: &str) {
     let rest = path.strip_prefix("/remote/").unwrap_or("");
     let (id, tail) = rest.split_once('/').unwrap_or((rest, ""));

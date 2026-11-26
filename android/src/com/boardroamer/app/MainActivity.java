@@ -20,6 +20,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
+import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -52,7 +53,8 @@ public class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
     static final String BASE = "https://" + HOST + "/index.html";
     private static final String TAG = "BoardRoamer";
-    private static final int REQ_FILE = 71;
+    private static final int REQ_FILE = 71, REQ_CAM = 72;
+    private PermissionRequest camRequest; // the page wants the camera (to scan the pairing code): waiting for the person to allow it
 
     WebView web;
     private ValueCallback<Uri[]> chooser;
@@ -199,6 +201,24 @@ public class MainActivity extends Activity {
                 return true;
             }
 
+            /** The camera, for scanning the pairing code on the computer. Only our own page, only video, and only when Android's permission is given. */
+            @Override public void onPermissionRequest(PermissionRequest r) {
+                runOnUiThread(() -> {
+                    boolean video = false, other = false;
+                    for (String res : r.getResources()) { if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) video = true; else other = true; }
+                    if (!video || other || r.getOrigin() == null || !HOST.equals(r.getOrigin().getHost())) { r.deny(); return; }
+                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        r.grant(new String[] { PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+                    } else {
+                        if (camRequest != null) camRequest.deny();
+                        camRequest = r;
+                        requestPermissions(new String[] { android.Manifest.permission.CAMERA }, REQ_CAM);
+                    }
+                });
+            }
+
+            @Override public void onPermissionRequestCanceled(PermissionRequest r) { if (camRequest == r) camRequest = null; }
+
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
                 if (chooser != null) chooser.onReceiveValue(null);
                 chooser = cb;
@@ -211,6 +231,16 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+    }
+
+    @Override public void onRequestPermissionsResult(int req, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(req, perms, results);
+        if (req == REQ_CAM && camRequest != null) {
+            PermissionRequest r = camRequest;
+            camRequest = null;
+            if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) r.grant(new String[] { PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+            else r.deny();
+        }
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {

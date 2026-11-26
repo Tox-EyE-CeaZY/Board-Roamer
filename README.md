@@ -187,7 +187,7 @@ ui/             embedded frontend (vanilla ES modules, no build step)
 - **Local** (Settings → Local, off by default): a gallery of the pictures and videos in folders you choose, on this device and on
   the other devices you sync with. Subfolders show up like boards; files open in the normal viewer; you can tag them (tags stay
   in Board Roamer, never in the file) and the tags Board Roamer embedded in its own downloads are read back. Read-only.
-  *Let my other devices browse these folders* shares them over your sync connection (same pairing code). On Android it needs
+  *Let my other devices browse these folders* shares them over your sync connection (paired phones only). On Android it needs
   "All files access" and keeps sharing alive with the app closed (a quiet "Sharing with your devices" notification). Mac:
   normal folders work, a Photos library is not a folder and cannot be browsed.
 - **Notifications** (Settings → Notifications, off by default): a system notification when a check finds new posts from your
@@ -197,9 +197,13 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   On Android this keeps working with the app closed (a background check about every 30 minutes, no Google services needed).
 - **#blur**: add `#blur` to a blacklist line (`wolf solo #blur`) to blur matching posts instead of hiding them. They stay
   blurred, in the gallery and the viewer, until you tap reveal, even when blacklisting is set to Hide or Off.
-- **Sync**: Settings → Sync on the computer turns on sharing and shows an address and a pairing code. Enter them in the
-  phone's Settings → Sync. Boards, pins, follows, library, trail, reading progress and look/search settings merge both
-  ways over Tailscale or the same Wi-Fi. Logins and layout sizes stay per device.
+- **Sync**: Settings → Sync on the computer turns on sharing; *Add a phone* shows a QR code, and the phone's Settings → Sync →
+  *Scan the code* pairs it (a typed code works too). The computer announces itself on the home network, so a phone finds it by
+  itself, and a roommate's Board Roamer on the same Wi-Fi is simply ignored (each computer has its own id and certificate, and a
+  phone only trusts the one it scanned). The connection is encrypted and pinned to that computer's certificate. Away from home
+  it works the same way when Tailscale is installed on both; the app suggests it when it can't reach the computer. Boards, pins,
+  follows, library, trail, reading progress and look/search settings merge both ways. Logins and layout sizes stay per device.
+  Phones paired before 2.13 pair again once (old address-and-code pairings were unencrypted).
 - **Phone layout**: bottom tab bar, sheets instead of popovers, swipe/pinch/long-press gestures, pull to refresh, Back
   button support, and a touch-friendly comic reader.
 
