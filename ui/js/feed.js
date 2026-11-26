@@ -64,7 +64,7 @@ export function renderFeed(root, ctx, list = null) {
 
   /* ---------------------------------------------------------------- showing and hiding the buttons */
   let idleT = 0;
-  const landscape = () => document.documentElement.classList.contains('phone') && innerWidth > innerHeight;
+  const landscape = () => document.documentElement.classList.contains('phone') && document.documentElement.classList.contains('landscape');
   /** While a video plays (or the phone is sideways) the buttons fade after a moment; any touch brings them back. */
   function wake() {
     el.classList.remove('idle');

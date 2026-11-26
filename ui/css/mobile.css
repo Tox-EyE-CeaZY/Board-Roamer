@@ -421,3 +421,37 @@ html.phone.landscape body[data-view="feed"] #app:has(.fd.idle, .fd.clean) { grid
 html.phone.landscape body[data-view="feed"] #app:has(.fd.idle, .fd.clean) .rail { display: none; }
 html.phone.landscape .fd-info { padding-bottom: 8px; } html.phone.landscape .fd-rail { bottom: 4px; gap: 0; grid-auto-flow: column; right: 8px; }
 html.phone.landscape .fd-info { right: 40%; }
+
+/* ============================================================================
+   DUAL SCREEN — a hinge or fold splits the window (Surface Duo spanned across both screens, tabletop postures).
+   platform.js measures the two screens and sets --p1-x/y/w/h (the main one: gallery, tabs, bars) and --p2-x/y/w/h
+   (the detail one: the viewer, the reader, settings), in px. Each screen is laid out as a phone; nothing is drawn under the hinge.
+   ========================================================================== */
+html.dual body { inset: auto; left: var(--p1-x); top: var(--p1-y); width: var(--p1-w); height: var(--p1-h); }
+html.dual #appbar { left: var(--p1-x); right: calc(100% - var(--p1-x) - var(--p1-w)); top: var(--p1-y); }
+html.dual #tabbar { left: var(--p1-x); right: calc(100% - var(--p1-x) - var(--p1-w)); bottom: calc(100% - var(--p1-y) - var(--p1-h)); }
+html.dual .fab { right: calc(100% - var(--p1-x) - var(--p1-w) + 14px); }
+html.dual #toasts { left: calc(var(--p1-x) + var(--p1-w) / 2); }
+/* the detail screen: whatever opens full-screen goes there */
+html.dual #viewer, html.dual #reader, html.dual.phone .settings {
+  inset: auto; left: var(--p2-x); top: var(--p2-y); width: var(--p2-w); height: var(--p2-h); right: auto; bottom: auto;
+}
+html.dual #reader { --pw: var(--p2-w); }
+html.dual .vw-title, html.dual .rd-title b, html.dual .vw-pool { max-width: calc(var(--p2-w) * .3); }
+/* sheets and dialogs cover the screen you are working on: the detail one while something is open in it */
+html.dual .sheet-back, html.dual .dlg-back, html.dual .help-back { inset: auto; left: var(--p1-x); top: var(--p1-y); width: var(--p1-w); height: var(--p1-h); }
+html.dual:has(#viewer.in, #reader.in) .sheet-back,
+html.dual:has(#viewer.in, #reader.in) .dlg-back,
+html.dual:has(#viewer.in, #reader.in) .help-back { left: var(--p2-x); top: var(--p2-y); width: var(--p2-w); height: var(--p2-h); }
+html.dual .pop.sheet, html.dual .ctxm.sheet { max-height: min(84%, calc(var(--p1-h) - 28px)); }
+/* nothing open on the detail screen yet: leave it calm instead of a hole */
+html.dual body::after {
+  content: 'Open a post, a page or a setting and it appears here'; position: fixed; z-index: -1; display: grid; place-items: center; text-align: center; padding: 0 12%; box-sizing: border-box;
+  left: var(--p2-x); top: var(--p2-y); width: var(--p2-w); height: var(--p2-h);
+  font: 600 11px var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--faint); pointer-events: none;
+}
+
+/* ============================================================ short windows: split-screen, a phone on its side */
+html.phone.short { --appbar: 44px; --tabbar: 50px; }
+html.phone.short .tab-t { display: none; }
+html.phone.short .ab-title { font-size: 16px; }

@@ -7,6 +7,8 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Rect;
+import android.view.DisplayCutout;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -70,6 +72,8 @@ public class MainActivity extends Activity {
         web = new WebView(this);
         web.setBackgroundColor(0xFF0A1113);
         setContentView(web);
+        // a hinge or fold can move whenever the window changes (spanning across both screens, split-screen, rotating)
+        web.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or, ob) -> updateHinge());
         configure();
         handleIntent(getIntent());
         web.loadUrl(BASE + pendingHash);
@@ -82,6 +86,40 @@ public class MainActivity extends Activity {
         if (!pendingHash.isEmpty()) {
             web.evaluateJavascript("location.hash=" + JSONObject.quote(pendingHash.substring(1)), null);
             pendingHash = "";
+        }
+    }
+
+    /** The hinge between the two screens of a dual-screen phone, in CSS pixels of the page: {"x","y","w","h"}, or "". Read by Bridge.hinge(). */
+    volatile String hinge = "";
+
+    private void updateHinge() {
+        String j = "";
+        try {
+            float den = getResources().getDisplayMetrics().density;
+            int W = web.getWidth(), H = web.getHeight();
+            int[] loc = new int[2];
+            web.getLocationInWindow(loc);
+            Rect found = null;
+            // the hinge of a Surface Duo (and other dual-screen and folding phones) is reported as a display cutout
+            WindowInsets in = web.getRootWindowInsets();
+            DisplayCutout dc = in != null ? in.getDisplayCutout() : null;
+            if (dc != null && W > 0) for (Rect r : dc.getBoundingRects()) {
+                Rect q = new Rect(r.left - loc[0], r.top - loc[1], r.right - loc[0], r.bottom - loc[1]);
+                if ((q.height() >= H * 0.9 && q.width() < W * 0.3) || (q.width() >= W * 0.9 && q.height() < H * 0.3)) { found = q; break; }
+            }
+            // no cutout reported: a Surface Duo with its window spanning both screens still has a hinge across the middle of the long side
+            if (found == null && W > 0 && Build.MODEL != null && Build.MODEL.contains("Duo")) {
+                float wd = W / den, hd = H / den;
+                if (Math.max(wd, hd) >= 1000 && Math.min(wd, hd) <= 800) {
+                    int gap = Math.round(28 * den);
+                    found = wd > hd ? new Rect((W - gap) / 2, 0, (W + gap) / 2, H) : new Rect(0, (H - gap) / 2, W, (H + gap) / 2);
+                }
+            }
+            if (found != null) j = "{\"x\":" + found.left / den + ",\"y\":" + found.top / den + ",\"w\":" + found.width() / den + ",\"h\":" + found.height() / den + "}";
+        } catch (RuntimeException ignored) { }
+        if (!j.equals(hinge)) {
+            hinge = j;
+            web.evaluateJavascript("window.__layout&&window.__layout()", null);
         }
     }
 

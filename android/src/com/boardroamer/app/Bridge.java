@@ -32,6 +32,10 @@ final class Bridge {
         return m == null || m.isEmpty() ? e.getClass().getSimpleName() : m;
     }
 
+    /** Where the hinge is on a dual-screen phone (JSON in CSS pixels), or "" on any other device. */
+    @JavascriptInterface
+    public String hinge() { return a.hinge; }
+
     /** Asynchronous: the answer arrives through window.__nativeResult(id, json). */
     @JavascriptInterface
     public void save(int id, String url, String name, String dir, String metaJson, String ua) {
