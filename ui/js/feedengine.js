@@ -114,28 +114,35 @@ const savePool = (src) => {
   }, 4000);
   src.savePool();
 };
+const newSrc = (prov, pool) => ({ prov, pool, fresh: [], last: 0, reqs: [], cool: 0, fails: 0, filling: null, followBusy: false, told: false });
 export const srcOf = (prov) => {
-  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: loadPool(prov), fresh: [], last: 0, reqs: [], cool: 0, fails: 0, filling: null, followBusy: false, told: false });
+  if (!srcs.has(prov.id)) srcs.set(prov.id, newSrc(prov, loadPool(prov)));
   return srcs.get(prov.id);
 };
+/** Whose turn-taking a pool follows: its own, or (a second pool on the same site) the site's. */
+const paceOf = (src) => src.pace || src;
+/** The pool a view picks from, and the mode it picks in (the Feed follows the setting; Roam's For you has its own of both). */
+const poolFor = (view, prov) => (view?.src && view.src.prov.id === prov.id ? view.src : srcOf(prov));
+const modeFor = (view) => view?.mode || mode();
 export const enabled = () => (S('feedSources') || []).map((id) => getProvider(id)).filter((p, i, a) => p && a.indexOf(p) === i);
 export const needsKeyMissing = (prov) => prov.needsKey && !(((S('creds') || {})[prov.credKey] || {}).key);
 
 /** Wait for this site's turn. Each kind of request queues on its own, so a chore never sits in front of the next batch of posts. */
 function gate(src, lane = 'posts') {
   const gap = LANE_GAP[lane] || GAP[src.prov.id] || DEF_GAP;
-  const L = ((src.lanes ||= {})[lane] ||= { last: 0, chain: Promise.resolve() });
+  const pace = paceOf(src);
+  const L = ((pace.lanes ||= {})[lane] ||= { last: 0, chain: Promise.resolve() });
   return (L.chain = L.chain.then(async () => {
     for (;;) {
       const now = Date.now();
-      src.reqs = src.reqs.filter((t) => now - t < 300000);
-      let wait = Math.max(0, L.last + gap - now, src.last + EVERY - now);
-      if (src.reqs.length >= BUDGET) wait = Math.max(wait, src.reqs[0] + 300000 - now);
+      pace.reqs = pace.reqs.filter((t) => now - t < 300000);
+      let wait = Math.max(0, L.last + gap - now, pace.last + EVERY - now);
+      if (pace.reqs.length >= BUDGET) wait = Math.max(wait, pace.reqs[0] + 300000 - now);
       if (wait <= 0) break;
       await sleep(wait); // another lane may have gone meanwhile: look again
     }
-    L.last = src.last = Date.now();
-    src.reqs.push(src.last);
+    L.last = pace.last = Date.now();
+    pace.reqs.push(pace.last);
   }));
 }
 
@@ -152,17 +159,18 @@ async function fetchPage(src, terms, { order = '', score = 0, age = '', page = n
 /** The next page of a feed object (which remembers its own cursor), paced. Cool-down on trouble, so a struggling site is left alone. */
 async function pageOf(src, feed, lane = 'posts') {
   feed.noCats = true; // no automatic tag-category lookups for a whole page (see ensureCats)
-  if (src.cool > Date.now()) throw new Error('cooling');
+  const pace = paceOf(src);
+  if (pace.cool > Date.now()) throw new Error('cooling');
   await gate(src, lane);
-  if (src.cool > Date.now()) throw new Error('cooling');
+  if (pace.cool > Date.now()) throw new Error('cooling');
   try {
     const posts = await src.prov.page(feed);
-    src.fails = 0;
+    pace.fails = 0;
     return posts;
   } catch (e) {
     if (!e.status || e.status === 429 || e.status >= 500 || e.status === 403) {
-      src.fails++;
-      src.cool = Date.now() + Math.min(5 * 60000, 20000 * 2 ** (src.fails - 1));
+      pace.fails++;
+      pace.cool = Date.now() + Math.min(5 * 60000, 20000 * 2 ** (pace.fails - 1));
     }
     throw e;
   }
@@ -335,7 +343,7 @@ export function refill(src, view) {
   const prov = src.prov, model = modelOf(prov);
   src.filling = (async () => {
     try {
-      const m = mode();
+      const m = modeFor(view);
       if (m === 'new' || m === 'hot') {
         let posts = await pageOf(src, streamFeed(src, m));
         learnCats(posts);
@@ -361,7 +369,7 @@ export function refill(src, view) {
         for (const p of posts) (tag(p, '_kind', q.kind), tag(p, '_q', q.tag || ''));
         src.pool.push(...posts);
         if (src.pool.length > POOL_MAX) src.pool.splice(0, src.pool.length - POOL_MAX);
-        savePool(src);
+        if (!src.pace) savePool(src);
         // a targeted search is only a handful: top up with a broad batch too when the pool is thin
         if (posts.length >= 6 && (!plan || src.pool.length >= POOL_LOW)) break;
         plan = null;
@@ -383,7 +391,7 @@ export function refill(src, view) {
 export async function followTick(src, view) {
   const prov = src.prov, model = modelOf(prov);
   if (!S('feedFollows') && mode() !== 'follows') return;
-  if (src.followBusy || src.cool > Date.now()) return;
+  if (src.followBusy || paceOf(src).cool > Date.now()) return;
   const now = Date.now();
   const due = subs.all().filter((f) => f.p === prov.credKey && f.cat === 'artist' && now - (model.fchk[f.t] || 0) > FOLLOW_EVERY).sort((a, b) => (model.fchk[a.t] || 0) - (model.fchk[b.t] || 0));
   if (!due.length) return;
@@ -460,7 +468,7 @@ function sameness(view, model) {
 function takeFrom(src, view, explore) {
   const model = modelOf(src.prov);
   const q = queued(view);
-  const m = mode();
+  const m = modeFor(view);
   src.pool = src.pool.filter((p) => acceptable(p, model, q, m));
   if (!src.pool.length) return null;
   if (m !== 'foryou') return src.pool.shift(); // New / Hot: the site's own order
@@ -482,16 +490,16 @@ function takeFrom(src, view, explore) {
 
 /** The next post for the view: now and then one fresh from a follow, otherwise taste or a deliberate wander. */
 export async function nextPost(view) {
-  const list = enabled().filter((p) => !needsKeyMissing(p));
+  const list = (view.sites || enabled()).filter((p) => !needsKeyMissing(p));
   if (!list.length) return null;
-  const m = mode();
+  const m = modeFor(view);
   const fresh = () => {
     const q = queued(view);
-    for (const p of list) srcOf(p).fresh = srcOf(p).fresh.filter((x) => acceptable(x, modelOf(p), q, m));
-    return list.flatMap((p) => srcOf(p).fresh).sort((a, b) => new Date(b.created) - new Date(a.created));
+    for (const p of list) poolFor(view, p).fresh = poolFor(view, p).fresh.filter((x) => acceptable(x, modelOf(p), q, m));
+    return list.flatMap((p) => poolFor(view, p).fresh).sort((a, b) => new Date(b.created) - new Date(a.created));
   };
   const useFresh = (post) => {
-    list.forEach((p) => (srcOf(p).fresh = srcOf(p).fresh.filter((x) => x !== post)));
+    list.forEach((p) => (poolFor(view, p).fresh = poolFor(view, p).fresh.filter((x) => x !== post)));
     return { post, kind: 'follow' };
   };
   if (m === 'follows') {
@@ -505,11 +513,11 @@ export async function nextPost(view) {
   }
   for (let round = 0; round < 3; round++) {
     for (let k = 0; k < list.length; k++) {
-      const prov = list[(view.rr++) % list.length], src = srcOf(prov);
+      const prov = list[(view.rr++) % list.length], src = poolFor(view, prov);
       const explore = m === 'foryou' && Math.random() < (S('feedExplore') || 0) / 100;
       let post = takeFrom(src, view, explore);
       if (src.pool.length < POOL_LOW && !src.filling && view.active()) refill(src, view); // in the background
-      if (!post && src.cool <= Date.now()) {
+      if (!post && paceOf(src).cool <= Date.now()) {
         await refill(src, view);
         post = takeFrom(src, view, explore);
       }
@@ -519,6 +527,51 @@ export async function nextPost(view) {
   // nothing new anywhere: forget the oldest half of what was seen in earlier sessions (this session's posts still never repeat)
   if (m === 'foryou') for (const p of list) trim(modelOf(p).seen, Math.floor(modelOf(p).seen.size / 2));
   return null;
+}
+
+/* ------------------------------------------------------------------ For you, in Roam */
+/**
+ * The Feed's suggestions as a page-by-page source for the Roam grid (same shape as a search feed). It has its own pool, shares the
+ * site's pacing, and what it hands out does not come up again in the Feed this session. Showing a grid teaches nothing.
+ */
+export class SuggestFeed {
+  constructor(prov) {
+    this.prov = prov;
+    this.done = false;
+    this.busy = false;
+    this.total = null;
+    this.tags = [];
+    const main = srcOf(prov);
+    const src = Object.assign(newSrc(prov, []), { pace: main, warmed: true });
+    this.view = { items: [], rr: 0, mode: 'foryou', sites: [prov], src, active: () => true };
+  }
+  async next(count = 30) {
+    if (this.busy || this.done) return [];
+    this.busy = true;
+    try {
+      if (needsKeyMissing(this.prov)) throw new Error(`${this.prov.name} needs an API key: add it in Settings.`);
+      if (!this.started) {
+        this.started = true;
+        if (S('feedLearn') && canLearn(this.prov)) learnAccount(this.prov); // in the background, for next time if not this one
+        followTick(this.view.src, this.view);
+      }
+      const out = [];
+      while (out.length < count) {
+        const got = await nextPost(this.view);
+        if (!got) break;
+        this.view.items.push(got);
+        for (const id of idsOf(got.post)) shown.add(id);
+        out.push(got.post);
+      }
+      if (!out.length) {
+        if (paceOf(this.view.src).cool > Date.now()) throw new Error('The site asked us to slow down. Try again in a moment.');
+        this.done = true;
+      }
+      return out;
+    } finally {
+      this.busy = false;
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ what you said about a post */
