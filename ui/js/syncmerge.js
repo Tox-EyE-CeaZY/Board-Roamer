@@ -9,7 +9,9 @@
  *   reading    the most recent page per comic wins
  *   folders    one list, newest rename wins; which folder a title or board is in travels with the title / board
  *   deletions  remembered as tombstones for 120 days, and a later edit beats an earlier deletion
+ *   feed       what the Feed learned: added up per device without counting anything twice (feedmerge.js)
  */
+import { mergeFeed } from './feedmerge.js';
 const postKey = (p) => `${p.provider}:${p.id}`;
 const INBOX = 'pins';
 const num = (n) => (typeof n === 'number' && isFinite(n) ? n : 0);
@@ -177,7 +179,9 @@ export function merge(a, b) {
   if (!a) return b;
   if (!b) return a;
   const tomb = mergeTomb(a.tomb, b.tomb);
+  const feed = mergeFeed(a.feed, b.feed);
   return {
+    ...(feed ? { feed } : {}),
     v: 1,
     ...mergeSettings(a, b),
     boards: mergeBoards(a.boards, b.boards, tomb),

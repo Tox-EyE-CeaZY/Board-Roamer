@@ -22,6 +22,7 @@ import { Style } from './style.js';
 import * as stylist from './stylist.js';
 import { poolInfo, loadPool as loadComic, poolKey as readKey } from './pools.js';
 import { comicPlan } from './comicplan.js';
+import { engine as sync, deviceId, ledgerOf, foldAccount, resetLedger } from './feedsync.js';
 import { isPhone } from './platform.js';
 
 const GAP = { e621: 1500, e926: 1500 };
@@ -35,7 +36,7 @@ const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] ||
 export const SUGGEST_AT = 3; // liked this many times (favorite 1, upvote about 0.8): worth suggesting
 export const POOL_LOW = 80;
 const POOL_MAX = 700;
-const SEEN_MAX = 3000; // shown posts remembered between sessions
+const SEEN_MAX = 6000; // shown posts remembered between sessions (across synced devices)
 const FRESH_DAYS = 8;
 const FOLLOW_EVERY = 25 * 60000;
 const LEARN_EVERY = 12 * 3600000;
@@ -50,6 +51,13 @@ const models = new Map();
 class Model {
   constructor(cred) {
     this.cred = cred;
+    const later = debounce(() => this._save(), 1500);
+    this.save = Object.assign(() => ((this.dirty = true), later()), { flush: () => later.flush(), cancel: () => later.cancel() });
+    this.load();
+  }
+  load() {
+    const cred = this.cred;
+    this.dirty = false;
     this.taste = new Taste(kv.get('feed:t:' + cred, null));
     this.mood = new Mood(kv.get('feed:mood:' + cred, null)); // today's lean, on top of the taste
     this.style = new Style(kv.get('feed:style:' + cred, null)); // what the pictures you like look like
@@ -59,9 +67,25 @@ class Model {
     this.comics = new Set(kv.get('feed:comics:' + cred, [])); // comics (not in the library) that For you has already put forward
     this.learnInfo = kv.get('feed:learn:' + cred, {});
     this.fchk = kv.get('feed:fchk:' + cred, {});
-    this.save = debounce(() => this._save(), 1500);
+    // today and art style as seen on your other devices
+    const L = ledgerOf(cred), mine = L && deviceId();
+    for (const [id, slot] of Object.entries(L?.dev || {})) {
+      if (id === mine) continue;
+      if (slot.mood) this.mood.extra.push(new Mood(slot.mood));
+      if (slot.style) this.style.extra.push(new Style(slot.style));
+    }
+  }
+  /** What is read from your favorites on a site is the same on every device: it is recorded so that sync counts it once. */
+  account(learn) {
+    if (!ledgerOf(this.cred)) return learn();
+    this.save.flush();
+    foldAccount(this.cred);
+    learn();
+    this.save.flush();
+    foldAccount(this.cred, 'base');
   }
   _save() {
+    this.dirty = false;
     trim(this.seen, SEEN_MAX);
     trim(this.hidden, SEEN_MAX);
     trim(this.comics, 400);
@@ -74,6 +98,7 @@ class Model {
     kv.set('feed:hide:' + this.cred, [...this.hidden]);
     kv.set('feed:learn:' + this.cred, this.learnInfo);
     kv.set('feed:fchk:' + this.cred, this.fchk);
+    emit('feed-state'); // sync sends it along before long
   }
   reset() {
     this.taste.reset();
@@ -84,6 +109,7 @@ class Model {
     this.hidden.clear();
     this.comics.clear();
     this.learnInfo = {};
+    resetLedger(this.cred);
     this.save.flush();
   }
 }
@@ -92,8 +118,14 @@ export const modelOf = (prov) => {
   if (!models.has(prov.credKey)) models.set(prov.credKey, new Model(prov.credKey));
   return models.get(prov.credKey);
 };
-addEventListener('pagehide', () => models.forEach((m) => m.save.flush()));
-addEventListener('visibilitychange', () => document.hidden && models.forEach((m) => m.save.flush()));
+const saveAll = () => models.forEach((m) => m.dirty && m.save.flush());
+addEventListener('pagehide', saveAll);
+addEventListener('visibilitychange', () => document.hidden && saveAll());
+sync.flush = saveAll;
+sync.reload = (cred) => {
+  const m = models.get(cred);
+  if (m) (m.save.cancel(), m.load());
+};
 
 /* ------------------------------------------------------------------ nothing twice */
 const shown = new Set(); // everything that has been on screen since the app started
@@ -275,18 +307,20 @@ export async function learnAccount(prov, { force = false } = {}) {
         if (!posts.length) break;
         learnCats(posts);
         let fresh = 0;
-        for (const p of posts) {
-          if (model.likes.has(p.id)) {
-            // learned before artists were counted: count them now, once, without learning the tags twice
-            if (full && info.recount) model.taste.countArtists(p, q.w);
-            continue;
+        model.account(() => {
+          for (const p of posts) {
+            if (model.likes.has(p.id)) {
+              // learned before artists were counted: count them now, once, without learning the tags twice
+              if (full && info.recount) model.taste.countArtists(p, q.w);
+              continue;
+            }
+            model.likes.add(p.id);
+            model.taste.learn(p, { l: q.w, n: 1 });
+            fresh++;
+            added++;
+            if (!full && fresh <= 10) styleLike(p, 0.6 * q.w, stylist.SEED); // favorited elsewhere since last time
           }
-          model.likes.add(p.id);
-          model.taste.learn(p, { l: q.w, n: 1 });
-          fresh++;
-          added++;
-          if (!full && fresh <= 10) styleLike(p, 0.6 * q.w, stylist.SEED); // favorited elsewhere since last time
-        }
+        });
         if (full) Object.assign(st, { pages: i + 1, cursor: feed.cursor, pageNo: feed.pageNo });
         model.save();
         emit('feed-learn', { running: true, cred: prov.credKey, n: added });
@@ -312,7 +346,7 @@ async function baseline(prov, model, src) {
   for (let i = 0; i < 2; i++) {
     const posts = await fetchPage(src, [], { ...exploreOpts(prov), ratings: ALL_RATINGS, lane: 'learn' });
     learnCats(posts);
-    for (const p of posts) model.taste.learn(p, { l: 0, n: 1 });
+    model.account(() => posts.forEach((p) => model.taste.learn(p, { l: 0, n: 1 })));
   }
   model.save();
 }

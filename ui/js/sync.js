@@ -11,6 +11,7 @@ import { isAndroid, native } from './platform.js';
 import { emit } from './store.js';
 
 const KEY = 'br1:syncCfg';
+const FEED_EVERY = 3 * 60000; // the Feed learns with every swipe: that is sent at most this often, and when the app is put away
 const DEFAULT_PORT = 4622;
 const CODE_RE = /\b([A-Z2-9]{5})-?([A-Z2-9]{5})\b/i;
 
@@ -191,8 +192,21 @@ export async function startAutoSync() {
     timer = setTimeout(() => active() && !(isAndroid() && document.hidden) && Date.now() >= backoffUntil && syncNow({ quiet: true }).catch(() => {}), 6000);
   };
   for (const ev of ['boards', 'subs', 'trail', 'settings', 'reading']) on(ev, later);
+  let learned = false, feedTimer = 0;
+  const sendFeed = () => {
+    clearTimeout(feedTimer);
+    feedTimer = 0;
+    if (!learned || !active() || applying || Date.now() < backoffUntil) return;
+    learned = false;
+    syncNow({ quiet: true }).catch(() => (learned = true));
+  };
+  on('feed-state', () => {
+    learned = true;
+    if (active() && !feedTimer) feedTimer = setTimeout(sendFeed, Math.max(6000, cfg.last + FEED_EVERY - Date.now()));
+  });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && active() && Date.now() - cfg.last > 20_000) syncNow({ quiet: true }).catch(() => {});
+    if (document.hidden) sendFeed();
+    else if (active() && Date.now() - cfg.last > 20_000) syncNow({ quiet: true }).catch(() => {});
   });
   schedule();
   if (active()) setTimeout(() => syncNow({ quiet: true }).catch(() => {}), 2500);
