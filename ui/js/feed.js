@@ -751,7 +751,7 @@ export function renderFeed(root, ctx) {
       const learned = !m.taste.t[tag] ? 'not seen much yet' : m.taste.likes < 4 ? 'not enough to say yet' : lift > 0.8 ? 'you like it a lot' : lift > 0.25 ? 'you like it' : lift < -0.6 ? 'you tend to skip it' : lift < -0.2 ? 'not your favorite' : 'no strong opinion';
       row.replaceChildren(
         h('div', { class: 'fd-tr-name' }, h('b', { style: `color:var(--c-${cat})` }, pretty(tag)), h('small', {}, said ? 'set by you' : learned),
-          h('i', { class: 'fd-meter' + (lift < 0 ? ' neg' : '') }, h('i', { style: `width:${Math.round(Math.min(1, Math.abs(lift) / (lift < 0 ? 1.5 : 3)) * 100)}%` }))),
+          h('i', { class: 'fd-meter' + (lift < 0 ? ' neg' : '') }, h('i', { style: `width:${m.taste.likes < 4 ? 0 : Math.round(Math.min(1, Math.abs(lift) / (lift < 0 ? 1.5 : 3)) * 100)}%` }))),
         h('div', { class: 'fd-says' }, SAYS.map(([v, label]) => h('button', { class: (said === v ? 'on ' : '') + (v < 0 ? 'neg' : ''), onclick: (e) => { e.stopPropagation(); m.taste.say(tag, said === v ? 0 : v); m.save(); if (v === -2 && said !== v) dropUpcoming(true); paint(); } }, label))));
     };
     paint();
