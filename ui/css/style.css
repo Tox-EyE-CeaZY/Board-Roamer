@@ -1364,6 +1364,9 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .fd-row small { display: block; opacity: .65; font-size: 11px; margin-top: 2px; max-width: 230px; }
 .fd-slide { display: flex; align-items: center; gap: 8px; }
+.fd-col { display: grid; gap: 8px; } .fd-col small { display: block; opacity: .65; font-size: 11px; margin-top: 2px; }
+.fd-col .seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); } .fd-col .seg-b { padding-inline: 0; text-align: center; }
+.fd-burst.up { color: var(--accent); } .fd-burst.down { color: var(--hot); } .fd-burst.up svg, .fd-burst.down svg { fill: none; stroke-width: 3; }
 .fd-slide input { width: 110px; }
 .fd-stats { display: grid; gap: 8px; }
 .fd-stat { display: grid; gap: 6px; padding: 10px; border-left: 3px solid hsl(var(--ph, 128) 70% 55%); background: var(--bg3); }

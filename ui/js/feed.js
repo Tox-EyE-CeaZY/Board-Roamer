@@ -283,7 +283,7 @@ export function renderFeed(root, ctx) {
   };
 
   /**
-   * Tap: pause a video / open a picture. Double-tap: like. Press and hold: the post's menu. Two fingers held still: hide the buttons.
+   * Tap: pause a video / open a picture. Double-tap: what you chose in the Feed settings. Press and hold: the post's menu. Two fingers held still: hide the buttons.
    * A tap that only brings hidden buttons back does nothing else.
    */
   const attachGestures = (card, stage, media, p) => {
@@ -327,8 +327,7 @@ export function renderFeed(root, ctx) {
       if (now - tapAt < 300) {
         clearTimeout(tapT);
         tapAt = 0;
-        burst(card, e);
-        if (!isLiked(p)) toggleLike(p);
+        doubleTap(card, p, e);
         return;
       }
       tapAt = now;
@@ -374,9 +373,21 @@ export function renderFeed(root, ctx) {
     wake();
   };
 
-  const burst = (card, e) => {
+  /** The Feed's own double-tap (Feed settings): favorite, upvote, both or downvote. It only ever adds, so a stray one undoes nothing. */
+  function doubleTap(card, p, e) {
+    const does = S('feedDtap') || 'both';
+    burst(card, e, does === 'up' ? 'up' : does === 'down' ? 'down' : 'heart');
+    if (does === 'down') {
+      if (!isDown(p)) downvote(indexOf(card));
+    } else if (does === 'up') {
+      if (!isUp(p)) upvote(p, { keep: true });
+    } else if (!isLiked(p)) toggleLike(p, { vote: does === 'both' });
+    else if (does === 'both' && !isUp(p)) upvote(p, { keep: true }); // a favorite already: the upvote is still missing
+  }
+
+  const burst = (card, e, shape = 'heart') => {
     const r = card.getBoundingClientRect();
-    const b = h('div', { class: 'fd-burst', html: icon('heart', 90), style: `left:${e.clientX - r.left}px;top:${e.clientY - r.top}px` });
+    const b = h('div', { class: 'fd-burst ' + shape, html: icon(shape, 90), style: `left:${e.clientX - r.left}px;top:${e.clientY - r.top}px` });
     card.append(b);
     haptic('tick');
     setTimeout(() => b.remove(), 800);
@@ -621,8 +632,8 @@ export function renderFeed(root, ctx) {
     p.myVote = on ? 1 : 0;
   };
 
-  /** The heart: favorite it, and (like a double-tap in the viewer) upvote it too. Both buttons show what happened. */
-  async function toggleLike(p) {
+  /** The heart: favorite it, and (like a double-tap in the viewer) upvote it too, unless `vote` is off. Both buttons show what happened. */
+  async function toggleLike(p, { vote = true } = {}) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
     const want = !isLiked(p);
     if (want) { m.likes.add(p.id); m.taste.learn(p, { l: 1, n: 0, post_n: 0 }); }
@@ -630,12 +641,12 @@ export function renderFeed(root, ctx) {
     haptic(want ? 'tick' : 'soft');
     m.save();
     const online = signedIn(prov) && S('feedSyncLikes');
-    if (want && prov.vote && !signedIn(prov)) setUp(p, true); // signed out: remembered here
+    if (want && vote && prov.vote && !signedIn(prov)) setUp(p, true); // signed out: remembered here
     repaint(p);
     if (online) {
       const jobs = [];
       if (prov.fav) jobs.push(prov.setFav(p, want).then(() => { p.faved = want; }));
-      if (want && prov.vote && !isUp(p)) jobs.push(prov.setVote(p, 1, true).then(() => setUp(p, true)));
+      if (want && vote && prov.vote && !isUp(p)) jobs.push(prov.setVote(p, 1, true).then(() => setUp(p, true)));
       const failed = (await Promise.allSettled(jobs)).find((r) => r.status === 'rejected');
       if (failed) toast(`Liked here, but ${prov.name} said: ${failed.reason.message}`, { kind: 'err', ms: 3600 });
       repaint(p);
@@ -645,13 +656,14 @@ export function renderFeed(root, ctx) {
     }
   }
 
-  async function upvote(p) {
+  /** The arrow toggles; `keep` (a double-tap) only ever adds, even if the site already had your vote. */
+  async function upvote(p, { keep = false } = {}) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
-    let on = !isUp(p);
+    let on = keep || !isUp(p);
     haptic('tick');
     if (prov.vote && signedIn(prov) && S('feedSyncLikes')) {
       try {
-        const r = await prov.setVote(p, 1);
+        const r = await prov.setVote(p, 1, keep);
         if (r?.our_score != null) on = r.our_score > 0;
       } catch (e) {
         return toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
@@ -881,6 +893,8 @@ export function renderFeed(root, ctx) {
       h('h4', {}, 'Your Feed'),
       h('small', { class: 'fd-hint' }, MENU_HINT),
       h('div', { class: 'fd-sub' }, 'Sites'), sites,
+      h('div', { class: 'fd-col' }, h('div', {}, h('b', {}, 'Double-tap does'), h('small', {}, 'Only in the Feed. The viewer keeps its own setting')),
+        segmented([['fav', 'Favorite'], ['up', 'Upvote'], ['both', 'Both'], ['down', 'Downvote']], S('feedDtap') || 'both', (v) => setS('feedDtap', v))),
       row('Exploring', 'How much is deliberately outside your taste', h('div', { class: 'fd-slide' }, sl, out)),
       row('Preload ahead', 'How many posts download before you reach them (more uses more data)', segmented([[8, '8'], [20, '20'], [40, '40']], S('feedPreload') || 20, (v) => { setS('feedPreload', v); fill(); warm(); })),
       row('New from follows', 'Mix in fresh posts from artists you follow', tgl('feedFollows')),
