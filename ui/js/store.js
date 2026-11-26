@@ -551,6 +551,8 @@ export function wipe(what) {
 }
 
 /* ---------- sync: everything that travels, and how it lands ---------- */
+/** Parts kept elsewhere add themselves here ({snapshot(), apply(value)}): the Feed's learning (feedsync.js). */
+export const syncParts = {};
 export const syncData = {
   snapshot() {
     const cfg = {}, cfgT = {};
@@ -560,7 +562,7 @@ export const syncData = {
     }
     const cut = Date.now() - TOMB_KEEP;
     for (const m of ['b', 'bp', 's', 't', 'l', 'f']) for (const k of Object.keys(tomb[m])) if (tomb[m][k] < cut) delete tomb[m][k];
-    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, folders: folderList, tagLinks: linkList, trail, reading: readList, tomb }));
+    return JSON.parse(JSON.stringify({ v: 1, settings: cfg, settingsT: cfgT, boards: boardList, subs: subList, library: libList, folders: folderList, tagLinks: linkList, trail, reading: readList, tomb, feed: syncParts.feed?.snapshot() }));
   },
   /** Replace local state with a merged document. */
   apply(doc) {
@@ -588,6 +590,7 @@ export const syncData = {
     save('tagLinks', linkList);
     save('folders', folderList); emit('folders');
     save('boards', boardList); save('subs', subList); save('library', libList); save('trail', trail); save('reading', readList); save('tomb', tomb);
+    if (doc.feed) syncParts.feed?.apply(doc.feed);
     emit('boards'); emit('subs'); emit('library'); emit('trail');
     for (const k of changed) emit('settings', { key: k, value: settings[k] });
     return changed;

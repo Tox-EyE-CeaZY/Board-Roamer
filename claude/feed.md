@@ -13,7 +13,7 @@ One post at a time, full screen, swipe (or arrow keys / J K) for the next. Route
   the sum of its tags' lifts times a category weight (`CAT_W`, artists 2.2) over sqrt(tag count). Counts fade with a 120-day half-life. `rate()` also
   returns novelty (share of unfamiliar tags) and the best tag (used for the "You like X" label). `interests()` = tags worth querying for.
 - `ui/js/feed.js` – engine + view. Per account (credKey, so e621 and e926 share) `Model`: taste, seen ids, liked ids, learn info, follow check times,
-  persisted through `kv` in `store.js` (`br1:feed:*`, per device, not synced, not in backups). Per site `src`: candidate pool, fresh follow posts, pacing, cool-down.
+  persisted through `kv` in `store.js` (`br1:feed:*`, synced since 2.12.0, not in backups). Per site `src`: candidate pool, fresh follow posts, pacing, cool-down.
 - Settings (synced, `store.js`): `feedSources` (sites, remembered), `feedExplore` (% wandering, default 25), `feedFollows`, `feedSyncLikes`, `feedLearn`.
   All live in the sliders icon popover at the top right of the Feed.
 - `viewer.js` emits `post-like {post, on, vote}`; the Feed listens, so a heart/upvote anywhere teaches it.
@@ -46,7 +46,7 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - `fd-pop`/`fd-set` need a solid background (popover is over a photo).
 - `fetchPage` builds a `Feed` per call; `pageOf` takes an existing one (needed for e621 cursor paging when reading favorites).
 - DOM is windowed: slots for every card, content only within 2 of the current one.
-- Not synced between devices on purpose (models are big and per-site); the settings are.
+- The learned state was not synced until 2.12.0 (see below); the settings are.
 
 ## 2.1.0 fixes
 - `fill()` used to skip a round if one was already running and waited on category lookups before showing a card; with a long e621 queue (signed-in learning, follow checks) the Feed stalled after ~4 posts. Now a skipped round sets `view.again`, category lookups run in the background (`ensureCats(...).then(refreshInfo)`), `nextPost` has a 40 s timeout and the retry timer is 6 s.
@@ -108,3 +108,13 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - `libraryNews`: a library comic with unseen pages puts itself forward in For you / Following (not within 12 cards of another library card).
 - Reading progress now stores `at` (the page's post id): the reader counts only pages it can show, the pool lists all of them. "Finished" = reader index at its own end; new pages = pool count minus the library's `seenCount`.
 - Card: tap or the button opens the reader (`ctx.readPool(id, postId, provId, index)`; Back returns to the Feed), plus "Page N" for the page that led there, and "Add to library" / "All pages". "Open post" in the hold menu still opens the viewer.
+
+## Sync of what was learned (2.12.0)
+- `feedmerge.js` (pure, node-testable) = ledger and merge; `feedsync.js` = storage glue, registered in `syncParts.feed` (store.js), so the sync document gains `feed: {accounts: {<cred>: ledger}, nofollow}`; `syncmerge.merge` calls `mergeFeed`. The hub (`sync.rs`) is unchanged.
+- Ledger: `base` (everything learned before the first sync, plus what is read from site favorites; merged by per-tag **max**, so the same favorites are never added twice), `dev[id]` (activity since, one slot per device, written only by it, newer `rev` wins; **summed**), `lm` (like/unlike with time), `r` (tag ratings, latest wins), `seen`/`hidden`/`comics` (union, capped), `gen` (Forget my taste: newer generation replaces older everywhere).
+- Decaying counts are stored in fixed-day units (value x 2^(t/120d)), so stored numbers never drift and idle devices settle (no re-push).
+- Nothing hooks every `learn()` call: at sync time `fold()` compares what the device holds with what its ledger adds up to and records the difference. `Model.account()` marks favorite reads as base. A device that never synced keeps no ledger.
+- Mood and art style are per device: each Model loads the others' into `mood.extra` / `style.extra` (summed / weight-averaged when scoring), and writes only its own.
+- Known limit: likes made on two devices *before* their first sync are combined by max per tag, so a tag both had learned separately counts the larger of the two, not the sum.
+- Sending: with library changes as before; learning alone at most every 3 minutes, and when the app is put away. `Model` only writes when something changed (`dirty`), or fading mood would push forever. A device on an older version drops the `feed` section when it pushes; updated devices put it back at their next sync.
+- Testing: run the dev server with `LOCALAPPDATA` pointed at a scratch folder, or it shares the real app's sync files.

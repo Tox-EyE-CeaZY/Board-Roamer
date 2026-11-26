@@ -58,6 +58,7 @@ export class Style {
     this.tn = d.tn || 0; // today: sum of signal strengths
     this.at = d.at || 0;
     this.seeded = !!d.seeded; // a sample of favorites has been read once
+    this.extra = []; // the profiles from your other devices (sync): averaged in here, written there
     this.fade(now);
   }
 
@@ -75,15 +76,39 @@ export class Style {
   }
 
   /** What is particular about a picture: it minus the average (trusting the average only once it has seen a fair number). */
-  center(v) {
-    const k = this.nm / (this.nm + 20), out = zeros();
-    for (let i = 0; i < DIM; i++) out[i] = v[i] - this.mean[i] * k;
+  center(v, of = this) {
+    const k = of.nm / (of.nm + 20), out = zeros();
+    for (let i = 0; i < DIM; i++) out[i] = v[i] - of.mean[i] * k;
     return unit(out);
+  }
+
+  /** This device's profile and the others' as one: averages weighted by how much each has seen, today's directions added. */
+  joined() {
+    const all = [this, ...this.extra];
+    if (all.length === 1) return this;
+    const out = { mean: zeros(), lv: zeros(), tv: zeros(), nm: 0, lw: 0, ts: 0, tn: 0 };
+    for (const s of all) {
+      out.nm += s.nm;
+      out.lw += s.lw;
+      out.ts += s.ts;
+      out.tn += s.tn;
+      for (let i = 0; i < DIM; i++) {
+        out.mean[i] += s.mean[i] * s.nm;
+        out.lv[i] += s.lv[i] * s.lw;
+        out.tv[i] += s.tv[i];
+      }
+    }
+    for (let i = 0; i < DIM; i++) {
+      out.mean[i] /= out.nm || 1;
+      out.lv[i] /= out.lw || 1;
+    }
+    return out;
   }
 
   /** Enough to go on. */
   get known() {
-    return this.lw >= 1.5 || this.tn >= 1.5;
+    const all = [this, ...this.extra];
+    return all.reduce((n, s) => n + s.lw, 0) >= 1.5 || all.reduce((n, s) => n + s.tn, 0) >= 1.5;
   }
 
   /** A like (weight 1 for a favorite, less for quieter signs). */
@@ -107,6 +132,7 @@ export class Style {
 
   /** Let time pass for today's direction. */
   fade(now = Date.now()) {
+    for (const s of this.extra) s.fade(now);
     if (!this.at) return;
     const gap = now - this.at;
     if (gap < 60000) return;
@@ -135,13 +161,14 @@ export class Style {
 
   /** A function that rates pictures against your style as it is now: about -1..1, higher is closer to it. */
   rater() {
-    const liked = this.lw ? this.center(this.lv) : zeros(), sure = this.lw / (this.lw + 5);
-    const k = this.nm / (this.nm + 20), today = zeros();
-    for (let i = 0; i < DIM; i++) today[i] = this.tv[i] - this.mean[i] * k * this.ts;
-    const sureToday = Math.sqrt(dot(today, today)) > 0.05 ? this.tn / (this.tn + 3) : 0;
+    const me = this.joined();
+    const liked = me.lw ? this.center(me.lv, me) : zeros(), sure = me.lw / (me.lw + 5);
+    const k = me.nm / (me.nm + 20), today = zeros();
+    for (let i = 0; i < DIM; i++) today[i] = me.tv[i] - me.mean[i] * k * me.ts;
+    const sureToday = Math.sqrt(dot(today, today)) > 0.05 ? me.tn / (me.tn + 3) : 0;
     unit(today);
     return (e) => {
-      const c = this.center(e);
+      const c = this.center(e, me);
       return dot(c, liked) * sure + dot(c, today) * sureToday * 0.6;
     };
   }
@@ -152,5 +179,6 @@ export class Style {
     this.lv = zeros();
     this.nm = this.lw = this.ts = this.tn = this.at = 0;
     this.seeded = false;
+    this.extra = [];
   }
 }

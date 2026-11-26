@@ -23,6 +23,7 @@ export class Mood {
     this.v = d.v || {}; // tag -> how much it fits today, -CAP..CAP
     this.n = d.n || 0; // how much has been said today (sum of signal strengths)
     this.ts = d.ts || 0;
+    this.extra = []; // today as seen on your other devices (sync): read here, written there
     this.fade(now);
   }
 
@@ -34,6 +35,7 @@ export class Mood {
 
   /** Let time pass. */
   fade(now = Date.now()) {
+    for (const m of this.extra) m.fade(now);
     if (!this.ts) return;
     const gap = now - this.ts;
     if (gap < 60000) return;
@@ -49,7 +51,7 @@ export class Mood {
 
   /** Too little said yet to know what today is about. */
   get fresh() {
-    return this.n < 2.5;
+    return this.extra.reduce((n, m) => n + m.n, this.n) < 2.5;
   }
 
   /**
@@ -75,17 +77,23 @@ export class Mood {
   score(post) {
     const fs = felt(post);
     let sum = 0;
-    for (const [f, w] of fs) sum += (this.v[f] || 0) * w;
+    for (const [f, w] of fs) {
+      let x = this.v[f] || 0;
+      for (const m of this.extra) x += m.v[f] || 0;
+      sum += x * w;
+    }
     return Math.max(-CAP, Math.min(CAP, sum / Math.sqrt(Math.max(8, fs.length))));
   }
 
   forget(tag) {
     delete this.v[tag];
+    for (const m of this.extra) delete m.v[tag];
   }
 
   reset() {
     this.v = {};
     this.n = 0;
     this.ts = 0;
+    this.extra = [];
   }
 }

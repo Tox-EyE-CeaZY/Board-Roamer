@@ -1053,13 +1053,13 @@ export function renderFeed(root, ctx, list = null) {
         h('button', { class: 'btn', onclick: () => (closePopover(), refreshFeed()) }, 'Refresh feed'),
         h('button', { class: 'btn', onclick: () => (closePopover(), ctx.openSettings?.()) }, 'App settings')),
       h('button', { class: 'btn danger', onclick: async () => {
-        if (!await confirmDlg('Forget what the Feed learned?', 'This clears taste and the list of posts already shown, on this device. Favorites on the sites are not touched.', 'Forget')) return;
+        if (!await confirmDlg('Forget what the Feed learned?', 'This clears taste and the list of posts already shown, on this device and on the devices synced with it. Favorites on the sites are not touched.', 'Forget')) return;
         provs.forEach((p) => modelOf(p).reset());
         closePopover();
         refreshFeed({ fromScratch: true });
         toast('Feed taste reset');
         autoLearn();
-      } }, 'Forget my taste on this device'));
+      } }, 'Forget my taste'));
     popover(anchor, body, { align: 'right', cls: 'fd-pop' });
   }
 
