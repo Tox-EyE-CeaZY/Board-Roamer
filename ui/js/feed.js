@@ -741,8 +741,8 @@ export function renderFeed(root, ctx) {
   document.addEventListener('click', onRetap, true);
 
   /* ---------------------------------------------------------------- your say on tags */
-  const SAYS = [[-2, 'Never'], [-1, 'Less'], [1, 'More'], [2, 'Love']];
-  /** One row per tag: what was learned about it, and four buttons to overrule that. */
+  const SAYS = [[-2, 'Never'], [-1, 'Less'], ['n', 'Neutral'], [1, 'More'], [2, 'Love']];
+  /** One row per tag: what was learned about it, and buttons to overrule that. */
   const tagRow = (prov, tag) => {
     const m = modelOf(prov), row = h('div', { class: 'fd-tr' });
     const paint = () => {
@@ -780,7 +780,7 @@ export function renderFeed(root, ctx) {
     paint();
     popover(anchor, h('div', { class: 'fd-set' },
       h('h4', {}, post ? 'Tags on this post' : 'Your tags'),
-      h('small', { class: 'fd-hint' }, 'Never hides every post with the tag. Less and More nudge the Feed. Tap again to take it back.'),
+      h('small', { class: 'fd-hint' }, 'Never hides every post with the tag. Less and More nudge the Feed. Neutral means the tag does not count either way. Tap again to take it back.'),
       pickSite,
       post ? null : h('div', { class: 'fd-add' }, input, h('button', { class: 'btn', onclick: add }, 'Add')),
       list), { align: 'right', cls: 'fd-pop' });
