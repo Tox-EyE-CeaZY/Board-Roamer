@@ -92,7 +92,7 @@ export const DEFAULTS = {
   feedDtap: 'both', // double-tap in the Feed: fav | up | both | down (the viewer has its own, `dtap`)
   feedExplore: 25, // % of the Feed that is deliberately off your usual taste
   feedFollows: true, // new posts from followed artists jump the queue
-  feedSyncLikes: true, // a like in the Feed also favorites + upvotes on the site when you are signed in
+  feedSyncLikes: true, // hearts and votes in the Feed also happen on the site when you are signed in
   feedLearn: true, // read your favorites / upvotes from the site to learn your taste
   filters: { order: '', score: 0, ratings: { s: true, q: true, e: true }, media: '', shape: '', age: '' },
 };
