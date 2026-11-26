@@ -1,6 +1,7 @@
 /* ==========================================================================================================================
    The Feed's engine: what gets shown next, and how politely it is fetched. The screen itself is feed.js; the long-term taste model is
-   taste.js, the short-lived "today" layer on top of it is mood.js, and the art-style signal is style.js (fed by stylist.js).
+   taste.js, the short-lived "today" layer on top of it is mood.js, and the art-style signal is style.js (fed by stylist.js). A page of a
+   comic comes up as the comic (comicplan.js).
 
    What comes up is learned on this device from what you like (your favorites / upvotes on the sites, and the hearts you tap), mixed
    with deliberate wandering, and new posts from artists you follow.
@@ -13,19 +14,21 @@
    - an error or 429 puts that site on a growing cool-down (20 s doubling to 5 min) instead of retrying.
    ========================================================================================================================== */
 import { debounce, sleep, pretty } from './util.js';
-import { S, on, emit, subs, tagc, kv, voted } from './store.js';
+import { S, on, emit, subs, tagc, kv, voted, library, reading } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit } from './providers.js';
 import { Taste, softPick, features } from './taste.js';
 import { Mood } from './mood.js';
 import { Style } from './style.js';
 import * as stylist from './stylist.js';
+import { poolInfo, loadPool as loadComic, poolKey as readKey } from './pools.js';
+import { comicPlan } from './comicplan.js';
 import { isPhone } from './platform.js';
 
 const GAP = { e621: 1500, e926: 1500 };
 const DEF_GAP = 1200;
 const BUDGET = 120; // safety ceiling: requests per five minutes per site (0.4 a second)
 const EVERY = 700;
-const LANE_GAP = { tags: 2500, learn: 3000, follow: 4000 };
+const LANE_GAP = { tags: 2500, learn: 3000, follow: 4000, comic: 1500 };
 const PAGE = 40;
 /** The most each site hands out at once (e621 allows 320): fewer requests, and a deeper pool to pick from. */
 const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] || prov.pageSize || 40);
@@ -53,6 +56,7 @@ class Model {
     this.seen = new Set(kv.get('feed:seen:' + cred, []));
     this.likes = new Set(kv.get('feed:likes:' + cred, []));
     this.hidden = new Set(kv.get('feed:hide:' + cred, [])); // "not interested": never shown again
+    this.comics = new Set(kv.get('feed:comics:' + cred, [])); // comics (not in the library) that For you has already put forward
     this.learnInfo = kv.get('feed:learn:' + cred, {});
     this.fchk = kv.get('feed:fchk:' + cred, {});
     this.save = debounce(() => this._save(), 1500);
@@ -60,6 +64,8 @@ class Model {
   _save() {
     trim(this.seen, SEEN_MAX);
     trim(this.hidden, SEEN_MAX);
+    trim(this.comics, 400);
+    kv.set('feed:comics:' + this.cred, [...this.comics]);
     kv.set('feed:t:' + this.cred, this.taste.toJSON());
     kv.set('feed:mood:' + this.cred, this.mood.toJSON());
     kv.set('feed:style:' + this.cred, this.style.toJSON());
@@ -76,6 +82,7 @@ class Model {
     this.seen.clear();
     this.likes.clear();
     this.hidden.clear();
+    this.comics.clear();
     this.learnInfo = {};
     this.save.flush();
   }
@@ -95,16 +102,21 @@ export const idsOf = (p) => {
   const k = getProvider(p.provider).credKey + ':' + p.id;
   return p.md5 ? [k, 'md5:' + p.md5] : [k];
 };
-export function markShown(post) {
+export function markShown(post, comic = null) {
   for (const id of idsOf(post)) shown.add(id);
   const m = modelOf(post.provider);
+  if (comic) {
+    shown.add(comic.key);
+    if (!comic.inLibrary) (m.comics.add(String(comic.poolId)), m.save());
+  }
   if (!m.seen.has(post.id)) {
     m.seen.add(post.id);
     m.taste.learn(post, { l: 0, n: 1 });
     m.save();
   }
 }
-const queued = (view) => new Set(view ? view.items.flatMap((i) => idsOf(i.post)) : []);
+const queued = (view) => new Set(view ? view.items.flatMap((i) => (i.comic ? [...idsOf(i.post), i.comic.key] : idsOf(i.post))) : []);
+const comicKey = (cred, poolId) => `comic:${cred}:${poolId}`;
 
 /* ------------------------------------------------------------------ per-site state: pool of candidates, pacing, cool-down */
 export const srcs = new Map();
@@ -203,12 +215,21 @@ function learnCats(posts) {
  * said you were not interested in. New / Hot / Following are lists: they only avoid showing a post twice in the same list.
  */
 function acceptable(post, model, q, m = mode()) {
-  if (!post || !post.full || post.kind === 'flash' || post.isComic) return false;
+  if (!post || !post.full || post.kind === 'flash') return false;
+  if (post.isComic && !(post.pools?.length && getProvider(post.provider).pools)) return false; // a comic page with no comic to open
   if (!S('filters').ratings[post.rating]) return false;
   if (post.faved || model.likes.has(post.id) || model.hidden.has(post.id) || model.taste.banned(post)) return false;
   const ids = idsOf(post);
   if (ids.some((i) => q.has(i))) return false;
   if (m === 'foryou' && (model.seen.has(post.id) || ids.some((i) => shown.has(i)))) return false;
+  if ((m === 'foryou' || m === 'follows') && post.pools?.length) {
+    // one card per comic: its other pages stay out once it is lined up or was shown (and For you does not bring a stranger back)
+    for (const id of post.pools) {
+      const key = comicKey(model.cred, id);
+      if (q.has(key) || shown.has(key)) return false;
+      if (m === 'foryou' && model.comics.has(String(id)) && !library.find(model.cred, id)) return false;
+    }
+  }
   if (S('blacklistMode') !== 'off' && blacklistHit(post, hideRules())) return false;
   return true;
 }
@@ -703,7 +724,7 @@ function takeFrom(src, view, explore) {
 }
 
 /** The next post for the view: now and then one fresh from a follow, otherwise taste or a deliberate wander. */
-export async function nextPost(view) {
+async function pickPost(view) {
   const list = (view.sites || enabled()).filter((p) => !needsKeyMissing(p));
   if (!list.length) return null;
   const m = modeFor(view);
@@ -747,6 +768,126 @@ export async function nextPost(view) {
   return null;
 }
 
+/* ------------------------------------------------------------------ comics */
+const libraryComic = (prov, post) => (post.pools || []).map((id) => library.find(prov.credKey, id)).find((f) => f && (f.kind !== 'collection' || post.isComic)) || null;
+/** In a pool, so perhaps a page of a story: many pages are not tagged "comic", so the pool itself has to be asked. */
+const pooled = (prov, post) => !!prov.pools && !!post.pools?.length;
+const STRANGER_GAP = 8; // For you: at most one comic you have not saved in this many cards (follows excepted)
+const asked = new Set(); // pools whose details were requested already: asking again costs nothing
+/** A pool's name and page list, paced like everything else. `has`: a page it should contain (a stale copy is read again). */
+async function poolMeta(prov, id, has) {
+  const k = prov.credKey + ':' + id;
+  if (!asked.has(k)) await gate(srcOf(prov), 'comic');
+  asked.add(k);
+  return poolInfo(prov, id);
+}
+/** Page `i` of a comic, if it may be shown. */
+async function pageAt(prov, meta, i) {
+  let page = null;
+  if (meta.ids.length > i && meta.ids.length >= meta.count) {
+    await gate(srcOf(prov), 'comic');
+    page = (await prov.postsByIds([meta.ids[i]]))[0];
+  } else if (i === 0 && meta.ids[0]) {
+    await gate(srcOf(prov), 'comic');
+    page = (await prov.postsByIds([meta.ids[0]]))[0];
+  } else {
+    await gate(srcOf(prov), 'comic');
+    page = (await loadComic(prov, meta.id)).posts[i]; // Derpibooru lists no page ids: the whole comic is read
+  }
+  if (!page || !page.full || page.kind === 'flash' || !S('filters').ratings[page.rating]) return null;
+  if (S('blacklistMode') !== 'off' && blacklistHit(page, hideRules())) return null;
+  learnCats([page]);
+  return page;
+}
+/** What the card says about its comic, as things stand now (reading progress and the library change while the Feed is open). */
+export function comicState(prov, meta) {
+  const lib = library.find(prov.credKey, meta.id), had = reading.get(readKey(prov, meta.id));
+  const at = had?.at ? meta.ids.indexOf(had.at) : -1;
+  return { lib, plan: comicPlan({ count: meta.count || meta.ids.length, lib, read: had ? { ...had, page: at >= 0 ? at : undefined } : null }) };
+}
+const comicItem = (prov, meta, post, plan, at, found, lib) => ({
+  post, kind: 'comic', why: plan.label,
+  comic: { key: comicKey(prov.credKey, meta.id), poolId: meta.id, meta, name: meta.name, count: meta.count || meta.ids.length, at, found, inLibrary: !!lib },
+});
+/**
+ * A pick that turns out to be a page of a comic becomes a card for the comic. New and Hot are the site's own lists, so there the page
+ * stays and only gains the comic's controls. Returns null when this pick should be passed over.
+ */
+async function asComic(view, got) {
+  const post = got.post, prov = getProvider(post.provider), m = modeFor(view);
+  if (view.plain) return post.isComic ? null : got;
+  if (!pooled(prov, post)) return got;
+  const list = m === 'new' || m === 'hot';
+  const mine = libraryComic(prov, post);
+  try {
+    for (const id of mine ? [mine.pid] : post.pools.slice(0, 3)) {
+      let meta = await poolMeta(prov, id);
+      if (!meta || (!mine && meta.cat !== 'series')) continue; // a loose collection is not a story
+      const count = meta.count || meta.ids.length;
+      if (count < 2) continue;
+      const found = meta.ids.indexOf(post.id); // -1: not known (Derpibooru, or a page newer than what we read)
+      let { lib, plan } = comicState(prov, meta);
+      if (list) {
+        plan ||= { page: 0, label: 'In your library', action: 'Read from page 1' };
+        return { ...comicItem(prov, meta, post, plan, found, found, lib), why: whyOf(post, got.kind) };
+      }
+      if (!plan) return null; // in your library and read to the end
+      if (!lib && m === 'foryou' && got.kind !== 'follow' && view.items.slice(-STRANGER_GAP).some((x) => x.comic && !x.comic.inLibrary)) return null;
+      if (found === plan.page) return comicItem(prov, meta, post, plan, found, found, lib);
+      const page = await pageAt(prov, meta, plan.page);
+      if (!page) return null;
+      const m2 = modelOf(prov);
+      m2.seen.add(post.id); // the page that led here counts as shown too
+      for (const x of idsOf(post)) shown.add(x);
+      return comicItem(prov, meta, page, plan, plan.page, found, lib);
+    }
+    return post.isComic && !list ? null : got; // only in loose collections
+  } catch {
+    return list ? got : null; // better another post than a page from the middle of a story
+  }
+}
+/** A comic in your library with pages you have not seen, put forward by itself now and then. */
+async function libraryNews(view) {
+  const m = modeFor(view);
+  if ((m !== 'foryou' && m !== 'follows') || view.plain || view.items.length < 2) return null;
+  if (view.items.slice(-12).some((x) => x.comic?.inLibrary)) return null;
+  const q = queued(view), sites = view.sites || enabled();
+  for (const f of library.all()) {
+    if (f.kind === 'collection' || !library.newPages(f)) continue;
+    const prov = sites.find((p) => p.credKey === f.p && p.pools && !needsKeyMissing(p));
+    if (!prov) continue;
+    const key = comicKey(f.p, f.pid);
+    if (q.has(key) || shown.has(key) || paceOf(srcOf(prov)).cool > Date.now()) continue;
+    try {
+      const meta = await poolMeta(prov, f.pid);
+      const { lib, plan } = comicState(prov, meta);
+      const page = plan && (await pageAt(prov, meta, plan.page));
+      if (page && !modelOf(prov).taste.banned(page)) return comicItem(prov, meta, page, plan, plan.page, -1, lib);
+    } catch {
+      /* not this time */
+    }
+    shown.add(key); // nothing to show for it: leave it alone for this session
+    return null;
+  }
+  return null;
+}
+export async function nextPost(view) {
+  const news = await libraryNews(view);
+  if (news) return news;
+  for (let tries = 0; tries < 6; tries++) {
+    const got = await pickPost(view);
+    if (!got) return null;
+    // the very first cards do not wait for a comic to be looked up
+    if (!view.items.length && modeFor(view) === 'foryou' && !view.plain && pooled(getProvider(got.post.provider), got.post) && tries < 5) {
+      putBack(view, [got.post]);
+      continue;
+    }
+    const out = await asComic(view, got);
+    if (out) return out;
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ For you, in Roam */
 /**
  * The Feed's suggestions as a page-by-page source for the Roam grid (same shape as a search feed). It has its own pool, shares the
@@ -761,7 +902,7 @@ export class SuggestFeed {
     this.tags = [];
     const main = srcOf(prov);
     const src = Object.assign(newSrc(prov, []), { pace: main, warmed: true });
-    this.view = { items: [], rr: 0, mode: 'foryou', sites: [prov], src, active: () => true };
+    this.view = { items: [], rr: 0, mode: 'foryou', sites: [prov], src, active: () => true, plain: true }; // a grid of pictures: no comic cards
   }
   async next(count = 30) {
     if (this.busy || this.done) return [];
