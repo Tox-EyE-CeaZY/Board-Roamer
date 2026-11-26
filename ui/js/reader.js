@@ -284,7 +284,7 @@ export class ComicReader {
 
   _saveProgress = debounce(() => {
     if (!this.key) return;
-    reading.set(this.key, { i: this.i, total: this.pages.length, name: this.pool.name, cover: this.pages[0]?.thumb, pool: this.pool.id, prov: this.prov.id, kind: this.kind });
+    reading.set(this.key, { i: this.i, at: this.pages[this.i]?.id, total: this.pages.length, name: this.pool.name, cover: this.pages[0]?.thumb, pool: this.pool.id, prov: this.prov.id, kind: this.kind });
   }, 400);
 
   _preload() {
@@ -349,7 +349,7 @@ export class ComicReader {
   }
 
   _showEnd() {
-    reading.set(this.key, { i: this.pages.length - 1, total: this.pages.length, name: this.pool.name, cover: this.pages[0]?.thumb, pool: this.pool.id, prov: this.prov.id, kind: this.kind });
+    reading.set(this.key, { i: this.pages.length - 1, at: this.pages.at(-1)?.id, total: this.pages.length, name: this.pool.name, cover: this.pages[0]?.thumb, pool: this.pool.id, prov: this.prov.id, kind: this.kind });
     this.endCard.replaceChildren(
       h('div', { class: 'rde cut' },
         h('i', { class: 'es-art', html: icon('book', 44) }),

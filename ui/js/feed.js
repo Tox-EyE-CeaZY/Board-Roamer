@@ -12,8 +12,9 @@ import { haptic, isAndroid, isTouch, native } from './platform.js';
 import {
   SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
   isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools, feel, likely, putBack,
-  styleOn, styleLike, seedStyle, scout,
+  styleOn, styleLike, seedStyle, scout, comicState,
 } from './feedengine.js';
+import { toggleLibrary } from './library.js';
 
 const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
 const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Hold two fingers on it to hide the buttons.';
@@ -147,15 +148,49 @@ export function renderFeed(root, ctx, list = null) {
   const buildInfo = (it) => {
     const p = it.post, prov = getProvider(p.provider);
     const art = p.artists.slice(0, 2);
-    return h('div', { class: 'fd-info' },
+    return h('div', { class: 'fd-info' + (it.comic ? ' has-comic' : '') },
       h('div', { class: 'fd-chips-row' },
         it.why ? h('div', { class: 'fd-why ' + it.kind }, it.why) : null,
         h('div', { class: 'fd-site' }, prov.short),
         h('div', { class: 'fd-saved', hidden: !saved.has(p), html: icon('check', 12) + '<span>Downloaded</span>' })),
       art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openArtist(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
-      descBox(p),
+      it.comic ? comicBox(it) : descBox(p),
       tagBox(p, heaviestTags(p)));
   };
+
+  /* ---------------------------------------------------------------- comics */
+  /** Opens the reader over the Feed (Back returns here) at a page: by id where the pool lists ids, else by number. */
+  function readComic(it, index) {
+    const c = it.comic, { plan } = comicState(getProvider(it.post.provider), c.meta);
+    const at = index ?? plan?.page ?? 0;
+    hush(true);
+    react(it.post, 0.4);
+    ctx.readPool(c.poolId, c.meta.ids.length >= c.count ? c.meta.ids[at] : null, it.post.provider, at);
+  }
+  /** The comic's name, where you are in it, and what you can do. */
+  const comicBox = (it) => {
+    const c = it.comic, prov = getProvider(it.post.provider);
+    const { lib, plan } = comicState(prov, c.meta);
+    const act = (label, run, primary) => h('button', { class: primary ? 'primary' : '', onclick: (e) => (e.stopPropagation(), wake(), run()) }, label);
+    const where = c.at >= 0 ? `Page ${c.at + 1} of ${c.count}` : `${c.count} pages`;
+    const acts = [act(plan ? plan.action : 'Read again', () => readComic(it, plan ? undefined : 0), true)];
+    if (c.found > 0 && c.found !== plan?.page) acts.push(act(`Page ${c.found + 1}`, () => readComic(it, c.found))); // the page that brought it here
+    acts.push(lib ? act('All pages', () => (hush(true), ctx.go(`#/pool/${c.poolId}?p=${prov.id}`))) : act('Add to library', () => {
+      toggleLibrary(prov, { pool: c.meta, kind: 'comic', cover: it.post.sample || it.post.thumb });
+      c.inLibrary = true;
+      refreshInfo(it);
+    }));
+    return h('div', { class: 'fd-comic' },
+      h('div', { class: 'fd-comic-name' }, h('i', { html: icon('book', 16) }), h('b', {}, c.name), h('small', {}, where)),
+      h('div', { class: 'fd-comic-acts' }, acts));
+  };
+  /** After reading or saving: the lined-up comic cards say what is true now. */
+  const repaintComics = () => view.items.forEach((it) => {
+    if (!it.comic) return;
+    const { plan } = comicState(getProvider(it.post.provider), it.comic.meta);
+    if (it.kind === 'comic' && mode() !== 'new' && mode() !== 'hot') it.why = plan ? plan.label : 'Finished';
+    refreshInfo(it);
+  });
 
   /** Two lines of the description; tap for all of it. */
   const descBox = (p) => {
@@ -420,7 +455,7 @@ export function renderFeed(root, ctx, list = null) {
       item(view.clean ? 'Show buttons' : 'Hide buttons', 'eye', () => setClean(!view.clean), 'Or hold two fingers on the post'),
       !solo && p.artists.length ? item('Artist page', 'user', () => openArtist(p), 'Or swipe the post to the left') : null,
       item('Rate its tags', 'tag', () => setTimeout(() => tagSheet(menuBtn, p), 60), 'Tell the Feed what you want more or less of'),
-      item('Open post', 'fit', () => openIt(i)),
+      item('Open post', 'fit', () => openIt(i, true)),
       item('Share link', 'share', () => ctx.share?.(p)),
       isAndroid() ? item(p.kind === 'video' ? 'Share video' : 'Share picture', 'share', () => native.shareFile(p.kind === 'video' ? mediaSrc(p) : p.sample || p.full, `${p.provider}_${p.id}.${p.ext}`)) : null,
       item('Copy link', 'link', () => (copyText(p.url), toast('Post link copied', { ms: 1400 })))), { align: 'left', cls: 'fd-pop' });
@@ -506,8 +541,8 @@ export function renderFeed(root, ctx, list = null) {
           const got = await withTimeout(nextPost(view), 40000);
           if (mine !== run) { if (got && !solo) putBack(view, [got.post]); continue; }
           if (!got) break;
-          const { post, kind } = got;
-          view.items.push({ post, kind, why: whyOf(post, kind) });
+          const { post, kind, comic } = got;
+          view.items.push({ post, kind, comic, why: got.why ?? whyOf(post, kind) });
           addSlot();
           paintEmpty();
           if (view.items.length === 1) activate(0);
@@ -611,7 +646,7 @@ export function renderFeed(root, ctx, list = null) {
     if (solo) return; // going through someone's posts teaches the Feed nothing (a like still does)
     since = Date.now();
     activePost = it?.post || null;
-    if (it) markShown(it.post);
+    if (it) markShown(it.post, it.comic);
     if (i % 5 === 0) paintSuggest();
     if (i === 12 && !kv.get('feed:hint:tags', false)) { // said once, ever
       kv.set('feed:hint:tags', true);
@@ -739,8 +774,9 @@ export function renderFeed(root, ctx, list = null) {
     run++;
     const dropped = view.items.splice(keep);
     while (cards.length > view.items.length) (unmountCard(cards.length - 1), cards.pop().remove());
-    putBack(view, dropped.filter((x) => x.kind !== 'probe').map((x) => x.post));
-    for (const x of dropped.filter((d) => d.kind === 'probe')) (view.items.push(x), addSlot()); // a probe still waiting keeps its place in line
+    const stays = (x) => x.kind === 'probe' || !!x.comic;
+    putBack(view, dropped.filter((x) => !stays(x)).map((x) => x.post));
+    for (const x of dropped.filter(stays)) (view.items.push(x), addSlot()); // a probe or a comic still waiting keeps its place in line
     syncWindow();
     fill();
   }
@@ -814,7 +850,8 @@ export function renderFeed(root, ctx, list = null) {
     repaint(p);
   }
 
-  function openIt(i) {
+  function openIt(i, asPost = false) {
+    if (view.items[i]?.comic && !asPost) return readComic(view.items[i]); // a comic card opens the reader
     const looked = view.items[i]?.post;
     if (looked) react(looked, 0.4); // opening it for a closer look says something
     hush(true);
@@ -850,6 +887,8 @@ export function renderFeed(root, ctx, list = null) {
     on('saved', paintAll),
     on('pins-changed', paintAll),
     on('feed-learn', (e) => !e.detail.running && paintSuggest()),
+    on('reading', () => repaintComics()),
+    on('library', () => repaintComics()),
   ];
 
   const onKey = (e) => {

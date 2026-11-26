@@ -794,12 +794,12 @@ function closeReaderQuiet() {
   readerPushed = false;
 }
 
-/** Open the reader for a pool. Navigates to the pool page first so Back returns to where you were. */
-function readPool(id, postId, provId) {
+/** Open the reader for a pool. Navigates to the pool page first so Back returns to where you were. `index`: a page number, when there is no post id. */
+function readPool(id, postId, provId, index) {
   const pv = provId || prov.id;
   if (viewer.isOpen) closeViewerQuiet();
   readerPushed = true;
-  const q = postId ? 'p' + postId : 'resume';
+  const q = postId ? 'p' + postId : index != null ? String(index) : 'resume';
   setHash(`#/pool/${id}?p=${pv}&read=${q}`);
 }
 
