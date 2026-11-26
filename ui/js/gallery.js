@@ -191,10 +191,11 @@ export class Gallery {
   }
 
   relayout() {
-    const anchor = this.height ? Math.max(0, this.scroller.scrollTop - this._off()) / this.height : 0;
+    const top = this.scroller.scrollTop, above = top <= this._off(); // still up in what sits over the tiles: leave it there
+    const anchor = this.height ? Math.max(0, top - this._off()) / this.height : 0;
     this._reset();
     this._layout(0);
-    this.scroller.scrollTop = anchor * this.height + this._off();
+    this.scroller.scrollTop = above ? top : anchor * this.height + this._off();
     this.render();
   }
 

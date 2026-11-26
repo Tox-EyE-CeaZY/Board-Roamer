@@ -79,4 +79,5 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - `isLiked` / `isUp` / `isDown` drive the buttons (`myVote` from e621 + local `voted`). Only the video on screen may play (`hush`).
 - Your tags: `Taste.r` (-2 never, -1 less, 'n' neutral = learned weight muted, 1 more, 2 love; never fades; unset = learned). `banned()` filters, `rate()`/`interests()` use it, sheet = `tagSheet` (also 'Rate its tags' per post). One toast hint at card 12 (`feed:hint:tags`).
 - The per-post sheet lists every tag by category (type to filter, Add for one that is missing). `features()` stops at 70 tags for learning, so `banned()` and the rating boost in `rate()` read all of a post's tags.
+- Artist page (`artistpage.js`): swipe a card left, tap an artist name, or the menu. A panel over the Feed (no search bar) with a `Gallery` of the artist's posts, Follow, count/aliases/links. Closes on swipe right, Back, Escape or tapping Feed; `view.artist` makes the Feed inactive meanwhile.
 - Not interested: `notInterested()` (local only, `feed:hide:<cred>`). Downvote also does it and sends -1 when signed in.

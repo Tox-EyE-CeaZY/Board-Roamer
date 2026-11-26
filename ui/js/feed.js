@@ -7,6 +7,7 @@ import { toast, popover, closePopover, confirmDlg, segmented } from './ui.js';
 import { quickPin } from './pins.js';
 import { follow } from './follows.js';
 import { renderDText } from './dtext.js';
+import { openArtistPage } from './artistpage.js';
 import { haptic, isAndroid, isTouch, native } from './platform.js';
 import {
   SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
@@ -14,7 +15,7 @@ import {
 } from './feedengine.js';
 
 const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
-const MENU_HINT = 'Press and hold a post for more. Hold two fingers on it to hide the buttons.';
+const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Hold two fingers on it to hide the buttons.';
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
 const mode = () => S('feedMode') || 'foryou';
 const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+(=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
@@ -27,7 +28,8 @@ export function renderFeed(root, ctx) {
     idx: 0,
     busy: false,
     clean: false, // buttons hidden by you
-    active: () => root.isConnected && !root.hidden && !document.hidden && document.body.dataset.view === 'feed' && !viewerOpen(),
+    artist: null, // the artist page, while it covers the Feed
+    active: () => root.isConnected && !root.hidden && !document.hidden && document.body.dataset.view === 'feed' && !view.artist && !viewerOpen(),
   };
   const cards = []; // one slot per item; only the ones near the screen have content
   const scroller = h('div', { class: 'fd-scroll', tabindex: '0' });
@@ -127,6 +129,7 @@ export function renderFeed(root, ctx) {
       blurred ? h('button', { class: 'fd-reveal', onclick: (e) => (e.stopPropagation(), stage.classList.remove('blur'), e.currentTarget.remove()) }, 'Blurred: tap to show') : null);
     attachZoom(card, stage, media);
     attachGestures(card, stage, media, p);
+    attachSwipe(card, p);
     paintState(card, p);
     return card;
   };
@@ -140,7 +143,7 @@ export function renderFeed(root, ctx) {
         it.why ? h('div', { class: 'fd-why ' + it.kind }, it.why) : null,
         h('div', { class: 'fd-site' }, prov.short),
         h('div', { class: 'fd-saved', hidden: !saved.has(p), html: icon('check', 12) + '<span>Downloaded</span>' })),
-      art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
+      art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openArtist(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
       descBox(p),
       tagBox(p, heaviestTags(p)));
   };
@@ -337,6 +340,34 @@ export function renderFeed(root, ctx) {
     });
   };
 
+  /** A swipe in from the right opens the artist's page. */
+  const attachSwipe = (card, p) => {
+    let start = null;
+    card.addEventListener('touchstart', (e) => {
+      start = e.touches.length === 1 && !card._zoom.zoomed() && !e.target.closest('.fd-allscroll, .fd-desc.open') ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+    }, { passive: true });
+    card.addEventListener('touchend', (e) => {
+      if (!start) return;
+      const dx = e.changedTouches[0].clientX - start.x, dy = e.changedTouches[0].clientY - start.y;
+      start = null;
+      if (dx < -70 && -dx > Math.abs(dy) * 1.7) openArtist(p);
+    }, { passive: true });
+    card.addEventListener('touchcancel', () => (start = null), { passive: true });
+  };
+
+  function openArtist(p, name) {
+    const names = p.artists?.length ? p.artists : name ? [name] : [];
+    if (!names.length) return toast('No artist is tagged on this post', { ms: 1800 });
+    if (view.artist) return;
+    hush(true);
+    wake();
+    view.artist = openArtistPage(el, ctx, {
+      provId: p.provider, names, name: name || names[0],
+      onFollow: () => (paintSuggest(), view.items.forEach(refreshInfo)),
+      onClose: () => { view.artist = null; wake(); fill(); },
+    });
+  }
+
   const togglePlay = (v) => {
     if (v.paused) (delete v.dataset.userPaused, v.play().catch(() => {}));
     else (v.dataset.userPaused = '1', v.pause());
@@ -360,6 +391,7 @@ export function renderFeed(root, ctx) {
     popover(anchor, h('div', { class: 'fd-set fd-actions' },
       item('Not interested', 'close', () => skip(i), 'Fewer like this. Nothing is sent to the site'),
       item(view.clean ? 'Show buttons' : 'Hide buttons', 'eye', () => setClean(!view.clean), 'Or hold two fingers on the post'),
+      p.artists.length ? item('Artist page', 'user', () => openArtist(p), 'Or swipe the post to the left') : null,
       item('Rate its tags', 'tag', () => setTimeout(() => tagSheet(menuBtn, p), 60), 'Tell the Feed what you want more or less of'),
       item('Open post', 'fit', () => openIt(i)),
       item('Share link', 'share', () => ctx.share?.(p)),
@@ -716,6 +748,7 @@ export function renderFeed(root, ctx) {
     else if (k === 'u' || k === 'U') p && upvote(p);
     else if (k === 'h' || k === 'H') setClean(!view.clean);
     else if (k === 'Enter') (e.preventDefault(), openIt(view.idx));
+    else if (k === 'ArrowRight') p && (e.preventDefault(), openArtist(p));
     else if (k === 'd' || k === 'D') p && download(p);
     else if (k === ' ') {
       const v = cardAt(view.idx)?.querySelector('video');
@@ -727,7 +760,9 @@ export function renderFeed(root, ctx) {
   /* tapping Feed again while on it: the first tap says so, the second refreshes */
   let tappedFeed = 0;
   const onRetap = (e) => {
-    if (!view.active() || !e.target.closest?.('a[data-view="feed"]')) return; // the nav link only: <body> carries data-view too
+    if (!e.target.closest?.('a[data-view="feed"]')) return; // the nav link only: <body> carries data-view too
+    if (view.artist) return (e.preventDefault(), e.stopPropagation(), view.artist.close());
+    if (!view.active()) return;
     e.preventDefault();
     e.stopPropagation();
     if (Date.now() - tappedFeed < 3000) {
@@ -806,7 +841,7 @@ export function renderFeed(root, ctx) {
     const paint = () => {
       const items = suggestions();
       list.replaceChildren(...(items.length ? items.map((s) => h('div', { class: 'fd-sugg', style: `--ph:${s.prov.color}` },
-        h('button', { class: 'fd-sugg-name', onclick: () => (closePopover(), openSearch({ provider: s.prov.id }, s.name)) }, h('b', {}, pretty(s.name)), h('small', {}, `${s.prov.name} · liked ${Math.round(s.v)}`)),
+        h('button', { class: 'fd-sugg-name', onclick: () => (closePopover(), openArtist({ provider: s.prov.id }, s.name)) }, h('b', {}, pretty(s.name)), h('small', {}, `${s.prov.name} · liked ${Math.round(s.v)}`)),
         h('button', { class: 'btn primary', onclick: () => { follow(s.name, s.prov.id); paint(); paintSuggest(); } }, 'Follow'),
         h('button', { class: 'ibtn', title: 'Not this one', 'aria-label': 'Dismiss', html: icon('close', 16), onclick: () => { dismissSuggestion(s.key); paint(); paintSuggest(); } }))) : [h('small', {}, 'Nobody to suggest right now.')]));
     };
@@ -972,6 +1007,7 @@ export function renderFeed(root, ctx) {
       removeEventListener('hashchange', onHash);
       document.removeEventListener('click', onRetap, true);
       document.removeEventListener('visibilitychange', onVis);
+      view.artist?.close();
       hush(true);
       leave();
       return;

@@ -1391,3 +1391,17 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-says button { min-height: 36px; padding: 0; font: 700 10.5px var(--f-mono); border: 1px solid var(--line2); }
 .fd-says button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .fd-says button.neg.on { background: var(--hot); color: #140503; }
+
+/* an artist's page over the Feed */
+.fd-artist { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; padding-top: var(--fd-top); background: var(--bg); color: var(--ink); translate: 100% 0; transition: translate .28s var(--ease); }
+.fd-artist.in { translate: 0 0; }
+.fd-ap-head { display: flex; align-items: center; gap: 6px; flex: none; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.fd-ap-head .fd-ib { color: var(--ink); filter: none; }
+.fd-ap-title { min-width: 0; display: grid; } .fd-ap-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 16px var(--f-display); } .fd-ap-title small { opacity: .6; font-size: 11px; }
+.fd-ap-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fd-ap-info { display: grid; gap: 10px; padding: 10px 0 12px; }
+.fd-ap-others { display: flex; flex-wrap: wrap; gap: 6px; }
+.fd-ap-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; } .fd-ap-name h2 { margin: 0; color: var(--c-artist); font: 800 24px var(--f-display); overflow-wrap: anywhere; } .fd-ap-count { opacity: .65; font: 700 11px var(--f-mono); }
+.fd-ap-about { display: grid; gap: 6px; font-size: 12.5px; } .fd-ap-about:empty { display: none; } .fd-ap-about p { margin: 0; opacity: .75; }
+.fd-ap-links { display: flex; flex-wrap: wrap; gap: 6px; } .fd-ap-links button { padding: 5px 9px; font: 600 11px var(--f-mono); border: 1px solid var(--line2); }
+.fd-ap-status { padding: 18px; text-align: center; opacity: .65; font-size: 12.5px; } .fd-ap-status:empty { padding: 0; }
