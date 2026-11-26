@@ -16,12 +16,14 @@ const covered = () => viewerOpen() || !!document.querySelector('.sheet-back, .po
 /**
  * @param host   the element to cover
  * @param ctx    the app's view context (openViewer, go, roamHash)
- * @param opts   provId, names (the post's artists), name (the one to show first), onClose, onFollow
+ * @param opts   provId, names (the post's artists), name (the one to show first), onClose, onFollow,
+ *               openReel(host, list): the Feed's own screen over a fixed list, which is how a post opens here
  * @returns      { close() }
  */
-export function openArtistPage(host, ctx, { provId, names, name = names[0], onClose, onFollow }) {
+export function openArtistPage(host, ctx, { provId, names, name = names[0], onClose, onFollow, openReel }) {
   const prov = getProvider(provId);
-  let current = name, gal = null, feed = null, run = 0, closed = false;
+  let current = name, gal = null, feed = null, run = 0, closed = false, reel = null;
+  let more = () => Promise.resolve(); // the next page of the artist shown
   const title = h('div', { class: 'fd-ap-title' });
   const body = h('div', { class: 'fd-ap-body' });
   const page = h('div', { class: 'fd-artist' },
@@ -53,7 +55,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     scroller.append(info);
     const status = h('div', { class: 'fd-ap-status' }, 'Loading posts…');
     gal = new Gallery(scroller, {
-      onOpen: (vi, tile) => ctx.openViewer(gal, vi, tile),
+      onOpen: (vi) => openAt(vi, who),
       onNeedMore: () => more(),
       onPin: (ps) => quickPin(ps),
       onOpenSite: (p) => openExternal(p.url),
@@ -61,10 +63,13 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     });
     gal.setFoot(status);
     feed = new Feed(prov, [{ t: who, op: '+' }], { order: '', score: 0, ratings: S('filters').ratings, media: '', shape: '', age: '' });
-    let fetching = false;
-    const more = async () => {
-      if (fetching || !feed || feed.done || mine !== run) return;
-      fetching = true;
+    let fetching = null;
+    /** The next page; asked again while one is on its way, it hands back the same wait. */
+    more = () => {
+      if (!feed || feed.done || mine !== run) return Promise.resolve();
+      return (fetching ||= fetchMore().finally(() => (fetching = null)));
+    };
+    const fetchMore = async () => {
       try {
         const posts = await feed.next();
         if (mine !== run || closed) return;
@@ -72,8 +77,6 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
         status.textContent = feed.done ? (gal.length ? 'That is everything' : 'No posts to show') : '';
       } catch (e) {
         status.replaceChildren(h('span', {}, e.message + ' '), h('button', { class: 'btn', onclick: () => ((status.textContent = 'Loading posts…'), more()) }, 'Try again'));
-      } finally {
-        fetching = false;
       }
     };
     more();
@@ -99,8 +102,32 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     }
   }
 
+  /** A post opens the way the Feed shows posts: full screen, swipe for the next of this artist's, in order. */
+  function openAt(vi, who) {
+    if (reel) return;
+    const el = h('div', { class: 'fd-reel' });
+    page.append(el);
+    const g = gal;
+    const screen = openReel(el, { title: pretty(who), start: vi, posts: () => g.viewList(), more: () => more(), onClose: () => closeReel() });
+    const off = onBack(() => (covered() ? false : (closeReel(), true)));
+    reel = { el, screen, off, gal: g };
+  }
+  /** Back to the grid, at the post you were on. */
+  function closeReel() {
+    if (!reel) return;
+    const { el, screen, off, gal: g } = reel;
+    reel = null;
+    const at = screen.index();
+    off();
+    screen.destroy();
+    el.remove();
+    const item = g.itemIndexOfView(at);
+    if (item >= 0) g.scrollTo(item);
+  }
+
   function close() {
     if (closed) return;
+    closeReel();
     closed = true;
     run++;
     offBack();
@@ -112,14 +139,14 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
   }
   const offBack = onBack(() => (covered() ? false : (close(), true)));
   const onKey = (e) => {
-    if ((e.key === 'Escape' || e.key === 'ArrowLeft') && !covered() && document.body.dataset.view === 'feed') (e.preventDefault(), e.stopPropagation(), close());
+    if ((e.key === 'Escape' || e.key === 'ArrowLeft') && !covered() && document.body.dataset.view === 'feed') (e.preventDefault(), e.stopPropagation(), reel ? closeReel() : close());
   };
   addEventListener('keydown', onKey, true);
   const onHash = () => setTimeout(() => document.body.dataset.view !== 'feed' && close(), 0); // off to a search: do not leave it lying open
   addEventListener('hashchange', onHash);
 
   let start = null;
-  page.addEventListener('touchstart', (e) => { start = e.touches.length === 1 && !e.target.closest('.fd-ap-others') ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+  page.addEventListener('touchstart', (e) => { start = !reel && e.touches.length === 1 && !e.target.closest('.fd-ap-others') ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
   page.addEventListener('touchend', (e) => {
     if (!start) return;
     const dx = e.changedTouches[0].clientX - start.x, dy = e.changedTouches[0].clientY - start.y;

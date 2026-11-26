@@ -21,7 +21,13 @@ const mode = () => S('feedMode') || 'foryou';
 const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+(=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
 const signedIn = (prov) => { const c = (S('creds') || {})[prov.credKey]; return !!(c?.user && c?.key); };
 
-export function renderFeed(root, ctx) {
+/**
+ * @param list  leave out for the Feed itself. With it, the same screen shows a fixed list in order (an artist's posts): nothing is
+ *              picked, learned from watching, or fetched here. { title, start, posts(), more(), onClose() }
+ * @returns     { index(), destroy() }
+ */
+export function renderFeed(root, ctx, list = null) {
+  const solo = !!list;
   const view = {
     items: [], // {post, kind, why}
     rr: 0,
@@ -40,9 +46,10 @@ export function renderFeed(root, ctx) {
   const tabs = h('div', { class: 'fd-tabs' }, MODES.map(([k, label]) => h('button', { 'data-m': k, onclick: () => setMode(k) }, label)));
   const paintTabs = () => tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === mode()));
   const menuBtn = h('button', { class: 'fd-ib fd-menu', title: 'Feed settings', 'aria-label': 'Feed settings', html: icon('sliders', 20), onclick: (e) => feedSettings(e.currentTarget) });
-  const top = h('div', { class: 'fd-top' },
-    h('button', { class: 'fd-ib', title: 'Cloak the screen', 'aria-label': 'Cloak the screen', html: icon('cloak', 20), onclick: () => ctx.cloak?.() }),
-    tabs, menuBtn);
+  const cloakBtn = h('button', { class: 'fd-ib', title: 'Cloak the screen', 'aria-label': 'Cloak the screen', html: icon('cloak', 20), onclick: () => ctx.cloak?.() });
+  const top = solo
+    ? h('div', { class: 'fd-top' }, h('button', { class: 'fd-ib', title: 'Back', 'aria-label': 'Back', html: icon('left', 20), onclick: () => list.onClose() }), h('div', { class: 'fd-solo-title' }, list.title), cloakBtn)
+    : h('div', { class: 'fd-top' }, cloakBtn, tabs, menuBtn);
   const el = h('div', { class: 'fd' }, scroller, top, pullEl, empty);
   root.replaceChildren(el);
   el.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && el.classList.contains('idle') && wake());
@@ -62,6 +69,7 @@ export function renderFeed(root, ctx) {
   function wake() {
     el.classList.remove('idle');
     clearTimeout(idleT);
+    if (view.artist) return;
     idleT = setTimeout(() => {
       const card = cardAt(view.idx), v = card?.querySelector('video');
       const busy = card?.querySelector('.fd-tags.open, .fd-desc.open') || document.querySelector('.sheet-back, .pop');
@@ -349,21 +357,27 @@ export function renderFeed(root, ctx) {
       if (!start) return;
       const dx = e.changedTouches[0].clientX - start.x, dy = e.changedTouches[0].clientY - start.y;
       start = null;
-      if (dx < -70 && -dx > Math.abs(dy) * 1.7) openArtist(p);
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.7) return;
+      if (solo) dx > 0 && list.onClose(); // swipe right: back to the grid
+      else if (dx < 0) openArtist(p);
     }, { passive: true });
     card.addEventListener('touchcancel', () => (start = null), { passive: true });
   };
 
   function openArtist(p, name) {
+    if (solo) return list.onClose(); // already inside an artist's posts: their page is right behind
     const names = p.artists?.length ? p.artists : name ? [name] : [];
     if (!names.length) return toast('No artist is tagged on this post', { ms: 1800 });
     if (view.artist) return;
     hush(true);
-    wake();
+    view.clean = false;
+    el.classList.remove('clean', 'idle'); // the page lies inside this screen and must not fade with it
+    clearTimeout(idleT);
     view.artist = openArtistPage(el, ctx, {
       provId: p.provider, names, name: name || names[0],
       onFollow: () => (paintSuggest(), view.items.forEach(refreshInfo)),
       onClose: () => { view.artist = null; wake(); fill(); },
+      openReel: (host, l) => renderFeed(host, ctx, l),
     });
   }
 
@@ -402,7 +416,7 @@ export function renderFeed(root, ctx) {
     popover(anchor, h('div', { class: 'fd-set fd-actions' },
       item('Not interested', 'close', () => skip(i), 'Fewer like this. Nothing is sent to the site'),
       item(view.clean ? 'Show buttons' : 'Hide buttons', 'eye', () => setClean(!view.clean), 'Or hold two fingers on the post'),
-      p.artists.length ? item('Artist page', 'user', () => openArtist(p), 'Or swipe the post to the left') : null,
+      !solo && p.artists.length ? item('Artist page', 'user', () => openArtist(p), 'Or swipe the post to the left') : null,
       item('Rate its tags', 'tag', () => setTimeout(() => tagSheet(menuBtn, p), 60), 'Tell the Feed what you want more or less of'),
       item('Open post', 'fit', () => openIt(i)),
       item('Share link', 'share', () => ctx.share?.(p)),
@@ -451,7 +465,30 @@ export function renderFeed(root, ctx) {
   const ahead = () => Math.max(14, (S('feedPreload') || 20) + 4); // cards lined up past the one on screen, so a swipe never waits for the network
   const withTimeout = (pr, ms) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]);
   let run = 0; // a refresh starts a new run: picks still on their way from the old one are dropped
+  /** A fixed list: show what there is, and ask for the next page as the end comes near. */
+  async function fillList() {
+    const append = () => {
+      const posts = list.posts();
+      if (posts.length <= view.items.length) return false;
+      for (const post of posts.slice(view.items.length)) (view.items.push({ post, kind: 'list', why: '' }), addSlot());
+      return true;
+    };
+    if (append()) syncWindow();
+    paintEmpty();
+    if (view.busy || view.items.length - view.idx > 8) return;
+    view.busy = true;
+    try {
+      await list.more();
+      if (root.isConnected && append()) syncWindow();
+    } finally {
+      view.busy = false;
+      paintEmpty();
+    }
+    if (!view.items.length) return;
+    if (!activePostSet) activate(0);
+  }
   async function fill() {
+    if (solo) return fillList();
     if (view.busy) return void (view.again = true); // run once more when the current round ends
     view.busy = true;
     try {
@@ -488,6 +525,7 @@ export function renderFeed(root, ctx) {
     const list = enabled();
     if (view.items.length) return void (empty.hidden = true);
     empty.hidden = false;
+    if (solo) return empty.replaceChildren(h('div', { class: 'fd-loading' }, h('i'), h('b', {}, 'Loading…')));
     const say = (title, text, spin = true) => empty.replaceChildren(h('div', { class: 'fd-loading' }, spin ? h('i') : null, h('b', {}, title), h('small', {}, text)));
     if (mode() === 'follows' && !view.busy) {
       if (!list.some((p) => subs.all().some((f) => f.p === p.credKey))) return say('Follow some artists first', 'Their new posts show up here.', false);
@@ -527,7 +565,7 @@ export function renderFeed(root, ctx) {
   };
 
   /* ---------------------------------------------------------------- what is on screen now: learn from it */
-  let since = 0, catBusy = false, activePost = null;
+  let since = 0, catBusy = false, activePost = null, activePostSet = false;
   /** Categories for the cards about to be seen, where a site sends none: one paced request, then their text is redrawn. */
   async function catsNear() {
     if (catBusy) return;
@@ -553,12 +591,15 @@ export function renderFeed(root, ctx) {
       const b = cardAt(i).querySelector('.fd-btn.sound');
       if (b) b.innerHTML = icon(v.muted ? 'mute' : 'sound', 24);
     }
-    since = Date.now();
-    activePost = it?.post || null;
-    if (it) (markShown(it.post), paintState(cardAt(i), it.post));
+    if (it) paintState(cardAt(i), it.post);
     wake();
+    activePostSet = true;
     fill();
     catsNear();
+    if (solo) return; // going through someone's posts teaches the Feed nothing (a like still does)
+    since = Date.now();
+    activePost = it?.post || null;
+    if (it) markShown(it.post);
     if (i % 5 === 0) paintSuggest();
     if (i === 12 && !kv.get('feed:hint:tags', false)) { // said once, ever
       kv.set('feed:hint:tags', true);
@@ -760,7 +801,7 @@ export function renderFeed(root, ctx) {
     else if (k === 'u' || k === 'U') p && upvote(p);
     else if (k === 'h' || k === 'H') setClean(!view.clean);
     else if (k === 'Enter') (e.preventDefault(), openIt(view.idx));
-    else if (k === 'ArrowRight') p && (e.preventDefault(), openArtist(p));
+    else if (k === 'ArrowRight' && !solo) p && (e.preventDefault(), openArtist(p));
     else if (k === 'd' || k === 'D') p && download(p);
     else if (k === ' ') {
       const v = cardAt(view.idx)?.querySelector('video');
@@ -772,7 +813,7 @@ export function renderFeed(root, ctx) {
   /* tapping Feed again while on it: the first tap says so, the second refreshes */
   let tappedFeed = 0;
   const onRetap = (e) => {
-    if (!e.target.closest?.('a[data-view="feed"]')) return; // the nav link only: <body> carries data-view too
+    if (solo || !e.target.closest?.('a[data-view="feed"]')) return; // the nav link only: <body> carries data-view too
     if (view.artist) return (e.preventDefault(), e.stopPropagation(), view.artist.close());
     if (!view.active()) return;
     e.preventDefault();
@@ -971,7 +1012,7 @@ export function renderFeed(root, ctx) {
 
   /* pull down on the first card to refresh */
   let pull = null;
-  scroller.addEventListener('touchstart', (e) => { pull = scroller.scrollTop <= 0 && e.touches.length === 1 ? { y: e.touches[0].clientY, dy: 0 } : null; }, { passive: true });
+  scroller.addEventListener('touchstart', (e) => { pull = !solo && scroller.scrollTop <= 0 && e.touches.length === 1 ? { y: e.touches[0].clientY, dy: 0 } : null; }, { passive: true });
   scroller.addEventListener('touchmove', (e) => {
     if (!pull) return;
     pull.dy = e.touches[0].clientY - pull.y;
@@ -996,7 +1037,7 @@ export function renderFeed(root, ctx) {
 
   /* --- background upkeep while the Feed is open: follow checks, a top-up of pools */
   const upkeep = setInterval(() => {
-    if (!view.active()) return;
+    if (solo || !view.active()) return;
     for (const p of enabled()) {
       if (needsKeyMissing(p)) continue;
       const src = srcOf(p);
@@ -1011,21 +1052,25 @@ export function renderFeed(root, ctx) {
   const onHash = () => setTimeout(() => { if (!view.active()) (hush(true), unturn()); }, 0);
   addEventListener('hashchange', onHash);
   // pause video when the viewer or another page covers the feed, and resume when it comes back
+  let gone = false;
+  function destroy() {
+    if (gone) return;
+    gone = true;
+    clearInterval(watch);
+    clearInterval(upkeep);
+    clearTimeout(idleT);
+    offs.forEach((off) => off());
+    sizer.disconnect();
+    removeEventListener('keydown', onKey);
+    removeEventListener('hashchange', onHash);
+    document.removeEventListener('click', onRetap, true);
+    document.removeEventListener('visibilitychange', onVis);
+    view.artist?.close();
+    hush(true);
+    leave();
+  }
   const watch = setInterval(() => {
-    if (!root.isConnected) {
-      clearInterval(watch);
-      clearInterval(upkeep);
-      offs.forEach((off) => off());
-      sizer.disconnect();
-      removeEventListener('keydown', onKey);
-      removeEventListener('hashchange', onHash);
-      document.removeEventListener('click', onRetap, true);
-      document.removeEventListener('visibilitychange', onVis);
-      view.artist?.close();
-      hush(true);
-      leave();
-      return;
-    }
+    if (!root.isConnected) return destroy();
     if (!view.active()) return hush(true);
     hush();
     const v = cardAt(view.idx)?.querySelector('video');
@@ -1033,10 +1078,21 @@ export function renderFeed(root, ctx) {
   }, 700);
 
   /* ---------------------------------------------------------------- go */
+  const handle = { index: () => view.idx, destroy };
+  if (solo) {
+    for (const post of list.posts()) (view.items.push({ post, kind: 'list', why: '' }), addSlot());
+    const at = Math.max(0, Math.min(list.start || 0, view.items.length - 1));
+    view.idx = at;
+    scroller.scrollTop = at * scroller.clientHeight;
+    if (view.items.length) activate(at);
+    else fill();
+    return handle;
+  }
   paintTabs();
   paintEmpty();
   paintSuggest();
   setTimeout(autoLearn, 15000); // reading favorites can wait: the first cards come first
   setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, mode() === 'follows' ? 0 : 8000);
   fill();
+  return handle;
 }
