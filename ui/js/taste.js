@@ -17,6 +17,9 @@ const LIFT_MIN = -1.5, LIFT_MAX = 3;
 const SAID = { 2: 1.9, 1: 0.9, n: 0, '-1': -1.3, '-2': -4 };
 const ORDER = { 2: 0, 1: 1, n: 2, '-1': 3, '-2': 4 };
 
+/** Every tag on a post (the learned features below stop at 70, your own ratings must not). */
+const allTags = (post) => Object.entries(post.tags || {}).flatMap(([cat, list]) => list.map((t) => [t, cat]));
+
 /** [feature, weight] pairs for a post: its tags by category, plus its kind and rating (as "~kind:video"). */
 export function features(post) {
   const out = [];
@@ -101,7 +104,7 @@ export class Taste {
 
   /** Does this post carry a tag you never want to see? */
   banned(post) {
-    return features(post).some(([f]) => this.r[f] === -2);
+    return allTags(post).some(([t]) => this.r[t] === -2);
   }
 
   /** Tags with an opinion attached: the ones you rated first, then what was learned most strongly either way. */
@@ -153,12 +156,6 @@ export class Taste {
     const fs = features(post);
     let sum = 0, unknown = 0, best = null, bestV = 0;
     for (const [f, w, cat] of fs) {
-      const said = this.r[f];
-      if (said) {
-        const v = SAID[said] * w;
-        sum += v;
-        if (v > bestV && cat !== 'kind') (bestV = v), (best = { f, cat });
-      }
       const e = this.t[f];
       if (!e || e[1] < 2) {
         if (cat !== 'meta' && cat !== 'kind') unknown++;
@@ -167,6 +164,12 @@ export class Taste {
       const v = this.lift(f) * w;
       sum += v;
       if (v > bestV && cat !== 'kind') (bestV = v), (best = { f, cat });
+    }
+    for (const [t, cat] of allTags(post)) { // what you said counts for every tag, and for no less than an ordinary one
+      if (!this.r[t]) continue;
+      const v = SAID[this.r[t]] * Math.max(1, CAT_W[cat] ?? 1);
+      sum += v;
+      if (v > bestV) (bestV = v), (best = { f: t, cat });
     }
     const n = Math.max(8, fs.length);
     return { score: sum / Math.sqrt(n), novelty: Math.min(1, unknown / Math.max(4, fs.length - 1)), why: best };
