@@ -1,5 +1,6 @@
 /* ==========================================================================================================================
-   The Feed's engine: what gets shown next, and how politely it is fetched. The screen itself is feed.js; the taste model is taste.js.
+   The Feed's engine: what gets shown next, and how politely it is fetched. The screen itself is feed.js; the long-term taste model is
+   taste.js and the short-lived "today" layer on top of it is mood.js.
 
    What comes up is learned on this device from what you like (your favorites / upvotes on the sites, and the hearts you tap), mixed
    with deliberate wandering, and new posts from artists you follow.
@@ -12,9 +13,10 @@
    - an error or 429 puts that site on a growing cool-down (20 s doubling to 5 min) instead of retrying.
    ========================================================================================================================== */
 import { debounce, sleep, pretty } from './util.js';
-import { S, emit, subs, tagc, kv, voted } from './store.js';
+import { S, on, emit, subs, tagc, kv, voted } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit } from './providers.js';
 import { Taste, softPick, features } from './taste.js';
+import { Mood } from './mood.js';
 import { isPhone } from './platform.js';
 
 const GAP = { e621: 1500, e926: 1500 };
@@ -44,6 +46,7 @@ class Model {
   constructor(cred) {
     this.cred = cred;
     this.taste = new Taste(kv.get('feed:t:' + cred, null));
+    this.mood = new Mood(kv.get('feed:mood:' + cred, null)); // today's lean, on top of the taste
     this.seen = new Set(kv.get('feed:seen:' + cred, []));
     this.likes = new Set(kv.get('feed:likes:' + cred, []));
     this.hidden = new Set(kv.get('feed:hide:' + cred, [])); // "not interested": never shown again
@@ -55,6 +58,7 @@ class Model {
     trim(this.seen, SEEN_MAX);
     trim(this.hidden, SEEN_MAX);
     kv.set('feed:t:' + this.cred, this.taste.toJSON());
+    kv.set('feed:mood:' + this.cred, this.mood.toJSON());
     kv.set('feed:seen:' + this.cred, [...this.seen]);
     kv.set('feed:likes:' + this.cred, [...this.likes].slice(-8000));
     kv.set('feed:hide:' + this.cred, [...this.hidden]);
@@ -63,6 +67,7 @@ class Model {
   }
   reset() {
     this.taste.reset();
+    this.mood.reset();
     this.seen.clear();
     this.likes.clear();
     this.hidden.clear();
@@ -437,6 +442,114 @@ const lean = (p) => {
   return 0.5 * Math.exp(-age / 45) + 0.35 * Math.min(1, Math.log10(1 + Math.max(0, p.score || 0)) / 3);
 };
 
+const MOOD = 1.4; // how much today counts next to the long-term score (which is scaled by 1.2)
+/** The long-term score, flattened: a favorite subject helps, it does not take over. */
+const flat = (score) => Math.sign(score) * Math.sqrt(Math.abs(score));
+
+/* ------------------------------------------------------------------ today */
+/** The share of everything shown that carried this tag: how little a tag says about a mood. */
+const commonness = (model) => (tag) => (model.taste.pn > 20 ? (model.taste.t[tag]?.[1] || 0) / model.taste.pn : 0);
+/** A reaction to a post, -1..1. Moves today's mood only; the long-term weights are learned elsewhere. */
+export function feel(post, signal) {
+  const m = modelOf(post.provider);
+  m.mood.feel(post, signal, commonness(m));
+  m.save();
+}
+// likes made in the viewer (from the Feed, the artist page or Roam) count for today too
+on('post-like', (e) => feel(e.detail.post, e.detail.on ? (e.detail.vote ? 0.8 : 1) : -0.5));
+
+/*
+ * Probes: while today's mood is unknown, a few of the first posts are chosen to find it out, one from each of the main things you like,
+ * one by an artist you like on a subject you are cooler on, and one from outside your usual. They look like any other post.
+ */
+function planProbes(view, prov) {
+  const src = poolFor(view, prov), model = modelOf(prov), t = model.taste;
+  if (!t.ready || !model.mood.fresh) return [];
+  const likes = t.interests(['species', 'character', 'general', 'copyright'], 24, (f) => tagc.get(prov.id, f)?.cat ?? null);
+  // separate subjects: skip a tag that mostly turns up together with one already chosen
+  const having = (tag) => new Set(src.pool.filter((p) => carries(p, tag)).map((p) => p.id));
+  const heads = [];
+  for (const x of likes) {
+    if (heads.length >= 4) break;
+    const mine = having(x.tag);
+    const twin = heads.some((h) => { let both = 0; for (const id of mine) if (h.ids.has(id)) both++; return both > 0.35 * Math.min(mine.size || 1, h.ids.size || 1); });
+    if (!twin) heads.push({ tag: x.tag, ids: mine });
+  }
+  const artists = t.topArtists(2).slice(0, 6).map((a) => a.name);
+  const plan = [...heads.map((h) => ({ type: 'subject', tag: h.tag })), ...(artists.length ? [{ type: 'artist', artists }] : []), { type: 'wild' }];
+  if (artists.length) seedArtists(src, view, artists);
+  // scattered over cards 2-11, the wildcards toward the end, so it never reads as a questionnaire
+  const spots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].sort(() => Math.random() - 0.5).slice(0, plan.length).sort((a, b) => a - b);
+  return plan.map((p, i) => ({ ...p, at: spots[i] }));
+}
+const carries = (p, tag) => Object.values(p.tags).some((list) => list.includes(tag));
+/** One small request so that the artists you like are among the candidates. */
+async function seedArtists(src, view, artists) {
+  const prov = src.prov, model = modelOf(prov);
+  if (paceOf(src).cool > Date.now()) return;
+  try {
+    const some = artists.slice(0, prov.engine === 'e6' ? 5 : 1);
+    const posts = await fetchPage(src, some.map((t) => ({ t, op: some.length > 1 ? '~' : '+' })), { ...(prov.engine === 'e6' ? { order: 'random' } : {}), limit: 40, lane: 'follow' });
+    learnCats(posts);
+    const have = new Set(src.pool.map((p) => p.id)), q = queued(view);
+    for (const p of posts.filter((x) => !have.has(x.id) && acceptable(x, model, q, 'foryou'))) (tag(p, '_kind', 'explore'), src.pool.push(p));
+  } catch {
+    /* the probes make do with what is in the pool */
+  }
+}
+/** Take the post that answers this probe best, or nothing if the pool holds none. */
+function takeProbe(view, prov, probe) {
+  const src = poolFor(view, prov), model = modelOf(prov), t = model.taste;
+  const q = queued(view);
+  const open = src.pool.filter((p) => acceptable(p, model, q, 'foryou'));
+  const seenArtists = new Set(view.items.slice(-8).flatMap((x) => x.post.artists));
+  const fresh = (p) => !p.artists.some((a) => seenArtists.has(a));
+  let from, score;
+  if (probe.type === 'subject') {
+    from = open.filter((p) => carries(p, probe.tag) && fresh(p));
+    score = (p) => flat(t.rate(p).score) + lean(p);
+  } else if (probe.type === 'artist') {
+    const loved = open.filter((p) => p.artists.some((a) => probe.artists.includes(a)) && fresh(p));
+    const offTaste = loved.filter((p) => Object.values(p.tags).flat().some((x) => t.r[x] === -1 || t.lift(x) < -0.25));
+    from = offTaste.length ? offTaste : loved;
+    score = lean;
+  } else {
+    from = open.filter(fresh);
+    score = (p) => t.rate(p).novelty * 1.5 + lean(p);
+  }
+  if (!from.length) return null;
+  const post = from[softPick(from.map((p) => score(p) + Math.random() * 0.4), 0.4)];
+  src.pool.splice(src.pool.indexOf(post), 1);
+  return post;
+}
+function nextProbe(view, list) {
+  view.probes ||= {};
+  for (const prov of list) {
+    const plan = (view.probes[prov.id] ||= poolFor(view, prov).pool.length >= 20 ? planProbes(view, prov) : null);
+    if (!plan) continue;
+    const probe = plan.find((p) => p.at === view.items.length);
+    if (!probe) continue;
+    plan.splice(plan.indexOf(probe), 1);
+    const post = takeProbe(view, prov, probe);
+    if (post) return { post, kind: 'probe' };
+  }
+  return null;
+}
+
+/** The posts most likely to come next (not taken): their pictures are worth downloading early. */
+export function likely(view, count) {
+  const out = [];
+  for (const prov of enabled()) {
+    const model = modelOf(prov);
+    out.push(...poolFor(view, prov).pool.map((p) => [flat(model.taste.rate(p).score) * 1.2 + model.mood.score(p) * MOOD + lean(p), p]));
+  }
+  return out.sort((a, b) => b[0] - a[0]).slice(0, count).map((x) => x[1]);
+}
+/** Give back posts that were lined up but never reached, so they can be picked again with today's mood as it is now. */
+export function putBack(view, posts) {
+  for (const p of posts) poolFor(view, getProvider(p.provider)).pool.push(p);
+}
+
 /** The few tags the taste model is leaning on for a post. */
 const pull = (p, t) => features(p).filter(([, , c]) => c !== 'meta' && c !== 'kind').map(([f, w]) => [f, t.lift(f) * w]).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([f]) => f);
 
@@ -473,14 +586,15 @@ function takeFrom(src, view, explore) {
   if (!src.pool.length) return null;
   if (m !== 'foryou') return src.pool.shift(); // New / Hot: the site's own order
   let idx;
-  if (!model.taste.ready) idx = softPick(src.pool.map((p) => lean(p) + Math.random() * 0.4), 0.5);
+  model.mood.fade();
+  if (!model.taste.ready) idx = softPick(src.pool.map((p) => lean(p) + model.mood.score(p) * MOOD + Math.random() * 0.4), 0.5);
   else {
     const dull = sameness(view, model);
     const scores = src.pool.map((p) => {
       const r = model.taste.rate(p);
-      const liking = Math.sign(r.score) * Math.sqrt(Math.abs(r.score)); // flattened: a favorite subject helps, it does not take over
-      if (explore) return r.novelty * 1.2 + Math.max(-1, Math.min(0.6, liking)) * 0.3 + lean(p) * 0.6 + Math.random() * 0.5 - dull(p) * 0.5;
-      return liking * 1.2 + lean(p) + Math.random() * 0.6 - dull(p);
+      const liking = flat(r.score);
+      if (explore) return r.novelty * 1.2 + Math.max(-1, Math.min(0.6, liking)) * 0.3 + lean(p) * 0.6 + model.mood.score(p) * 0.3 + Math.random() * 0.5 - dull(p) * 0.5;
+      return liking * 1.2 + model.mood.score(p) * MOOD + lean(p) + Math.random() * 0.6 - dull(p);
     });
     idx = softPick(scores, explore ? 0.5 : 0.75);
   }
@@ -505,6 +619,10 @@ export async function nextPost(view) {
   if (m === 'follows') {
     const all = fresh();
     return all.length ? useFresh(all[0]) : null;
+  }
+  if (m === 'foryou') {
+    const probe = nextProbe(view, list);
+    if (probe) return probe;
   }
   // about one card in five, never two close together, and not always strictly the newest
   if (m === 'foryou' && S('feedFollows') && view.items.length && !view.items.slice(-2).some((x) => x.kind === 'follow') && Math.random() < 0.28) {
@@ -580,6 +698,7 @@ export const isUp = (p) => voted.has(p) || p.myVote > 0;
 export const isDown = (p) => p.myVote < 0;
 /** Teaches the Feed without telling the site anything. */
 export function notInterested(post) {
+  feel(post, -1);
   const m = modelOf(post.provider);
   m.hidden.add(post.id);
   m.taste.learn(post, { n: 2.5, post_n: 0.5 });

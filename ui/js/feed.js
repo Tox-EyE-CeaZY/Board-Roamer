@@ -11,7 +11,7 @@ import { openArtistPage } from './artistpage.js';
 import { haptic, isAndroid, isTouch, native } from './platform.js';
 import {
   SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
-  isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools,
+  isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools, feel, likely, putBack,
 } from './feedengine.js';
 
 const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
@@ -129,7 +129,7 @@ export function renderFeed(root, ctx, list = null) {
         railButton('up', 'Upvote (U)', 'up', () => upvote(p)),
         railButton('down', 'Downvote (X)', 'down', () => downvote(indexOf(card))),
         railButton('dl', 'Download (D)', 'download', () => download(p)),
-        railButton('share', 'Share', 'share', () => ctx.share?.(p)),
+        railButton('share', 'Share', 'share', () => (react(p, 0.5), ctx.share?.(p))),
         railButton('pin', 'Pin', 'pin', () => (quickPin([p]), setTimeout(() => paintState(card, p), 60))),
         p.kind === 'video' ? railButton('sound', 'Sound', media.muted ? 'mute' : 'sound', (b) => { media.muted = !media.muted; setS('muted', media.muted); b.innerHTML = icon(media.muted ? 'mute' : 'sound', 24); }) : null,
         p.kind === 'video' && isAndroid() && p.w > p.h ? railButton('rotate', 'Turn sideways', 'rotate', () => turn()) : null),
@@ -185,7 +185,7 @@ export function renderFeed(root, ctx, list = null) {
     const prov = getProvider(p.provider);
     if (isFollowed(prov, name)) return null;
     const keen = (modelOf(prov).taste.a[name] || 0) >= SUGGEST_AT;
-    return h('button', { class: 'fd-follow' + (keen ? ' keen' : ''), onclick: (e) => { e.stopPropagation(); follow(name, prov.id); e.currentTarget.remove(); paintSuggest(); } }, keen ? 'Follow · you like them' : 'Follow');
+    return h('button', { class: 'fd-follow' + (keen ? ' keen' : ''), onclick: (e) => { e.stopPropagation(); follow(name, prov.id); react(p, 0.6); e.currentTarget.remove(); paintSuggest(); } }, keen ? 'Follow · you like them' : 'Follow');
   };
 
   const refreshInfo = (it) => {
@@ -369,6 +369,7 @@ export function renderFeed(root, ctx, list = null) {
     const names = p.artists?.length ? p.artists : name ? [name] : [];
     if (!names.length) return toast('No artist is tagged on this post', { ms: 1800 });
     if (view.artist) return;
+    if (p.id) react(p, 0.4);
     hush(true);
     view.clean = false;
     el.classList.remove('clean', 'idle'); // the page lies inside this screen and must not fade with it
@@ -462,7 +463,10 @@ export function renderFeed(root, ctx, list = null) {
   };
 
   /* --- keeping the queue stocked */
-  const ahead = () => Math.max(14, (S('feedPreload') || 20) + 4); // cards lined up past the one on screen, so a swipe never waits for the network
+  /* Cards lined up past the one on screen. For you keeps this short, so what you do changes what comes soon; picking is instant (the
+     pool is already on the device) and the pictures of likely candidates are fetched ahead either way. Other lists line up the full run. */
+  const KEEP = 4; // never re-picked: the card on screen and the next three
+  const ahead = () => (mode() === 'foryou' ? 8 : Math.max(14, (S('feedPreload') || 20) + 4));
   const withTimeout = (pr, ms) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]);
   let run = 0; // a refresh starts a new run: picks still on their way from the old one are dropped
   /** A fixed list: show what there is, and ask for the next page as the end comes near. */
@@ -499,7 +503,7 @@ export function renderFeed(root, ctx, list = null) {
           if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
           const mine = run;
           const got = await withTimeout(nextPost(view), 40000);
-          if (mine !== run) continue;
+          if (mine !== run) { if (got && !solo) putBack(view, [got.post]); continue; }
           if (!got) break;
           const { post, kind } = got;
           view.items.push({ post, kind, why: whyOf(post, kind) });
@@ -539,16 +543,23 @@ export function renderFeed(root, ctx, list = null) {
   /* Pictures are downloaded well before they are needed, nearest first, a few at a time (they come from the sites' file servers, not the API). */
   const warmed = new Map(); // url -> Image, kept so the download is not dropped
   let warming = 0;
+  let wanted = [];
   function warm() {
     if (!root.isConnected) return;
-    const next = view.items.slice(view.idx + 1, view.idx + 1 + (S('feedPreload') || 20)).map((x) => (x.post.kind === 'video' ? x.post.thumb : mediaSrc(x.post)));
-    while (warming < 4) {
-      const url = next.find((u) => u && !warmed.has(u));
+    const want = S('feedPreload') || 20;
+    const lined = view.items.slice(view.idx + 1, view.idx + 1 + want).map((x) => x.post);
+    if (!solo && mode() === 'foryou' && lined.length < want) lined.push(...likely(view, want - lined.length));
+    wanted = lined.map((p) => (p.kind === 'video' ? p.thumb : mediaSrc(p)));
+    pump();
+  }
+  function pump() {
+    while (warming < 4 && root.isConnected) {
+      const url = wanted.find((u) => u && !warmed.has(u));
       if (!url) break;
       const img = new Image();
       warmed.set(url, img);
       warming++;
-      img.onload = img.onerror = () => { warming--; warm(); };
+      img.onload = img.onerror = () => { warming--; pump(); };
       img.src = url;
     }
     while (warmed.size > 120) warmed.delete(warmed.keys().next().value);
@@ -616,10 +627,13 @@ export function renderFeed(root, ctx, list = null) {
     const ms = Date.now() - since, p = activePost, m = modelOf(p.provider);
     const liked = m.likes.has(p.id);
     const vid = cardAt(view.idx)?.querySelector('video');
-    if (ms < 1100 && !liked) m.taste.learn(p, { n: 0.3, post_n: 0 }); // flicked past
-    else if (!liked && !document.hidden) {
-      const watched = vid ? ms > Math.min(14000, (vid.duration || 8) * 1000 * 0.9) : ms > 7000;
-      if (watched) m.taste.learn(p, { l: 0.25, n: 0, post_n: 0 }); // stayed a while: a little in its favor
+    // How long you stayed is the quietest and most frequent thing you say. It mostly moves today's mood, and the long-term taste a little.
+    // (Past a minute and a half the phone was probably just lying there.)
+    if (ms < 1100) {
+      if (!liked) (m.taste.learn(p, { n: 0.1, post_n: 0 }), react(p, -0.25));
+    } else if (!liked && !document.hidden && ms < 90000) {
+      const stayed = vid ? ms > Math.min(10000, (vid.duration || 8) * 700) : ms > 4500;
+      if (stayed) (m.taste.learn(p, { l: 0.12, n: 0, post_n: 0 }), react(p, vid || ms > 9000 ? 0.5 : 0.3));
     }
     m.save();
     activePost = null;
@@ -701,6 +715,33 @@ export function renderFeed(root, ctx, list = null) {
     });
   }
 
+  /* ---- today's mood */
+  let stirred = 0, restirT = 0;
+  /**
+   * Something was said about a post (-1..1). Once enough has been said (or one thing said strongly), the cards lined up a little further
+   * on are picked again, so the Feed drifts with you instead of finishing an order it made before.
+   */
+  function react(p, signal) {
+    feel(p, signal);
+    if (solo || mode() !== 'foryou') return;
+    stirred += Math.abs(signal);
+    if (stirred < 1 && Math.abs(signal) < 0.8) return;
+    clearTimeout(restirT);
+    restirT = setTimeout(restir, 250);
+  }
+  function restir() {
+    const keep = view.idx + KEEP;
+    if (!root.isConnected || view.items.length <= keep) return;
+    stirred = 0;
+    run++;
+    const dropped = view.items.splice(keep);
+    while (cards.length > view.items.length) (unmountCard(cards.length - 1), cards.pop().remove());
+    putBack(view, dropped.filter((x) => x.kind !== 'probe').map((x) => x.post));
+    for (const x of dropped.filter((d) => d.kind === 'probe')) (view.items.push(x), addSlot()); // a probe still waiting keeps its place in line
+    syncWindow();
+    fill();
+  }
+
   /** The heart favorites, nothing more (like the viewer's heart). Only a double-tap set to "Both" passes `vote` to upvote as well. */
   async function toggleLike(p, { vote = false } = {}) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
@@ -709,6 +750,7 @@ export function renderFeed(root, ctx, list = null) {
     else { m.likes.delete(p.id); p.faved = false; m.taste.learn(p, { l: -1, n: 0, post_n: 0 }); }
     haptic(want ? 'tick' : 'soft');
     m.save();
+    react(p, want ? 1 : -0.5);
     const online = signedIn(prov) && S('feedSyncLikes');
     if (want && vote && prov.vote && !isUp(p) && (online || !signedIn(prov))) castVote(p, 1);
     repaint(p);
@@ -734,6 +776,7 @@ export function renderFeed(root, ctx, list = null) {
     const on = keep || !isUp(p);
     haptic('tick');
     castVote(p, on ? 1 : 0);
+    react(p, on ? 0.8 : -0.4);
     if (on && !m.likes.has(p.id)) m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 });
     m.save();
     toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1100 });
@@ -747,6 +790,7 @@ export function renderFeed(root, ctx, list = null) {
     castVote(p, -1);
     toast('Downvoted. Fewer like this', { ms: 1400 });
     goTo(i + 1);
+    setTimeout(restir, 900); // once the next card is on screen
   }
 
   /** "Not interested": teaches the Feed, tells the site nothing. */
@@ -757,15 +801,19 @@ export function renderFeed(root, ctx, list = null) {
     haptic('tick');
     toast('Got it, fewer like this', { ms: 1400 });
     goTo(i + 1);
+    setTimeout(restir, 900);
   }
 
   async function download(p, again = false) {
     if (saved.has(p) && !again) return void toast('Already downloaded', { action: { label: 'Download again', run: () => download(p, true) }, ms: 3500 });
+    react(p, 0.6);
     await ctx.savePost?.(p);
     repaint(p);
   }
 
   function openIt(i) {
+    const looked = view.items[i]?.post;
+    if (looked) react(looked, 0.4); // opening it for a closer look says something
     hush(true);
     const g = {
       viewList: () => view.items.map((x) => x.post),
@@ -794,6 +842,7 @@ export function renderFeed(root, ctx, list = null) {
       } else if (yes && !m.likes.has(post.id)) m.taste.learn(post, { l: 0.7, n: 0, post_n: 0 });
       m.save();
       repaint(post);
+      if (yes && !solo) (clearTimeout(restirT), (restirT = setTimeout(restir, 600))); // today's mood heard it too
     }),
     on('saved', paintAll),
     on('pins-changed', paintAll),
@@ -851,7 +900,7 @@ export function renderFeed(root, ctx, list = null) {
       row.replaceChildren(
         h('div', { class: 'fd-tr-name' }, h('b', { style: `color:var(--c-${cat})` }, pretty(tag)), h('small', {}, said ? 'set by you' : learned),
           h('i', { class: 'fd-meter' + (lift < 0 ? ' neg' : '') }, h('i', { style: `width:${m.taste.likes < 4 ? 0 : Math.round(Math.min(1, Math.abs(lift) / (lift < 0 ? 1.5 : 3)) * 100)}%` }))),
-        h('div', { class: 'fd-says' }, SAYS.map(([v, label]) => h('button', { class: (said === v ? 'on ' : '') + (v < 0 ? 'neg' : ''), onclick: (e) => { e.stopPropagation(); m.taste.say(tag, said === v ? 0 : v); m.save(); if (v === -2 && said !== v) dropUpcoming(true); paint(); } }, label))));
+        h('div', { class: 'fd-says' }, SAYS.map(([v, label]) => h('button', { class: (said === v ? 'on ' : '') + (v < 0 ? 'neg' : ''), onclick: (e) => { e.stopPropagation(); m.taste.say(tag, said === v ? 0 : v); m.mood.forget(tag); m.save(); if (v === -2 && said !== v) dropUpcoming(true); paint(); } }, label))));
     };
     paint();
     return row;
