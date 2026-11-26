@@ -773,6 +773,7 @@ export function renderFeed(root, ctx) {
       const t = input.value.trim().toLowerCase().replace(/\s+/g, '_');
       if (!t) return;
       input.value = '';
+      list.querySelector(':scope > small')?.remove(); // the "nothing yet" line
       list.prepend(tagRow(prov, t));
     };
     input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), add()));
