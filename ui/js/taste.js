@@ -13,8 +13,9 @@ const HALF_LIFE_DAYS = 120;
 const SMOOTH = 3; // pseudo-observations at the global rate: how much evidence a tag needs before its own rate counts
 const MAX_TAGS = 4500;
 const LIFT_MIN = -1.5, LIFT_MAX = 3;
-/** What your own rating of a tag adds on top of what was learned: Love, More, Less, Never. */
-const SAID = { 2: 1.9, 1: 0.9, '-1': -1.3, '-2': -4 };
+/** What your own rating of a tag adds on top of what was learned: Love, More, Less, Never. Neutral ('n') adds nothing and mutes what was learned. */
+const SAID = { 2: 1.9, 1: 0.9, n: 0, '-1': -1.3, '-2': -4 };
+const ORDER = { 2: 0, 1: 1, n: 2, '-1': 3, '-2': 4 };
 
 /** [feature, weight] pairs for a post: its tags by category, plus its kind and rating (as "~kind:video"). */
 export function features(post) {
@@ -92,7 +93,7 @@ export class Taste {
     if (++this._calls % 100 === 0) this._prune();
   }
 
-  /** Say what you think of a tag (0 takes it back). */
+  /** Say what you think of a tag: 2, 1, 'n' (neutral), -1, -2; 0 takes it back and lets the Feed learn it again. */
   say(tag, value) {
     if (value) this.r[tag] = value;
     else delete this.r[tag];
@@ -112,7 +113,7 @@ export class Taste {
       .map(([tag, [l, n]]) => ({ tag, said: 0, lift: this.lift(tag), weight: Math.abs(this.lift(tag)) * Math.sqrt(l > 0.5 ? l : n / 4) }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, limit);
-    return [...said.sort((a, b) => b.said - a.said), ...learned.sort((a, b) => b.lift - a.lift)];
+    return [...said.sort((a, b) => ORDER[a.said] - ORDER[b.said]), ...learned.sort((a, b) => b.lift - a.lift)];
   }
 
   /** Add to (or with a negative amount take from) how much an artist is liked. Weights are kept and nudged, never recomputed. */
@@ -136,7 +137,7 @@ export class Taste {
 
   lift(f) {
     const e = this.t[f];
-    if (!e) return 0;
+    if (!e || this.r[f] === 'n') return 0;
     const g = this.base;
     const r = (e[0] + SMOOTH * g) / (e[1] + SMOOTH);
     return Math.max(LIFT_MIN, Math.min(LIFT_MAX, Math.log(r / g)));

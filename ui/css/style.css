@@ -1385,7 +1385,7 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-tr-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
 .fd-tr-name b { overflow-wrap: anywhere; } .fd-tr-name small { opacity: .6; font-size: 11px; }
 .fd-meter { width: 100%; height: 3px; background: var(--line); } .fd-meter i { display: block; height: 100%; background: var(--accent); } .fd-meter.neg i { background: var(--hot); }
-.fd-says { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.fd-says button { min-height: 34px; font: 700 11px var(--f-mono); border: 1px solid var(--line2); }
+.fd-says { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.fd-says button { min-height: 36px; padding: 0; font: 700 10.5px var(--f-mono); border: 1px solid var(--line2); }
 .fd-says button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .fd-says button.neg.on { background: var(--hot); color: #140503; }
