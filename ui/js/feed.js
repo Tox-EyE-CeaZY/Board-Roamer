@@ -18,7 +18,7 @@ const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], 
 const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Hold two fingers on it to hide the buttons.';
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
 const mode = () => S('feedMode') || 'foryou';
-const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+(=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
+const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+([=,][^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
 const signedIn = (prov) => { const c = (S('creds') || {})[prov.credKey]; return !!(c?.user && c?.key); };
 
 /**
