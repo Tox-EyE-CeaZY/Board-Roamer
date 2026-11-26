@@ -83,6 +83,7 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - Roam has a 'For you' route chip (`fy=1` in the hash, never the default): `SuggestFeed` in `feedengine.js` has the same `next()/done` shape as `Feed`, its own pool sharing the site's pacing (`src.pace`), uses the current source only, learns nothing from showing the grid, and is not added to the Trail.
 - A post on the artist page opens `renderFeed(host, ctx, list)`: the same screen over a fixed list (`solo`). No picking, follow checks, pull-to-refresh, dwell learning or markShown; likes still count. Back / swipe right / Escape return to the grid at that post.
 - The heart (button and L) only favorites. Upvoting along with it happens only for `feedDtap: 'both'` (the default double-tap).
+- Votes go through `castVote(p, 1|0|-1)` in `feed.js`: buttons change at once, requests are chained per post, a refusal repaints what the site last had.
 - Double-tap: `feedDtap` (synced; fav | up | both | down), separate from the viewer's `dtap`. Only adds; `down` also advances.
 - Not interested: `notInterested()` (local only, `feed:hide:<cred>`). Downvote also does it and sends -1 when signed in.
 - `.fd-media` is absolutely positioned inside `.fd-stage` (inset 0, object-fit contain). Do not make it a plain grid/flex child with height 100%: tall pictures then overflow and are cut off (seen on square screens such as the Surface Duo).

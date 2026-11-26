@@ -668,10 +668,38 @@ export function renderFeed(root, ctx, list = null) {
     view.snapT = setTimeout(() => Math.abs(scroller.scrollTop - y) > 2 && scroller.scrollTo({ top: y, behavior: 'instant' }), 650);
   };
   const repaint = (p) => view.items.forEach((it, i) => it.post === p && paintState(cardAt(i), p));
-  const setUp = (p, on) => {
-    voted.set(p, on);
-    p.myVote = on ? 1 : 0;
+  /** What the vote buttons say about a post: 1 up, -1 down, 0 neither. */
+  const showVote = (p, v) => {
+    voted.set(p, v > 0);
+    p.myVote = v;
+    repaint(p);
   };
+  const voteQueue = new WeakMap(); // post -> { chain, turn, had: what the site last had }
+  /**
+   * The buttons change the moment you tap. The site is told afterwards, one request at a time for each post; if it refuses, the buttons
+   * go back to what it last had.
+   */
+  function castVote(p, to) {
+    const prov = getProvider(p.provider);
+    const had = isUp(p) ? 1 : isDown(p) ? -1 : 0;
+    showVote(p, to);
+    if (!(prov.vote && signedIn(prov) && S('feedSyncLikes'))) return; // signed out: remembered here only
+    const q = voteQueue.get(p) || { chain: Promise.resolve(), turn: 0, had };
+    voteQueue.set(p, q);
+    const turn = ++q.turn;
+    q.chain = q.chain.then(async () => {
+      try {
+        // setting a vote asks the site to keep it if it is already there; taking one back is the same vote sent again
+        let r = to ? await prov.setVote(p, to, true) : await prov.setVote(p, q.had < 0 ? -1 : 1);
+        if (!to && r?.our_score) r = await prov.setVote(p, Math.sign(r.our_score)); // it had no such vote and cast one: take that back
+        q.had = r?.our_score != null ? Math.sign(r.our_score) : to;
+        if (turn === q.turn && q.had !== to) showVote(p, q.had);
+      } catch (e) {
+        if (turn === q.turn) showVote(p, q.had); // a later tap is still on its way: let that one have the last word
+        toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
+      }
+    });
+  }
 
   /** The heart favorites, nothing more (like the viewer's heart). Only a double-tap set to "Both" passes `vote` to upvote as well. */
   async function toggleLike(p, { vote = false } = {}) {
@@ -682,15 +710,18 @@ export function renderFeed(root, ctx, list = null) {
     haptic(want ? 'tick' : 'soft');
     m.save();
     const online = signedIn(prov) && S('feedSyncLikes');
-    if (want && vote && prov.vote && !signedIn(prov)) setUp(p, true); // signed out: remembered here
+    if (want && vote && prov.vote && !isUp(p) && (online || !signedIn(prov))) castVote(p, 1);
     repaint(p);
     if (online) {
-      const jobs = [];
-      if (prov.fav) jobs.push(prov.setFav(p, want).then(() => { p.faved = want; }));
-      if (want && vote && prov.vote && !isUp(p)) jobs.push(prov.setVote(p, 1, true).then(() => setUp(p, true)));
-      const failed = (await Promise.allSettled(jobs)).find((r) => r.status === 'rejected');
-      if (failed) toast(`Liked here, but ${prov.name} said: ${failed.reason.message}`, { kind: 'err', ms: 3600 });
-      repaint(p);
+      if (prov.fav) {
+        try {
+          await prov.setFav(p, want);
+          p.faved = want;
+        } catch (e) {
+          toast(`Liked here, but ${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
+        }
+        repaint(p);
+      }
     } else if (want && !signedIn(prov) && !view.hintLike && (prov.fav || prov.vote)) {
       view.hintLike = true;
       toast('Saved to your taste. Sign in under Settings to favorite on the site too', { ms: 3200 });
@@ -698,44 +729,24 @@ export function renderFeed(root, ctx, list = null) {
   }
 
   /** The arrow toggles; `keep` (a double-tap) only ever adds, even if the site already had your vote. */
-  async function upvote(p, { keep = false } = {}) {
-    const m = modelOf(p.provider), prov = getProvider(p.provider);
-    let on = keep || !isUp(p);
+  function upvote(p, { keep = false } = {}) {
+    const m = modelOf(p.provider);
+    const on = keep || !isUp(p);
     haptic('tick');
-    if (prov.vote && signedIn(prov) && S('feedSyncLikes')) {
-      try {
-        const r = await prov.setVote(p, 1, keep);
-        if (r?.our_score != null) on = r.our_score > 0;
-      } catch (e) {
-        return toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
-      }
-    }
-    setUp(p, on);
+    castVote(p, on ? 1 : 0);
     if (on && !m.likes.has(p.id)) m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 });
     m.save();
     toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1100 });
-    repaint(p);
   }
 
-  async function downvote(i) {
+  function downvote(i) {
     const p = view.items[i]?.post;
     if (!p) return;
-    const prov = getProvider(p.provider);
     haptic('tick');
     notInterested(p);
-    voted.set(p, false);
-    p.myVote = -1;
-    repaint(p);
+    castVote(p, -1);
     toast('Downvoted. Fewer like this', { ms: 1400 });
     goTo(i + 1);
-    if (prov.vote && signedIn(prov) && S('feedSyncLikes')) {
-      try {
-        const r = await prov.setVote(p, -1, true);
-        if (r?.our_score != null) p.myVote = r.our_score;
-      } catch (e) {
-        toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3000 });
-      }
-    }
   }
 
   /** "Not interested": teaches the Feed, tells the site nothing. */
