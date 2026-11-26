@@ -30,7 +30,9 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     h('div', { class: 'fd-ap-head' }, h('button', { class: 'fd-ib', title: 'Back', 'aria-label': 'Back', html: icon('left', 20), onclick: () => close() }), title),
     body);
 
+  const hideTop = () => { const b = document.querySelector(".fab"); if (b) b.hidden = true; }; // the app's "back to top": it only follows scrolling
   async function load(who) {
+    hideTop();
     const mine = ++run;
     current = who;
     title.replaceChildren(h('b', {}, pretty(who)), h('small', {}, prov.name));
@@ -107,6 +109,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     if (reel) return;
     const el = h('div', { class: 'fd-reel' });
     page.append(el);
+    hideTop();
     const g = gal;
     const screen = openReel(el, { title: pretty(who), start: vi, posts: () => g.viewList(), more: () => more(), onClose: () => closeReel() });
     const off = onBack(() => (covered() ? false : (closeReel(), true)));
@@ -118,6 +121,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     const { el, screen, off, gal: g } = reel;
     reel = null;
     const at = screen.index();
+    hideTop();
     off();
     screen.destroy();
     el.remove();
@@ -128,13 +132,14 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
   function close() {
     if (closed) return;
     closeReel();
+    hideTop();
     closed = true;
     run++;
     offBack();
     removeEventListener('keydown', onKey, true);
     removeEventListener('hashchange', onHash);
     page.classList.remove('in');
-    setTimeout(() => page.remove(), 300);
+    setTimeout(() => (page.remove(), hideTop()), 300); // its grid can still report a scroll while sliding out
     onClose?.();
   }
   const offBack = onBack(() => (covered() ? false : (close(), true)));

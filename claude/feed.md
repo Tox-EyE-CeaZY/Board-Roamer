@@ -86,3 +86,4 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - Double-tap: `feedDtap` (synced; fav | up | both | down), separate from the viewer's `dtap`. Only adds; `down` also advances.
 - Not interested: `notInterested()` (local only, `feed:hide:<cred>`). Downvote also does it and sends -1 when signed in.
 - `.fd-media` is absolutely positioned inside `.fd-stage` (inset 0, object-fit contain). Do not make it a plain grid/flex child with height 100%: tall pictures then overflow and are cut off (seen on square screens such as the Surface Duo).
+- The app's floating back-to-top (`.fab`) only updates on scroll: `showView` hides it when the screen changes, and the artist page hides it on open / post open / close (late scroll events from a closing or covered artist grid are ignored in `setupTouch`).

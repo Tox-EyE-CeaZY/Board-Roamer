@@ -300,6 +300,7 @@ function showView(name) {
   roam.hidden = !isRoam;
   other.hidden = isRoam;
   strip.hidden = !isRoam;
+  if (document.body.dataset.view !== name) fab.hidden = true; // "back to top" belongs to the screen that was scrolled
   document.body.dataset.view = name;
   if (isRoam) requestAnimationFrame(() => gal.render());
 }
@@ -1441,7 +1442,10 @@ function setupTouch() {
   // floating "back to top" once you've scrolled a good way
   document.getElementById('views').addEventListener('scroll', (e) => {
     const t = e.target;
-    if (t?.classList?.contains('gal') || t?.id === 'v-other') fab.hidden = !isPhone() || t.scrollTop < 900;
+    if (!(t?.classList?.contains('gal') || t?.id === 'v-other')) return;
+    // the artist grid over the Feed gets no button while it slides away or a post covers it (late scroll events would leave it stuck)
+    const cover = t.closest('.fd-artist');
+    fab.hidden = !isPhone() || t.scrollTop < 900 || (!!cover && (!cover.classList.contains('in') || !!cover.querySelector('.fd-reel')));
   }, { capture: true, passive: true });
 
   // pull down at the top of the results to run the search again
