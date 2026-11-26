@@ -1408,3 +1408,7 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-ap-about { display: grid; gap: 6px; font-size: 12.5px; } .fd-ap-about:empty { display: none; } .fd-ap-about p { margin: 0; opacity: .75; }
 .fd-ap-links { display: flex; flex-wrap: wrap; gap: 6px; } .fd-ap-links button { padding: 5px 9px; font: 600 11px var(--f-mono); border: 1px solid var(--line2); }
 .fd-ap-status { padding: 18px; text-align: center; opacity: .65; font-size: 12.5px; } .fd-ap-status:empty { padding: 0; }
+
+/* a post opened from the artist's page: the Feed's screen over their list */
+.fd-reel { position: absolute; inset: 0; z-index: 5; display: flex; background: #050808; }
+.fd-solo-title { justify-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 15px var(--f-display); text-shadow: 0 1px 6px #000; }
