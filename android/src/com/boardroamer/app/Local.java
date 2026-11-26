@@ -59,8 +59,8 @@ final class Local {
 
     private static Context app;
     private static SharedPreferences prefs;
-    private static volatile String hubUrl = "", code = "";
-    private static volatile JSONObject remotes = new JSONObject(); // device name -> http://addr:port
+    private static volatile String hubUrl = "", code = "", shareCode = ""; // code = this phone's device token for the computer
+    private static volatile JSONObject remotes = new JSONObject(); // device name -> {url: http://addr:port, code}
     private static ServerSocket server;
     private static volatile int port = 0;
     private static Thread announcer;
@@ -120,7 +120,9 @@ final class Local {
         app = c.getApplicationContext();
         prefs = app.getSharedPreferences("local", Context.MODE_PRIVATE);
         hubUrl = prefs.getString("hub", "");
-        code = prefs.getString("code", "");
+        code = prefs.getString("token", "");
+        Hub.fp = prefs.getString("fp", "");
+        shareCode = Hub.shareCode(code);
         applyShare();
         if (!hubUrl.isEmpty()) startAnnouncer();
     }
@@ -131,10 +133,12 @@ final class Local {
 
     static boolean sharing() { return prefs != null && prefs.getBoolean("share", false); }
 
-    static void setHub(String url, String c) {
+    static void setHub(String url, String token, String fp) {
         hubUrl = url == null ? "" : url.replaceAll("/+$", "");
-        code = c == null ? "" : c;
-        if (prefs != null) prefs.edit().putString("hub", hubUrl).putString("code", code).apply();
+        code = token == null ? "" : token;
+        Hub.fp = fp == null ? "" : fp.toLowerCase(Locale.ROOT);
+        shareCode = Hub.shareCode(code);
+        if (prefs != null) prefs.edit().putString("hub", hubUrl).putString("token", code).putString("fp", Hub.fp).remove("code").apply();
         announce();
         startAnnouncer();
     }
@@ -144,8 +148,6 @@ final class Local {
             JSONObject o = new JSONObject(json);
             remotes = o.optJSONObject("devices") != null ? o.getJSONObject("devices") : new JSONObject();
             if (o.optString("hub").length() > 0) hubUrl = o.getString("hub").replaceAll("/+$", "");
-            if (o.optString("code").length() > 0) code = o.getString("code");
-            if (prefs != null) prefs.edit().putString("hub", hubUrl).putString("code", code).apply();
         } catch (Throwable ignored) { }
     }
 
@@ -502,13 +504,21 @@ final class Local {
         if (slash < 0) return err(404, "not found");
         String id = Uri.decode(rest.substring(0, slash)), tail = rest.substring(slash);
         if (!tail.equals("/local/list") && !tail.equals("/local/file") && !tail.equals("/local/thumb")) return err(404, "not found");
-        String base = id.equals("hub") ? hubUrl : remotes.optString(id, "");
-        if (base.isEmpty() || code.isEmpty()) return err(404, "that device is not reachable (is it sharing, and is Board Roamer open there?)");
+        String base, bearer;
+        if (id.equals("hub")) {
+            base = hubUrl;
+            bearer = code;
+        } else {
+            JSONObject r = remotes.optJSONObject(id);
+            base = r == null ? "" : r.optString("url", "");
+            bearer = r == null ? "" : r.optString("code", "");
+        }
+        if (base.isEmpty() || bearer.isEmpty()) return err(404, "that device is not reachable (is it sharing, and is Board Roamer open there?)");
         try {
-            HttpURLConnection c = (HttpURLConnection) new URL(base + tail + (q.getEncodedQuery() == null ? "" : "?" + q.getEncodedQuery())).openConnection();
+            HttpURLConnection c = Hub.open(base + tail + (q.getEncodedQuery() == null ? "" : "?" + q.getEncodedQuery()));
             c.setConnectTimeout(5000);
             c.setReadTimeout(40000);
-            c.setRequestProperty("Authorization", "Bearer " + code);
+            c.setRequestProperty("Authorization", "Bearer " + bearer);
             c.setRequestProperty("X-Device", deviceName());
             if (range != null) c.setRequestProperty("Range", range);
             int rc = c.getResponseCode();
@@ -569,7 +579,6 @@ final class Local {
         port = 0;
     }
 
-    private static String norm(String s) { return s == null ? "" : s.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT); }
 
     private static void handleSocket(Socket c) {
         try (Socket sock = c) {
@@ -596,7 +605,7 @@ final class Local {
                     else if (k.equals("range")) range = v;
                 }
                 Uri u = Uri.parse("http://x" + req[1]);
-                if (!sharing() || code.isEmpty() || !norm(auth).equals(norm(code))) o = err(401, "wrong pairing code");
+                if (!sharing() || shareCode.isEmpty() || !MessageDigest.isEqual(auth.getBytes(StandardCharsets.UTF_8), shareCode.getBytes(StandardCharsets.UTF_8))) o = err(401, "not allowed");
                 else if (!access()) o = err(403, "this phone has not allowed access to files");
                 else o = serve(u.getPath() == null ? "" : u.getPath(), u, range);
             }
@@ -624,7 +633,7 @@ final class Local {
         new Thread(() -> {
             HttpURLConnection h = null;
             try {
-                h = (HttpURLConnection) new URL(url + "/sync/device").openConnection();
+                h = Hub.open(url + "/sync/device");
                 h.setConnectTimeout(4000);
                 h.setReadTimeout(6000);
                 h.setRequestMethod("POST");

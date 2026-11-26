@@ -1,6 +1,7 @@
 import { h, download, pickFile, copyText, ago } from './util.js';
 import { RELEASES_URL } from './version.js';
-import { syncConfig, setSyncConfig, parsePairing, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
+import { syncConfig, isPaired, unpair, pairWith, parseKey, parseLink, connectionAdvice, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
+import { scanQr } from './qrscan.js';
 import { icon } from './icons.js';
 import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs, saved } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
@@ -139,44 +140,75 @@ export function openSettings(section) {
       status.textContent = st.phase === 'syncing' ? 'Syncing…' : st.error ? st.msg : st.last ? `${st.msg || 'Synced'} · ${ago(st.last)}` : 'Not synced yet';
     }));
     const what = h('div', { class: 'st-note' }, 'Syncs boards and pins, follows, the trail, reading progress and your look and search settings. Logins, layout sizes and phone options stay on each device. Deleting something on one device deletes it everywhere.');
+    const TAILSCALE = 'https://tailscale.com/download';
     if (isAndroid()) {
       const c = syncConfig();
-      const addr = h('input', { class: 'input', placeholder: '100.x.x.x:4622', value: c.url.replace(/^http:\/\//, ''), spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', inputmode: 'url' });
-      const code = h('input', { class: 'input mono', placeholder: 'XXXXX-XXXXX', value: c.code, spellcheck: 'false', autocapitalize: 'characters', autocomplete: 'off' });
-      const spread = (el) => el.addEventListener('input', () => { const p = parsePairing(el.value); if (p.url && p.code) (addr.value = p.url.replace(/^http:\/\//, ''), code.value = p.code); });
-      spread(addr); spread(code);
-      const connect = h('button', { class: 'btn primary', onclick: async () => {
-        const p = parsePairing(addr.value + ' ' + code.value);
-        if (!p.url || !p.code) return toast('Enter the address and the code shown on your computer', { kind: 'err' });
-        connect.disabled = true;
-        const keep = syncConfig();
-        setSyncConfig({ url: p.url, code: p.code });
-        try {
-          const info = await ping();
-          setSyncConfig({ host: info.host || '' });
-          toast('Connected to ' + (info.host || 'your desktop'));
-          // first connection only: the desktop can hand over its logins once. They never travel with normal syncing.
-          const private_ = /^http:\/\/100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(p.url);
-          if (private_ || await confirmDlg('Copy your login too?', 'This connection is not encrypted (it is not Tailscale). Your e621 username and API key would cross the network in plain text. Copy them anyway?', 'Copy login')) {
-            try { if (await claimCreds()) toast('Copied your login from the computer', { ms: 2600 }); } catch { /* the library can still sync */ }
-          }
-          await syncNow();
-        } catch (e) {
-          setSyncConfig({ url: keep.url, code: keep.code });
-          toast(e.message, { kind: 'err' });
-        }
-        connect.disabled = false;
+      const finish = async (host) => {
+        toast('Paired with ' + host);
+        // first connection only: the computer can hand over its logins once, over the encrypted connection. They never travel with normal syncing.
+        try { if (await claimCreds()) toast('Copied your login from the computer', { ms: 2600 }); } catch { /* the library can still sync */ }
+        try { await syncNow(); } catch { /* shown as a toast */ }
+      };
+      const run = async (btn, job) => {
+        btn.disabled = true;
+        try { await finish(await job()); } catch (e) { toast(e.message, { kind: 'err' }); }
+        btn.disabled = false;
         paintSync();
-      } }, c.url ? 'Reconnect & sync' : 'Connect & sync');
-      const auto = () => { const b = h('button', { class: 'tgl' + (c.auto ? ' on' : ''), role: 'switch', onclick: () => { setSyncConfig({ auto: !syncConfig().auto }); b.classList.toggle('on', syncConfig().auto); } }, h('i')); return h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Sync automatically'), h('small', {}, 'When the app opens and after you change something')), b); };
-      syncBox.replaceChildren(
-        h('div', { class: 'st-note' }, c.url ? `Paired with ${c.host || c.url}.` : 'On your computer open Settings → Sync, turn on sharing, then enter the address and code it shows.'),
-        h('div', { class: 'two' }, addr, code),
-        h('div', { class: 'row-btns' }, connect,
-          c.url ? h('button', { class: 'btn', onclick: async () => { try { await syncNow(); } catch { /* shown as a toast */ } } }, 'Sync now') : null,
-          c.url ? h('button', { class: 'btn danger', onclick: () => { setSyncConfig({ url: '', code: '', host: '', last: 0 }); paintSync(); } }, 'Disconnect') : null),
-        c.url ? auto() : null, status, what);
-      watch();
+      };
+      const scan = h('button', { class: 'btn primary', onclick: () => run(scan, async () => {
+        const text = await scanQr();
+        if (text == null) throw new Error('Cancelled');
+        if (!parseLink(text)) throw new Error('That is not the pairing code from Board Roamer on your computer');
+        return pairWith({ link: text });
+      }) }, isPaired() ? 'Pair with another computer' : 'Scan the code on your computer');
+      const parts = [
+        h('div', { class: 'st-note' }, isPaired()
+          ? `Paired with ${c.host || 'your computer'}. It is found automatically on your home network.`
+          : c.old ? 'Sync now pairs with a QR code and is encrypted, so this phone has to be paired again. On your computer open Settings → Sync and choose Add a phone, then scan the code.'
+            : 'On your computer open Settings → Sync, turn on sharing and choose Add a phone. Then scan the code it shows.'),
+        h('div', { class: 'row-btns' }, scan,
+          isPaired() ? h('button', { class: 'btn', onclick: async () => { try { await syncNow(); } catch { /* shown as a toast */ } } }, 'Sync now') : null,
+          isPaired() ? h('button', { class: 'btn danger', onclick: () => { unpair(); paintSync(); } }, 'Forget this computer') : null)];
+      // can't scan? the same pairing by typing the code, picking the computer from the ones found on this network
+      let pick = null, adviceFn = null;
+      const key = h('input', { class: 'input mono', placeholder: 'ABCD-EFGH-JKLM-NPQR', spellcheck: 'false', autocapitalize: 'characters', autocomplete: 'off' });
+      const addr = h('input', { class: 'input', placeholder: 'Address, only if it is not found (192.168.1.20:4622)', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', inputmode: 'url' });
+      const found = h('div', { class: 'pair-found' }, h('small', { class: 'st-note' }, 'Looking for computers on this network…'));
+      const typed = h('button', { class: 'btn', onclick: () => {
+        const k = parseKey(key.value);
+        if (!k) return toast('Type the 16-character code from your computer', { kind: 'err' });
+        if (!pick && !addr.value.trim()) return toast('Choose your computer from the list, or type its address', { kind: 'err' });
+        run(typed, () => pairWith({ key: k, address: addr.value.trim(), found: pick }));
+      } }, 'Pair with this code');
+      parts.push(h('details', { class: 'st-more' }, h('summary', {}, 'Can\u2019t scan? Type the code instead'), found, key, addr, h('div', { class: 'row-btns' }, typed)));
+      native.discoverHubs(2500).then(({ hubs }) => {
+        if (!found.isConnected) return;
+        if (!hubs.length) return found.replaceChildren(h('small', { class: 'st-note' }, 'No computer answered on this network. You can still scan its code, or type its address.'));
+        if (hubs.length === 1) pick = hubs[0];
+        const chips = hubs.map((x) => { const b = h('button', { class: 'chip' + (pick === x ? ' on' : ''), onclick: () => { pick = x; chips.forEach((c2) => c2.classList.toggle('on', c2 === b)); } }, x.name); return b; });
+        found.replaceChildren(...chips);
+        found.append(h('small', { class: 'st-note' }, hubs.length > 1 ? 'More than one computer is sharing here. Choose yours; it still needs its own code.' : 'Found on this network. It still needs its code.'));
+      });
+      if (isPaired()) {
+        parts.push(h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Sync automatically'), h('small', {}, 'When the app opens and after you change something')),
+          (() => { const b = h('button', { class: 'tgl' + (c.auto ? ' on' : ''), role: 'switch', onclick: () => { setSyncConfig({ auto: !syncConfig().auto }); b.classList.toggle('on', syncConfig().auto); } }, h('i')); return b; })()));
+        parts.push(status);
+        const adv = h('div', { class: 'st-note' });
+        const paintAdvice = (st) => {
+          if (!st.error) return adv.replaceChildren();
+          const a = connectionAdvice();
+          adv.replaceChildren(a.text, ' ', a.kind !== 'none' ? h('button', { class: 'btn', onclick: () => openExternal(TAILSCALE) }, 'Get Tailscale') : '');
+        };
+        parts.push(adv);
+        adviceFn = paintAdvice;
+      }
+      parts.push(what);
+      syncBox.replaceChildren(...parts);
+      if (isPaired()) {
+        watch();
+        const off = offStatus, stop = onSyncStatus(adviceFn);
+        offStatus = () => { off?.(); stop(); };
+      }
       return;
     }
     // desktop: share this library
@@ -187,21 +219,60 @@ export function openSettings(section) {
       try { await hostConfig({ enabled: !cf.enabled }); } catch (e) { toast(e.message, { kind: 'err' }); }
       paintSync();
     } }, h('i'));
-    const rows = [h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Share this library'), h('small', {}, 'Lets your other devices on this network or Tailscale sync with this app')), flip)];
+    const rows = [h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Share this library'), h('small', {}, 'Lets your phones sync with this app. Same Wi-Fi at home; with Tailscale, anywhere')), flip)];
     if (cf.enabled) {
-      const lines = cf.addrs.length ? cf.addrs : [{ ip: '(address not found)', kind: '' }];
+      const name = h('input', { class: 'input', value: cf.host, maxlength: '40', spellcheck: 'false', onchange: async () => { try { await hostConfig({ name: name.value }); toast('Phones will see this computer as ' + (name.value.trim() || cf.computer)); } catch (e) { toast(e.message, { kind: 'err' }); } } });
+      rows.push(h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Name shown on phones'), h('small', {}, 'Helps phones tell computers apart on a shared network')), name));
+      if (cf.offer) {
+        const left = h('small', {}, '');
+        const qr = h('div', { class: 'pair-qr' },
+          h('img', { alt: 'Pairing code', src: '/sync/qr?t=' + Date.now() }),
+          h('div', { class: 'pair-txt' },
+            h('div', { style: 'font-weight:700' }, 'Scan this with Board Roamer on your phone'),
+            h('small', {}, 'Settings → Sync → Scan the code on your computer. The code works once.'),
+            h('small', {}, 'Cannot scan? Type this on the phone:'),
+            h('b', {}, cf.offer.key),
+            left,
+            h('div', { class: 'row-btns' },
+              h('button', { class: 'btn', onclick: async () => { await copyText(cf.offer.link); toast('Pairing link copied'); } }, 'Copy pairing link'),
+              h('button', { class: 'btn', onclick: async () => { await hostConfig({ cancelPair: true }); paintSync(); } }, 'Cancel'))));
+        rows.push(qr);
+        let left_s = cf.offer.expiresIn;
+        const known = cf.devices.length;
+        const tick = setInterval(async () => {
+          if (!qr.isConnected) return clearInterval(tick);
+          left_s -= 2;
+          left.textContent = left_s > 0 ? `Valid for another ${Math.ceil(left_s / 60)} min` : 'Expired';
+          try {
+            const n = await hostConfig();
+            if (!n.offer || n.devices.length !== known) {
+              clearInterval(tick);
+              if (n.devices.length > known) toast('Paired with ' + n.devices[n.devices.length - 1].name);
+              paintSync();
+            }
+          } catch { /* the app is closing */ }
+        }, 2000);
+        left.textContent = `Valid for another ${Math.ceil(left_s / 60)} min`;
+      } else {
+        rows.push(h('div', { class: 'row-btns' }, h('button', { class: 'btn primary', onclick: async () => { try { await hostConfig({ pair: true }); } catch (e) { toast(e.message, { kind: 'err' }); } paintSync(); } }, 'Add a phone')));
+      }
+      if (cf.devices.length) {
+        rows.push(h('div', { class: 'st-note' }, 'Paired phones'));
+        for (const d of cf.devices) {
+          rows.push(h('div', { class: 'st-row' }, h('div', {}, h('b', {}, d.name), h('small', {}, d.ago == null ? 'Not seen since sharing started' : d.ago < 90 ? 'Connected just now' : `Last seen ${Math.round(d.ago / 60)} min ago`)),
+            h('button', { class: 'btn danger', onclick: async () => { if (await confirmDlg('Unpair ' + d.name + '?', 'It stops syncing with this computer until you pair it again with a new code.', 'Unpair')) { await hostConfig({ revoke: d.id }); paintSync(); } } }, 'Unpair')));
+        }
+        if (cf.devices.length > 1) rows.push(h('div', { class: 'row-btns' }, h('button', { class: 'btn danger', onclick: async () => { if (await confirmDlg('Unpair all phones?', 'Every phone has to be paired again with a new code.', 'Unpair all')) { await hostConfig({ revokeAll: true }); paintSync(); } } }, 'Unpair all')));
+      } else if (!cf.offer) rows.push(h('div', { class: 'st-note' }, 'No phone is paired yet.'));
       rows.push(
-        h('div', { class: 'sync-code' }, h('small', {}, 'Pairing code'), h('b', {}, cf.token)),
-        ...lines.map((a) => h('button', { class: 'sync-addr', title: 'Copy address and code', onclick: async () => { await copyText(`${a.ip}:${cf.port} ${cf.token}`); toast('Copied. Paste it on your phone'); } },
-          h('span', {}, `${a.ip}:${cf.port}`), h('small', {}, a.kind === 'tailscale' ? 'Tailscale' : a.kind === 'lan' ? 'Same Wi-Fi' : ''), h('i', { html: icon('copy', 14) }))),
-        h('div', { class: 'row-btns' },
-          h('button', { class: 'btn', onclick: async () => { try { await syncNow(); } catch { /* toast shows it */ } } }, 'Sync now'),
-          h('button', { class: 'btn', onclick: async () => { await hostConfig({ regen: true }); toast('New code made. Devices must re-enter it'); paintSync(); } }, 'New code')),
-        h('div', { class: 'st-row' }, h('div', {}, h('b', {}, cf.credsArmed ? 'Login ready for the next device' : 'Login not offered'), h('small', {}, cf.credsArmed ? 'The next device to connect gets your usernames and API keys once. Then they are forgotten, and never sync again.' : 'Your logins stay on this computer. Offer them once for a new device if you want it signed in too.')),
-          h('button', { class: 'btn', onclick: async () => { try { toast((await armCreds()) ? 'Login will go to the next device that connects' : 'There is no login saved to offer', { ms: 2600 }); } catch (e) { toast(e.message, { kind: 'err' }); } paintSync(); } }, cf.credsArmed ? 'Offer again' : 'Offer login')),
-        cf.devices.length ? h('div', { class: 'st-note' }, 'Connected: ' + cf.devices.map((d) => `${d.name} (${d.ago < 90 ? 'just now' : Math.round(d.ago / 60) + ' min ago'})`).join(', ')) : h('div', { class: 'st-note' }, 'No device has connected yet.'),
+        h('div', { class: 'st-row' }, h('div', {}, h('b', {}, cf.credsArmed ? 'Login ready for the next phone' : 'Login not offered'), h('small', {}, cf.credsArmed ? 'The next phone to pair gets your usernames and API keys once, over the encrypted connection. Then they are forgotten, and never sync again.' : 'Your logins stay on this computer. Offer them once for a new phone if you want it signed in too.')),
+          h('button', { class: 'btn', onclick: async () => { try { toast((await armCreds()) ? 'Login will go to the next phone that pairs' : 'There is no login saved to offer', { ms: 2600 }); } catch (e) { toast(e.message, { kind: 'err' }); } paintSync(); } }, cf.credsArmed ? 'Offer again' : 'Offer login')),
+        h('div', { class: 'row-btns' }, h('button', { class: 'btn', onclick: async () => { try { await syncNow(); } catch { /* toast shows it */ } } }, 'Sync now')),
+        cf.tailscale ? h('div', { class: 'st-note' }, 'Tailscale is on this computer, so paired phones that also have Tailscale can sync from anywhere.')
+          : h('div', { class: 'st-note' }, 'To sync away from home, install Tailscale (free) on this computer and your phone. Paired phones then find this computer by themselves. ', h('button', { class: 'btn', onclick: () => openExternal(TAILSCALE) }, 'Get Tailscale')),
+        h('div', { class: 'st-note' }, cf.addrs.length ? 'This computer: ' + cf.addrs.map((a) => `${a.ip}:${cf.port}`).join(', ') : 'No network address found.'),
         status,
-        h('div', { class: 'st-note' }, 'The first time, Windows may ask to allow Board Roamer on the network. Allow it for private networks. Tailscale traffic is encrypted; on plain Wi-Fi the code protects access but the data is not encrypted, so prefer Tailscale on shared networks.'));
+        h('div', { class: 'st-note' }, 'The connection is encrypted, and each phone only trusts this computer\u2019s own certificate. The first time, Windows may ask to allow Board Roamer on the network: allow it for private networks. Another computer with Board Roamer on the same network is not a problem: each one needs its own code.'));
       watch();
     }
     rows.push(what);

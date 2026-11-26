@@ -1422,3 +1422,17 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 /* a post opened from the artist's page: the Feed's screen over their list */
 .fd-reel { position: absolute; inset: 0; z-index: 5; display: flex; background: #050808; }
 .fd-solo-title { justify-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 15px var(--f-display); text-shadow: 0 1px 6px #000; }
+
+/* pairing: scanning the computer's code, and showing it */
+.qs { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+.qs video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.qs-frame { position: relative; width: min(70vw, 70vh, 360px); aspect-ratio: 1; border: 3px solid var(--hot); box-shadow: 0 0 0 100vmax rgba(0,0,0,.55); pointer-events: none; }
+.qs-msg { position: absolute; left: 16px; right: 16px; bottom: 96px; text-align: center; color: #fff; font: 600 14px/1.4 var(--f-mono); text-shadow: 0 1px 4px #000; }
+.qs-msg.bad { color: var(--hot); }
+.qs-x { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); }
+.pair-qr { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+.pair-qr img { width: 220px; height: 220px; background: #fff; image-rendering: pixelated; }
+.pair-qr .pair-txt { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.pair-qr b { font: 700 18px/1.3 var(--f-mono); letter-spacing: .06em; color: var(--hot); user-select: all; overflow-wrap: anywhere; }
+.pair-found { display: flex; flex-wrap: wrap; gap: 6px; }
+.pair-found .chip.on { border-color: var(--hot); color: var(--hot); }

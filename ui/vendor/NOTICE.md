@@ -13,6 +13,11 @@ TinyCLIP, https://github.com/microsoft/Cream/tree/main/TinyCLIP — Copyright (c
 Taken from the ONNX export https://huggingface.co/onnx-community/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M-ONNX (`onnx/model_int8.onnx`)
 and cut down with `tools/style-model.py` (text half removed, weight storage changed for the web runtime; same output).
 
+## jsqr/ — jsQR 1.4.0
+
+`jsQR.js` (QR code reader, runs on the page) and its `LICENSE`, unchanged, from the `jsqr` package. https://github.com/cozmo/jsQR —
+Copyright (c) Cosmo Wolfe. Apache License 2.0. Used on the phone to scan the pairing code that the computer shows (Settings → Sync).
+
 ## MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the

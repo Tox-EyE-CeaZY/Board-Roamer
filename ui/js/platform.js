@@ -146,7 +146,29 @@ export const native = {
   /** Local files on the phone: is access to files allowed, ask for it, and tell the shell how to reach the desktop and other devices. */
   localAccess: () => (has('localAccess') ? !!call('localAccess') : true),
   requestLocalAccess: () => call('requestLocalAccess'),
-  setHub: (url, code) => call('setHub', url || '', code || ''),
+  setHub: (url, token, fp) => call('setHub', url || '', token || '', fp || ''),
+  /** Pair with a computer: {urls: ['ip:port'], key, fp?, device}. Resolves {id, token, host, hostId, port, fp, url, addrs}. */
+  pairHub(req) {
+    return new Promise((resolve, reject) => {
+      const id = ++seq;
+      pending.set(id, { resolve, reject });
+      if (!has('pairHub')) return (pending.delete(id), reject(new Error('Pairing is not available here')));
+      call('pairHub', id, JSON.stringify(req));
+    });
+  },
+  /** Board Roamer computers announcing themselves on this network. Resolves {hubs: [{id, name, fp, host, port}]}. */
+  discoverHubs(ms) {
+    return new Promise((resolve) => {
+      const id = ++seq;
+      pending.set(id, { resolve, reject: () => resolve({ hubs: [] }) });
+      if (!has('discoverHubs')) return (pending.delete(id), resolve({ hubs: [] }));
+      call('discoverHubs', id, ms || 2500);
+    });
+  },
+  /** This phone's own addresses, and whether Tailscale is up: {addrs, tailscale}. */
+  netInfo() {
+    try { return has('netInfo') ? JSON.parse(call('netInfo') || '{}') : { addrs: [], tailscale: false }; } catch { return { addrs: [], tailscale: false }; }
+  },
   setRemotes: (json) => call('setRemotes', json),
   /** Android: offer Board Roamer for links to the supported sites, and open the system screen where that is switched on. */
   setLinks: (on) => call('setLinks', !!on),

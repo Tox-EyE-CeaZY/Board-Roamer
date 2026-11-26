@@ -73,8 +73,8 @@ final class Bridge {
             HttpURLConnection c = null;
             try {
                 URL u = new URL(url);
-                if (!"http".equals(u.getProtocol()) || !privateHost(u.getHost())) throw new Exception("Only addresses on your own network are allowed");
-                c = (HttpURLConnection) u.openConnection();
+                if (!("http".equals(u.getProtocol()) || "https".equals(u.getProtocol())) || !privateHost(u.getHost())) throw new Exception("Only addresses on your own network are allowed");
+                c = Hub.open(url);
                 c.setConnectTimeout(6000);
                 c.setReadTimeout(40000);
                 c.setRequestMethod(method);
@@ -103,9 +103,9 @@ final class Bridge {
                 String rev = c.getHeaderField("X-Rev");
                 out = new JSONObject().put("status", code).put("rev", rev == null ? JSONObject.NULL : rev).put("body", new String(buf.toByteArray(), StandardCharsets.UTF_8)).toString();
             } catch (java.net.SocketTimeoutException e) {
-                out = errorJson("The desktop did not answer. Is Board Roamer open there with sharing on?");
+                out = errorJson("The computer did not answer. Is Board Roamer open there with sharing on?");
             } catch (java.net.ConnectException e) {
-                out = errorJson("Could not reach the desktop. Check the address, that sharing is on, and that Windows Firewall allows Board Roamer.");
+                out = errorJson("Could not reach the computer. Check that sharing is on there, and that Windows Firewall allows Board Roamer on private networks.");
             } catch (Throwable e) {
                 out = errorJson(msg(e));
             } finally {
@@ -246,11 +246,43 @@ final class Bridge {
         });
     }
 
-    /** The desktop's address and the pairing code, so this phone can reach it (and tell it where this phone's folders are). */
+    /** The paired computer's address, this phone's device token and the certificate fingerprint to trust (so it can reach it, and tell it where this phone's folders are). */
     @JavascriptInterface
-    public void setHub(String url, String code) { Local.setHub(url, code); }
+    public void setHub(String url, String token, String fp) { Local.setHub(url, token, fp); }
 
-    /** Other devices that share their folders: {hub, code, devices: {name: "http://ip:port"}}. */
+    /** Pair with a computer from what its QR code (or typed code) says. Request {urls, key, fp?, device}; the answer has the device token and fingerprint. */
+    @JavascriptInterface
+    public void pairHub(int id, String requestJson) {
+        new Thread(() -> {
+            String out;
+            try {
+                out = Hub.pair(new JSONObject(requestJson)).toString();
+            } catch (Throwable e) {
+                out = errorJson(msg(e));
+            }
+            a.resolve(id, out);
+        }, "br-pair").start();
+    }
+
+    /** Computers running Board Roamer on this network, found by their service announcement: {hubs: [{id, name, fp, host, port}]}. */
+    @JavascriptInterface
+    public void discoverHubs(int id, int ms) {
+        new Thread(() -> {
+            String out;
+            try {
+                out = new JSONObject().put("hubs", Hub.discover(a, Math.max(500, Math.min(ms, 8000)))).toString();
+            } catch (Throwable e) {
+                out = errorJson(msg(e));
+            }
+            a.resolve(id, out);
+        }, "br-discover").start();
+    }
+
+    /** This phone's network addresses and whether Tailscale is up: {addrs: [{ip, tailscale}], tailscale}. */
+    @JavascriptInterface
+    public String netInfo() { return Hub.netInfo().toString(); }
+
+    /** Other devices that share their folders: {hub, token, devices: {name: {url, code}}}. */
     @JavascriptInterface
     public void setRemotes(String json) { Local.setRemotes(json); }
 

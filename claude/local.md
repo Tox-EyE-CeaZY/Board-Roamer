@@ -7,7 +7,7 @@ Notes on what the code does, so the next change doesn't have to rediscover it.
   the query: `?add=<path>&name=`, `?remove=<id>`, `?share=1|0`) and `/local/dirs` (the in-app folder picker). A request names a root id and a
   path *inside* it; `resolve()` refuses anything that canonicalises outside the root.
 - Another device is `/remote/<id>/local/...`: the desktop (`local::remote`) and the phone (`Local.remote`) forward it with
-  `Authorization: Bearer <pairing code>`. The desktop hub lists phones that share (`/sync/device` announce, `/sync/devices`); a phone
+  `Authorization: Bearer <device token>` (a phone's own folder server is sent `HMAC(token, "share")` instead, since it is plain http). The desktop hub lists phones that share (`/sync/device` announce, `/sync/devices`); a phone
   runs a tiny `ServerSocket` (port 4623+) and `ShareService` (foreground service, `dataSync`) keeps it alive; `BootReceiver` restores it.
   The hub url + code are persisted in the phone's prefs so sharing works after a reboot.
 - `list` includes `meta` read back from the file: XMP (`meta.rs::read`, `MetaRead.java`) from the head of images, the tail of MP4/WebM, or

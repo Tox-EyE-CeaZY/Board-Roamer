@@ -4,7 +4,7 @@
  * are, folders appear like boards, and you can tag pictures (the tags stay in Board Roamer, never in the file).
  *
  * Every device answers the same three questions (see src/local.rs and Local.java): /local/list, /local/file, /local/thumb.
- * Another device is reached through `/remote/<id>/local/...`, which the app forwards with your pairing code.
+ * Another device is reached through `/remote/<id>/local/...`, which the app forwards with the device's sync credentials.
  *
  * Routes:  #/local                      the devices
  *          #/local/<device>             that device's folders
@@ -35,13 +35,13 @@ export async function devices(force = false) {
   try {
     if (isAndroid()) {
       const cfg = syncConfig();
-      if (cfg.url && cfg.code) {
+      if (cfg.url && cfg.token) {
         const j = await hubDevices();
-        const remotes = { hub: cfg.url, code: cfg.code, devices: {} };
+        const remotes = { hub: cfg.url, devices: {} };
         if (j.hostShare) list.push({ id: 'hub', name: j.host, base: '/remote/hub' });
         for (const d of j.devices || []) {
           if (d.name === ownName()) continue;
-          remotes.devices[d.name] = `http://${d.addr}:${d.port}`;
+          remotes.devices[d.name] = { url: `http://${d.addr}:${d.port}`, code: d.code };
           list.push({ id: d.name, name: d.name, base: '/remote/' + enc(d.name) });
         }
         native.setRemotes(JSON.stringify(remotes));
