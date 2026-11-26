@@ -68,3 +68,14 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - Weights are stored and nudged (+/-), never recomputed; a model of 2400 favorites costs a few ms per pick. What slowed signed-in users was the favorites reading: it competed for requests and restarted from scratch if interrupted. `learnAccount` is now resumable (`learnInfo.q[query]` = pages, cursor, done): one full read ever, then 2-page top-ups. `LEARN_VERSION` bump = one re-read.
 - Variety: `sameness()` subtracts from the score for artists / lead tag / characters seen in the last 14 cards; softmax temperature 0.7; interest searches skip the last 8 subjects.
 - Follow suggestions: `Taste.a` counts likes per artist; at `SUGGEST_AT` (3) an unfollowed artist appears in the chip under the modes and in the settings popover, and their cards' Follow button is highlighted. Dismissed ones live in `feed:nofollow`.
+- Phones show popovers as sheets: the Feed's menus (`fd-pop` / `fd-set`) need the full-width overrides at the end of `mobile.css`, and any new popover class does too.
+
+## 2.4.0 (this replaces anything above that disagrees)
+- Files: `feedengine.js` = what to show and how it is fetched (models, pacing, learning, selection, ratings helpers); `feed.js` = the screen only.
+- Nothing twice: `shown` (module Set, this app session) + `model.seen` (3000, persisted) apply to For you; identity is `credKey:id` and `md5:`. New/Hot/Following only avoid duplicates inside the current list. There is no more `recycle()`.
+- Organic mix: ~25% targeted interest searches at most (40 posts each), the rest broad batches; learned score is square-rooted; `sameness()` also penalizes the same heavy tags and the same search (`_q`); follow posts come at random (~1 in 4-5, never adjacent). Taste picks carry no 'You like X' label.
+- Layout: on phones `body[data-view=feed]` hides `#appbar` and the Feed draws its own top bar (cloak, Following / For you / New / Hot, settings). Sites moved into the settings sheet. Tapping the Feed nav link again: toast, second tap within 3 s refreshes. Careful: `<body>` also has `data-view`, so match `a[data-view=feed]`.
+- Gestures (`attachGestures`): tap = pause / open, double-tap = like, hold = post menu (Not interested, hide buttons, rate tags, share...), two fingers held = hide buttons (`.fd.clean`). `.fd.idle` fades buttons 3 s into a video (1.8 s sideways).
+- `isLiked` / `isUp` / `isDown` drive the buttons (`myVote` from e621 + local `voted`). Only the video on screen may play (`hush`).
+- Your tags: `Taste.r` (-2 never, -1 less, 1 more, 2 love; never fades). `banned()` filters, `rate()`/`interests()` use it, sheet = `tagSheet` (also 'Rate its tags' per post). One toast hint at card 12 (`feed:hint:tags`).
+- Not interested: `notInterested()` (local only, `feed:hide:<cred>`). Downvote also does it and sends -1 when signed in.

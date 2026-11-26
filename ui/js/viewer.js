@@ -935,7 +935,7 @@ export class Viewer {
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
     this.bFav.classList.toggle('on', !!p.faved);
-    this.bUp.classList.toggle('on', voted.has(p));
+    this.bUp.classList.toggle('on', voted.has(p) || p.myVote > 0);
     for (const b of [this.bSave, this.bSaveDesk]) { b.classList.toggle('on', saved.has(p)); b.title = saved.has(p) ? 'Already downloaded (S)' : 'Download to your Downloads folder (S)'; }
     this.bPin.classList.toggle('on', boards.inAny(postKey(p)));
     this.bPlay.innerHTML = icon(this.playing ? 'pause' : 'play', 19);
@@ -993,6 +993,7 @@ export class Viewer {
       const r = await prov.setVote(p, 1);
       const on = r?.our_score != null ? r.our_score > 0 : !voted.has(p);
       voted.set(p, on);
+      p.myVote = on ? 1 : 0;
       emit('post-like', { post: p, on, vote: true });
       toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1200 });
       this._paintToggles();

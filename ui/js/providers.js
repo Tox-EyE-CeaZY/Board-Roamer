@@ -94,7 +94,7 @@ function normE6(p, prov) {
     sample: hasSample && sampleUrl ? sampleUrl : kind === 'image' ? full : null,
     full,
     score: sc.total ?? 0, up: sc.up ?? 0, down: sc.down ?? 0, favs: p.fav_count ?? st.fav_count ?? 0,
-    tags, artists, flat: Array.isArray(p.tags), sources: p.sources || [], created: p.created_at, desc: p.description || '',
+    tags, artists, flat: Array.isArray(p.tags), myVote: st.vote ?? p.vote ?? 0, sources: p.sources || [], created: p.created_at, desc: p.description || '',
     parent: p.relationships?.parent_id || null, children: p.relationships?.children || [], pools: p.pools || [],
     duration: p.duration || meta.duration || 0, comments: p.comment_count ?? st.comment_count ?? 0, faved: !!(p.is_favorited ?? st.is_favorited), url: `${prov.web}/posts/${p.id}`,
     alts: kind === 'video' ? e6alts(p, files) : [], sampleSmall: files.sample?.webp || null,

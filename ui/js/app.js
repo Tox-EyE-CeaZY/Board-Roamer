@@ -302,7 +302,7 @@ function showView(name) {
 }
 
 const roamHashFor = (terms, filters, provId) => roamHash(terms || [], { ...defaultFilters(), ...(filters || {}) }, provId || prov.id);
-const viewCtx = () => ({ savePost: (p) => saveOne(p), openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf, openSettings, editSources: (b) => editSources(b, () => applyRoute()) });
+const viewCtx = () => ({ savePost: (p) => saveOne(p), share: (p) => M.share(p), cloak: () => toggleCloak(), openTab: (hash, title, thumb) => openTab(hash, { title, thumb }), tabsOn: tabsEnabled, roamHash: roamHashFor, go, refresh: applyRoute, runSmart, openViewer, runEntry, saveSmart: saveSmartFromEntry, provId: prov.id, readPool, openFollow, feedOf, openSettings, editSources: (b) => editSources(b, () => applyRoute()) });
 
 /* ---------- tabs: what each one remembers, and how it comes back */
 let pendingRestore = null;

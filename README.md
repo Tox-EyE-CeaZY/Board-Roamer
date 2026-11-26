@@ -62,7 +62,8 @@ On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev li
 **Feed** (the home screen)
 - A TikTok-style feed: one post at a time, swipe for the next, double-tap to like. Learns your taste on this device from your favorites / upvotes
   on the sites (and the hearts you tap here, for sites without favorites or when signed out), mixes in some wandering, and puts new posts from followed artists first.
-- Pick which sites it draws from (remembered), and switch between For you, Following, New and Hot. Pull down to refresh.
+- Pick which sites it draws from (remembered), and switch between Following, For you, New and Hot. Pull down, or tap Feed twice, to refresh.
+- Rate tags (never, less, more, love), mark posts not interested, press and hold for more, hold two fingers to hide the buttons.
 - Gentle on the sites: one request at a time, spaced out, 40 posts per request, cool-downs after errors.
 
 **Search**

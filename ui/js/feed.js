@@ -1,648 +1,173 @@
-import { h, pretty, fmtNum, debounce, sleep } from './util.js';
+/* The Feed screen: one post at a time, full screen, swipe for the next. What to show comes from feedengine.js. */
+import { h, pretty, fmtNum, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, on, emit, subs, tagc, kv, postKey, voted } from './store.js';
-import { getProvider, providerList, Feed, compileBlacklist, blacklistHit, isBlurred, CATS, CAT_LABEL } from './providers.js';
-import { Taste, softPick, features } from './taste.js';
+import { S, setS, on, subs, tagc, voted, saved, boards, postKey, kv } from './store.js';
+import { getProvider, providerList, isBlurred, CATS, CAT_LABEL } from './providers.js';
 import { toast, popover, closePopover, confirmDlg, segmented } from './ui.js';
 import { quickPin } from './pins.js';
 import { follow } from './follows.js';
-import { haptic, isPhone } from './platform.js';
+import { renderDText } from './dtext.js';
+import { haptic, isAndroid, isTouch, native } from './platform.js';
+import {
+  SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
+  isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools,
+} from './feedengine.js';
 
-/* ==========================================================================================================================
-   The Feed: one post at a time, full screen, swipe for the next. What comes up is learned on this device from what you like
-   (your favorites / upvotes on the sites, and the hearts you tap here), mixed with some deliberate wandering, and new posts
-   from artists you follow jump the queue.
-
-   Being kind to the sites:
-   - one request at a time per site, at least 2.4 s apart (1.8 s for the others) and at most 20 per five minutes;
-   - a request fetches 40 posts, which is minutes of swiping, and only goes out when the pool is running low and the Feed is on screen;
-   - follow checks bundle up to 8 artists into one e621 request and re-check an artist at most every 25 minutes;
-   - an error or 429 puts that site on a growing cool-down (1, 2, 4... up to 15 minutes) instead of retrying;
-   - pictures come from the sites' CDN, loaded only for the card on screen and the next two.
-   ========================================================================================================================== */
-
-const GAP = { e621: 1500, e926: 1500 };
-const DEF_GAP = 1200;
-const BUDGET = 120; // safety ceiling: requests per five minutes per site (0.4 a second)
-const EVERY = 700; // never closer than this to the Feed's previous request to the same site, whatever it is for
-const LANE_GAP = { tags: 2500, learn: 3000, follow: 4000 }; // chores have their own, slower queues so they never hold up the posts
-const PAGE = 40;
-/** Posts per request: bigger pages mean fewer requests, and a deeper pool to swipe through. */
-const pageFor = (prov) => ({ e6: 200, db: 100, gb: 100, pm: 50 }[prov.engine] || prov.pageSize || 40); // the most each site hands out at once (e621 allows 320)
-const SUGGEST_AT = 3; // liked this many times (favorite 1, upvote about 0.8): worth suggesting
-const POOL_LOW = 80; // top the pool up long before it runs out
-const POOL_MAX = 700; // a big pool to rank from: the best of hundreds, not of a handful
-const FRESH_DAYS = 8;
-const FOLLOW_EVERY = 25 * 60000;
-const LEARN_EVERY = 12 * 3600000;
-const MIN_SCORE = { e621: 30, e926: 30, danbooru: 8, gelbooru: 6, safebooru: 2, derpibooru: 60 };
-const ALL_RATINGS = { s: true, q: true, e: true };
-
-/* ------------------------------------------------------------------ per-account model (shared by e621 and e926)  */
-const models = new Map();
-class Model {
-  constructor(cred) {
-    this.cred = cred;
-    this.taste = new Taste(kv.get('feed:t:' + cred, null));
-    this.seen = new Set(kv.get('feed:seen:' + cred, []));
-    this.seenMax = 400;
-    this.likes = new Set(kv.get('feed:likes:' + cred, []));
-    this.learnInfo = kv.get('feed:learn:' + cred, {});
-    this.fchk = kv.get('feed:fchk:' + cred, {});
-    this.save = debounce(() => this._save(), 1500);
-  }
-  _save() {
-    kv.set('feed:t:' + this.cred, this.taste.toJSON());
-    kv.set('feed:seen:' + this.cred, [...this.seen].slice(-400));
-    kv.set('feed:likes:' + this.cred, [...this.likes].slice(-8000));
-    kv.set('feed:learn:' + this.cred, this.learnInfo);
-    kv.set('feed:fchk:' + this.cred, this.fchk);
-  }
-  reset() {
-    this.taste.reset();
-    this.seen.clear();
-    this.likes.clear();
-    this.learnInfo = {};
-    this.save.flush();
-  }
-}
-const modelOf = (prov) => {
-  prov = typeof prov === 'string' ? getProvider(prov) : prov;
-  if (!models.has(prov.credKey)) models.set(prov.credKey, new Model(prov.credKey));
-  return models.get(prov.credKey);
-};
-addEventListener('pagehide', () => models.forEach((m) => m.save.flush()));
-addEventListener('visibilitychange', () => document.hidden && models.forEach((m) => m.save.flush()));
-
-/* ------------------------------------------------------------------ per-site state: pool of candidates, pacing, cool-down */
-const srcs = new Map();
-/** The last pool of candidates is kept on the device, so opening the app shows cards at once while a fresh batch is fetched behind them. */
-const poolKey = (prov) => 'feed:pool2:' + prov.id;
-for (const id of ['e621', 'e926', 'danbooru', 'gelbooru', 'safebooru', 'derpibooru']) kv.del('feed:pool:' + id); // the old format
-const loadPool = (prov) => {
-  const list = kv.get(poolKey(prov), []);
-  if (!Array.isArray(list)) return [];
-  for (const p of list) Object.defineProperty(p, '_kind', { value: 'explore', enumerable: false, writable: true, configurable: true });
-  return list.filter((p) => p && p.id && p.full && p.tags);
-};
-const savePool = (src) => {
-  src.savePool ||= debounce(() => {
-    if ((S('feedMode') || 'foryou') !== 'foryou') return;
-    kv.set(poolKey(src.prov), src.pool.slice(-90).map((p) => ({ ...p, desc: String(p.desc || '').slice(0, 300) })));
-  }, 4000);
-  src.savePool();
-};
-const srcOf = (prov) => {
-  if (!srcs.has(prov.id)) srcs.set(prov.id, { prov, pool: loadPool(prov), fresh: [], last: 0, reqs: [], chain: Promise.resolve(), cool: 0, fails: 0, filling: null, followBusy: false, told: false });
-  return srcs.get(prov.id);
-};
-
-/** Wait for this site's turn. Each kind of request ("lane") queues on its own, so a chore never sits in front of the next batch of posts. */
-function gate(src, lane = 'posts') {
-  const gap = LANE_GAP[lane] || GAP[src.prov.id] || DEF_GAP;
-  const L = ((src.lanes ||= {})[lane] ||= { last: 0, chain: Promise.resolve() });
-  return (L.chain = L.chain.then(async () => {
-    for (;;) {
-      const now = Date.now();
-      src.reqs = src.reqs.filter((t) => now - t < 300000);
-      let wait = Math.max(0, L.last + gap - now, src.last + EVERY - now);
-      if (src.reqs.length >= BUDGET) wait = Math.max(wait, src.reqs[0] + 300000 - now);
-      if (wait <= 0) break;
-      await sleep(wait); // another lane may have gone meanwhile: look again
-    }
-    L.last = src.last = Date.now();
-    src.reqs.push(src.last);
-  }));
-}
-
-const filtersFor = (o = {}) => ({ order: o.order || '', score: o.score || 0, ratings: o.ratings || S('filters').ratings, media: '', shape: '', age: o.age || '' });
-const trim = (set, max) => { while (set.size > max) set.delete(set.values().next().value); };
-
-/** One paced request. Cool-down on trouble, so a struggling site is left alone. */
-async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = pageFor(src.prov), ratings, lane } = {}) {
-  const feed = new Feed(src.prov, terms, filtersFor({ order, score, age, ratings }));
-  feed.limit = limit;
-  if (page != null) feed.pageNo = page;
-  return pageOf(src, feed, lane);
-}
-
-/** The next page of a feed object (which remembers its own cursor), paced. */
-async function pageOf(src, feed, lane = 'posts') {
-  feed.noCats = true; // no automatic tag-category lookups for a whole page (see ensureCats)
-  if (src.cool > Date.now()) throw new Error('cooling');
-  await gate(src, lane);
-  if (src.cool > Date.now()) throw new Error('cooling');
-  const prov = src.prov;
-  try {
-    const posts = await prov.page(feed);
-    src.fails = 0;
-    return posts;
-  } catch (e) {
-    if (!e.status || e.status === 429 || e.status >= 500 || e.status === 403) {
-      src.fails++;
-      src.cool = Date.now() + Math.min(5 * 60000, 20000 * 2 ** (src.fails - 1));
-    }
-    throw e;
-  }
-}
-
-/* ------------------------------------------------------------------ what may be shown */
-let rulesSig = null, rules = [];
-const hideRules = () => {
-  const sig = (S('blacklist') || []).join('\n');
-  if (sig !== rulesSig) (rulesSig = sig), (rules = compileBlacklist(S('blacklist') || []));
-  return rules;
-};
-
-function learnCats(posts) {
-  for (const p of posts) for (const c of Object.keys(p.tags)) if (c !== 'general' && c !== 'meta') for (const t of p.tags[c]) tagc.set(p.provider, t, { cat: c });
-}
-
-/** Repeats are fine, so "seen" only keeps the most recent few hundred out of For you; New and Hot ignore it. What is already a favorite (or liked) is left out. */
-function acceptable(post, model, queued, mode = S('feedMode') || 'foryou') {
-  if (!post || !post.full || post.kind === 'flash' || post.isComic) return false;
-  if (!S('filters').ratings[post.rating]) return false;
-  if (post.faved || model.likes.has(post.id)) return false;
-  if (queued.has(postKey(post)) || (mode === 'foryou' && model.seen.has(post.id))) return false;
-  if (S('blacklistMode') !== 'off' && blacklistHit(post, hideRules())) return false;
-  return true;
-}
-
-/* ------------------------------------------------------------------ learning from the account */
-const LEARN = {
-  e6: (c) => (c.user ? [{ t: `fav:${c.user.replace(/ /g, '_')}`, w: 1 }, { t: `votedup:${c.user.replace(/ /g, '_')}`, w: 0.8 }] : []),
-  db: (c) => (c.user ? [{ t: `ordfav:${c.user.replace(/ /g, '_')}`, w: 1 }] : []),
-  pm: (c) => (c.key ? [{ t: 'my:faves', w: 1 }, { t: 'my:upvotes', w: 0.7 }] : []),
-};
-const canLearn = (prov) => {
-  const c = (S('creds') || {})[prov.credKey] || {};
-  return !!LEARN[prov.engine]?.(c).length && (prov.engine === 'pm' ? !!c.key : !!c.user && !!c.key);
-};
-
-const learning = new Set();
-const LEARN_VERSION = 2; // 2: artists are counted too (one more read of the favorites for those learned before)
-const LEARN_PAGES = 6;
-/**
- * Reads favorites / upvotes into the stored weights. The full read happens once: where it got to is saved after every page, so closing
- * the app continues from there instead of starting over. Later runs only look at the newest page and add what is new.
- */
-async function learnAccount(prov, { force = false } = {}) {
-  const model = modelOf(prov), src = srcOf(prov);
-  if (!canLearn(prov) || learning.has(prov.credKey)) return;
-  let info = model.learnInfo;
-  if (info.v !== LEARN_VERSION) info = model.learnInfo = { v: LEARN_VERSION, q: {}, base: info.base, recount: model.likes.size > 0 };
-  const unfinished = () => LEARN[prov.engine](c).some((q) => !info.q[q.t]?.done);
-  const c = (S('creds') || {})[prov.credKey] || {};
-  if (!force && !unfinished() && info.ts && Date.now() - info.ts < LEARN_EVERY) return;
-  learning.add(prov.credKey);
-  let added = 0;
-  try {
-    emit('feed-learn', { running: true, cred: prov.credKey, n: 0 });
-    for (const q of LEARN[prov.engine](c)) {
-      const st = (info.q[q.t] ||= { done: false, pages: 0, cursor: null, pageNo: null });
-      const full = !st.done;
-      const feed = new Feed(prov, [{ t: q.t, op: '+' }], filtersFor({ ratings: ALL_RATINGS }));
-      feed.limit = pageFor(prov);
-      if (full && st.pages) (feed.cursor = st.cursor), (feed.pageNo = st.pageNo);
-      for (let i = full ? st.pages : 0; i < (full ? LEARN_PAGES : 2) && !feed.done; i++) {
-        const posts = await pageOf(src, feed, 'learn');
-        if (!posts.length) break;
-        learnCats(posts);
-        let fresh = 0;
-        for (const p of posts) {
-          if (model.likes.has(p.id)) {
-            // learned before artists were counted: count them now, once, without learning the tags twice
-            if (full && info.recount) model.taste.countArtists(p, q.w);
-            continue;
-          }
-          model.likes.add(p.id);
-          model.taste.learn(p, { l: q.w, n: 1 });
-          fresh++;
-          added++;
-        }
-        if (full) Object.assign(st, { pages: i + 1, cursor: feed.cursor, pageNo: feed.pageNo });
-        model.save();
-        emit('feed-learn', { running: true, cred: prov.credKey, n: added });
-        if (!full && !fresh) break;
-      }
-      st.done = true;
-    }
-    info.recount = false;
-    if (!info.base) await baseline(prov, model, src);
-    info.base = true;
-    info.ts = Date.now();
-    model.save();
-  } catch (e) {
-    if (e.message !== 'cooling') emit('toast', { msg: `Could not read ${prov.name} favorites: ${e.message}`, kind: 'err' });
-  } finally {
-    learning.delete(prov.credKey);
-    emit('feed-learn', { running: false, cred: prov.credKey, n: added });
-  }
-}
-
-/** A sample of ordinary posts from the same pool the Feed draws on, counted as "shown, not liked", so a tag's lift has something to compare with. */
-async function baseline(prov, model, src) {
-  for (let i = 0; i < 2; i++) {
-    const posts = await fetchPage(src, [], { ...exploreOpts(prov), ratings: ALL_RATINGS, lane: 'learn' });
-    learnCats(posts);
-    for (const p of posts) model.taste.learn(p, { l: 0, n: 1 });
-  }
-  model.save();
-}
-
-/* ------------------------------------------------------------------ candidate queries */
-function exploreOpts(prov, half = false) {
-  const s = Math.round((MIN_SCORE[prov.id] || 10) * (half ? 0.5 : 1));
-  if (!half && prov.ages && prov.engine !== 'db' && Math.random() < 0.35) return { order: 'score', score: 0, age: 'month', page: 1 + Math.floor(Math.random() * 6) }; // a wander through what was hot lately
-  if (prov.engine === 'db') return { order: '', score: s, page: 1 + Math.floor(Math.random() * 200) };
-  if (prov.engine === 'gb') return { order: 'random', score: s, page: Math.floor(Math.random() * 3) };
-  return { order: 'random', score: s };
-}
-
-function interestQuery(prov, model) {
-  const t = model.taste;
-  const all = t.interests(undefined, 40, (f) => tagc.get(prov.id, f)?.cat ?? null);
-  if (all.length < 3) return null;
-  const src = srcOf(prov);
-  const used = (src.searched ||= []); // the last few subjects searched for are left alone for a while
-  let list = all.filter((x) => !used.includes(x.tag));
-  if (list.length < 3) list = all;
-  const first = list[Math.max(0, softPick(list.slice(0, 20).map((x) => x.rank), 2.5))];
-  used.push(first.tag);
-  if (used.length > 8) used.shift();
-  const terms = [{ t: first.tag, op: '+' }];
-  if (prov.maxTags >= 3 && Math.random() < 0.4) {
-    const isArt = (f) => tagc.get(prov.id, f)?.cat === 'artist';
-    const pool = list.filter((x) => x.tag !== first.tag && !(isArt(first.tag) && isArt(x.tag)));
-    if (pool.length) terms.push({ t: pool[Math.floor(Math.random() * Math.min(10, pool.length))].tag, op: '+' });
-  }
-  const o = exploreOpts(prov, true);
-  if (prov.engine === 'db') {
-    const known = tagc.get(prov.id, first.tag)?.count;
-    o.page = 1 + Math.floor(Math.random() * Math.max(1, Math.min(25, Math.ceil((known || 300) / prov.pageSize))));
-  }
-  return { terms: terms.slice(0, prov.maxTags), opts: o, kind: 'interest', tag: first.tag };
-}
-
-function queued(view) {
-  return view ? new Set(view.items.map((i) => postKey(i.post))) : new Set();
-}
-
-/** New and Hot read the site's own ordering page after page (a feed object remembers where it is). */
-function streamFeed(src, mode) {
-  const prov = src.prov;
-  src.streams ||= {};
-  let f = src.streams[mode];
-  if (f && !f.done) return f;
-  if (mode === 'hot') {
-    src.hotLevel = f ? Math.min(2, (src.hotLevel || 0) + 1) : src.hotLevel || 0;
-    const ages = ['day', 'week', 'month'];
-    const o = prov.engine === 'db' ? { order: 'rank' } : { order: 'score', age: prov.ages ? ages[src.hotLevel] : '' };
-    f = new Feed(prov, [], filtersFor(o));
-  } else f = new Feed(prov, [], filtersFor({}));
-  f.limit = pageFor(prov);
-  src.streams[mode] = f;
-  return f;
-}
-
-/** Top the pool of a site up with one request. */
-function refill(src, view) {
-  if (src.filling) return src.filling;
-  const prov = src.prov, model = modelOf(prov);
-  src.filling = (async () => {
-    try {
-      const mode = S('feedMode') || 'foryou';
-      if (mode === 'new' || mode === 'hot') {
-        let posts = await pageOf(src, streamFeed(src, mode));
-        learnCats(posts);
-        const have = new Set(src.pool.map((p) => p.id)), q2 = queued(view);
-        posts = posts.filter((p) => !have.has(p.id) && acceptable(p, model, q2, mode));
-        for (const p of posts) Object.defineProperty(p, '_kind', { value: mode, enumerable: false, writable: true, configurable: true });
-        src.pool.push(...posts);
-        src.told = false;
-        return;
-      }
-      const pExplore = Math.max(0.15, (S('feedExplore') || 0) / 100);
-      let plan = null;
-      if (model.taste.ready && Math.random() > pExplore) plan = interestQuery(prov, model);
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const q = plan || { terms: [], opts: exploreOpts(prov), kind: 'explore' };
-        const small = !src.warmed && src.pool.length < 20; // the very first request of a session is a small one, so the first cards show quickly
-        src.warmed = true;
-        let posts = await fetchPage(src, q.terms, small ? { ...q.opts, limit: 40 } : q.opts);
-        learnCats(posts);
-        const have = new Set(src.pool.map((p) => p.id));
-        const q2 = queued(view);
-        posts = posts.filter((p) => !have.has(p.id) && acceptable(p, model, q2));
-        for (const p of posts) Object.defineProperty(p, '_kind', { value: q.kind, enumerable: false, writable: true, configurable: true });
-        src.pool.push(...posts);
-        if (src.pool.length > POOL_MAX) src.pool.splice(0, src.pool.length - POOL_MAX);
-        savePool(src);
-        if (posts.length >= 6) break;
-        plan = null; // a thin answer (a rare tag pair, a blacklist that ate the page): try a plain wander next
-      }
-      src.told = false;
-    } catch (e) {
-      if (e.message !== 'cooling' && !src.told) {
-        src.told = true;
-        emit('toast', { msg: `${src.prov.name}: ${e.message}`, kind: 'err' });
-      }
-    } finally {
-      src.filling = null;
-    }
-  })();
-  return src.filling;
-}
-
-/** New posts from followed artists. One request covers up to eight of them on e621. */
-async function followTick(src, view) {
-  const prov = src.prov, model = modelOf(prov);
-  if (!S('feedFollows') || src.followBusy || src.cool > Date.now()) return;
-  const now = Date.now();
-  const due = subs.all().filter((f) => f.p === prov.credKey && f.cat === 'artist' && now - (model.fchk[f.t] || 0) > FOLLOW_EVERY).sort((a, b) => (model.fchk[a.t] || 0) - (model.fchk[b.t] || 0));
-  if (!due.length) return;
-  src.followBusy = true;
-  try {
-    const batch = due.slice(0, prov.engine === 'e6' ? 8 : 1);
-    const terms = batch.map((f) => ({ t: f.t, op: batch.length > 1 ? '~' : '+' }));
-    const posts = await fetchPage(src, terms, { limit: PAGE, ratings: S('filters').ratings, lane: 'follow' });
-    learnCats(posts);
-    for (const f of batch) model.fchk[f.t] = Date.now();
-    const q = queued(view);
-    const lim = Date.now() - (S('feedMode') === 'follows' ? 30 : FRESH_DAYS) * 86400000;
-    const names = new Set(batch.map((f) => f.t));
-    const have = new Set(src.fresh.map((p) => p.id));
-    for (const p of posts) {
-      if (have.has(p.id) || !acceptable(p, model, q)) continue;
-      if (new Date(p.created).getTime() < lim) continue;
-      Object.defineProperty(p, '_kind', { value: 'follow', enumerable: false, writable: true, configurable: true });
-      Object.defineProperty(p, '_who', { value: [...p.artists, ...Object.values(p.tags).flat()].find((a) => names.has(a)) || batch[0].t, enumerable: false, writable: true, configurable: true });
-      src.fresh.push(p);
-    }
-    src.fresh.sort((a, b) => new Date(b.created) - new Date(a.created));
-    model.save();
-  } catch {
-    /* the cool-down in fetchPage already handled it */
-  } finally {
-    src.followBusy = false;
-  }
-}
-
-/* ------------------------------------------------------------------ choosing the next post */
-const enabled = () => (S('feedSources') || []).map((id) => getProvider(id)).filter((p, i, a) => p && a.indexOf(p) === i);
-const needsKeyMissing = (prov) => prov.needsKey && !(((S('creds') || {})[prov.credKey] || {}).key);
-
-function whyOf(post, model, kind) {
-  if (kind === 'new') return 'Newest';
-  if (kind === 'hot') return 'Hot right now';
-  if (kind === 'follow') return `New from ${pretty(post._who || post.artists[0] || 'an artist you follow')}`;
-  const r = model.taste.rate(post);
-  if (kind !== 'explore' && model.taste.ready && r.why && model.taste.lift(r.why.f) > 0.8) {
-    const t = pretty(r.why.f);
-    return r.why.cat === 'artist' ? `You like art by ${t}` : `You like ${t}`;
-  }
-  return model.taste.ready ? 'Something different' : 'Popular, to get to know you';
-}
-
-/** A gentle lean toward newer and hotter posts: a strong taste match still beats it, but between equals the fresh one wins. */
-const lean = (p) => {
-  const age = Math.max(0, (Date.now() - new Date(p.created).getTime()) / 86400000) || 0;
-  return 0.5 * Math.exp(-age / 45) + 0.35 * Math.min(1, Math.log10(1 + Math.max(0, p.score || 0)) / 3);
-};
-
-/**
- * How much a post repeats what was just shown: the same artist, the same leading tag, the same characters. Taken off its score, so a
- * strong taste still comes through but cannot take over the whole Feed.
- */
-function sameness(view, model) {
-  const recent = view.items.slice(-14).map((x) => x.post);
-  const artists = new Map(), lead = new Map(), chars = new Map();
-  const bump = (m, k, v = 1) => k && m.set(k, (m.get(k) || 0) + v);
-  recent.forEach((p, i) => {
-    const near = i >= recent.length - 5 ? 2 : 1; // the last few count double
-    for (const a of p.artists) bump(artists, a, near);
-    bump(lead, model.taste.rate(p).why?.f);
-    for (const c of p.tags.character) bump(chars, c);
-  });
-  return (p, why) => {
-    let pen = 0;
-    for (const a of p.artists) pen += Math.min(3, artists.get(a) || 0) * 0.8;
-    if (why) pen += Math.max(0, (lead.get(why.f) || 0) - 1) * 0.3;
-    for (const c of p.tags.character) pen += Math.min(3, chars.get(c) || 0) * 0.2;
-    return pen;
-  };
-}
-
-function takeFrom(src, view, explore) {
-  const model = modelOf(src.prov);
-  const q = queued(view);
-  const mode = S('feedMode') || 'foryou';
-  src.pool = src.pool.filter((p) => acceptable(p, model, q, mode));
-  if (!src.pool.length) return null;
-  if (mode !== 'foryou') return src.pool.shift(); // New / Hot: the site's own order
-  let idx;
-  if (!model.taste.ready) idx = softPick(src.pool.map(lean), 0.5);
-  else {
-    const dull = sameness(view, model);
-    const rated = src.pool.map((p) => {
-      const r = model.taste.rate(p);
-      return { p, ...r, score: r.score - dull(p, r.why) };
-    });
-    if (explore) {
-      // off the beaten path, but not off a cliff: unfamiliar posts that are at least not disliked
-      const sc = rated.map((r) => r.novelty * 1.4 + Math.max(-2, Math.min(1, r.score)) * 0.3 + (r.p._kind === 'explore' ? 0.3 : 0) + lean(r.p) * 0.6);
-      idx = softPick(sc, 0.35);
-    } else idx = softPick(rated.map((r) => r.score + lean(r.p)), 0.7);
-  }
-  const [post] = src.pool.splice(idx, 1);
-  return post;
-}
-
-/** The few tags that weigh most for this post: what the person likes first, then the telling ones (characters, species). */
-function heaviestTags(post, model, limit = 5) {
-  const t = model.taste, fs = features(post).filter(([f, , cat]) => cat !== 'meta' && cat !== 'kind' && cat !== 'artist');
-  const base = { character: 0.5, species: 0.4, copyright: 0.2, general: 0, lore: -0.2 };
-  return fs.map(([f, w, cat]) => ({ f, v: (t.ready ? t.lift(f) * w : 0) + (base[cat] ?? 0) + (t.t[f] ? 0.1 : 0) })).sort((a, b) => b.v - a.v).slice(0, limit).map((x) => x.f);
-}
-
-/** e621 sends tags flat: look up the categories of what is about to be shown (the cache makes this rarer and rarer), so artists and weights are right. */
-const unknownTags = (prov, posts) => new Set(posts.flatMap((p) => p.tags.general).filter((t) => !tagc.get(prov.id, t)));
-async function ensureCats(posts, { urgent = false } = {}) {
-  const first = posts[0];
-  if (!first) return false;
-  const prov = getProvider(first.provider);
-  if (!prov.resolveCats) return false;
-  const need = posts.filter((p) => p.flat !== false && p.tags.general.some((t) => !tagc.get(prov.id, t)));
-  // only when the card on screen is missing its categories, or a good number of tags have piled up: one request then covers several cards
-  if (!need.length || !(need.includes(first) || unknownTags(prov, need).size >= 70)) return false;
-  if (srcOf(prov).reqs.length > BUDGET * 0.7) return false; // short on budget: posts come first
-  try {
-    await gate(srcOf(prov), 'tags');
-    const asked = [...unknownTags(prov, need)].slice(0, prov.engine === 'gb' ? 60 : 100); // the same ones resolveCats will send
-    await prov.resolveCats(need, 1); // one paced request of up to 100 tags
-    // a few tags never come back (renamed, empty): once the answer arrived, stop asking about them
-    if (asked.some((t) => tagc.get(prov.id, t))) for (const t of asked) if (!tagc.get(prov.id, t)) tagc.set(prov.id, t, { cat: 'general' });
-  } catch {
-    /* categories are a nicety: carry on without */
-  }
-  return true;
-}
-
-/** Take the next post for the view: a follow's new post every third card, otherwise taste or a deliberate wander. */
-async function nextPost(view) {
-  const list = enabled().filter((p) => !needsKeyMissing(p));
-  if (!list.length) return null;
-  const q = queued(view);
-  const mode = S('feedMode') || 'foryou';
-  if (mode === 'follows') {
-    for (const p of list) srcOf(p).fresh = srcOf(p).fresh.filter((x) => acceptable(x, modelOf(p), q, mode));
-    const all = list.flatMap((p) => srcOf(p).fresh).sort((a, b) => new Date(b.created) - new Date(a.created));
-    if (!all.length) return null;
-    list.forEach((p) => (srcOf(p).fresh = srcOf(p).fresh.filter((x) => x !== all[0])));
-    return { post: all[0], kind: 'follow' };
-  }
-  if (mode === 'foryou' && S('feedFollows') && view.picks % 3 === 1) {
-    for (const p of list) {
-      const src = srcOf(p), m = modelOf(p);
-      src.fresh = src.fresh.filter((x) => acceptable(x, m, q));
-    }
-    const all = list.flatMap((p) => srcOf(p).fresh);
-    if (all.length) {
-      all.sort((a, b) => new Date(b.created) - new Date(a.created));
-      const post = all[0];
-      list.forEach((p) => (srcOf(p).fresh = srcOf(p).fresh.filter((x) => x !== post)));
-      return { post, kind: 'follow' };
-    }
-  }
-  for (let round = 0; round < 3; round++) {
-    for (let k = 0; k < list.length; k++) {
-      const prov = list[(view.rr++) % list.length], src = srcOf(prov);
-      const explore = mode === 'foryou' && Math.random() < (S('feedExplore') || 0) / 100;
-      let post = takeFrom(src, view, explore);
-      if (src.pool.length < POOL_LOW && !src.filling && view.active()) refill(src, view); // in the background
-      if (!post && src.cool <= Date.now()) {
-        await refill(src, view);
-        post = takeFrom(src, view, explore);
-      }
-      if (post) return { post, kind: explore && modelOf(prov).taste.ready ? 'explore' : post._kind || 'interest' };
-    }
-  }
-  return null;
-}
-
-/* ================================================================== the view */
-const mediaSrc = (p) => {
-  if (p.kind === 'video') {
-    const alts = (p.alts || []).filter((a) => a.url);
-    // phones take the smallest re-encode, computers 720p
-    const pick = isPhone() ? [...alts].sort((a, b) => (a.size || 1e12) - (b.size || 1e12))[0] : alts.find((a) => /720/.test(a.label)) || alts[0];
-    return pick?.url || p.full;
-  }
-  if (p.kind === 'anim') return p.full;
-  return (isPhone() ? p.sampleSmall || p.sample || p.full : p.full || p.sample) || p.thumb;
-};
-const smallVideo = (p) => !!p && (p.alts || []).some((a) => a.url === mediaSrc(p) && a.size && a.size < 8e6);
+const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
+const MENU_HINT = 'Press and hold a post for more. Hold two fingers on it to hide the buttons.';
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
+const mode = () => S('feedMode') || 'foryou';
+const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+(=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
+const signedIn = (prov) => { const c = (S('creds') || {})[prov.credKey]; return !!(c?.user && c?.key); };
 
 export function renderFeed(root, ctx) {
   const view = {
     items: [], // {post, kind, why}
-    picks: 0,
     rr: 0,
     idx: 0,
     busy: false,
+    clean: false, // buttons hidden by you
     active: () => root.isConnected && !root.hidden && !document.hidden && document.body.dataset.view === 'feed' && !viewerOpen(),
   };
+  const cards = []; // one slot per item; only the ones near the screen have content
   const scroller = h('div', { class: 'fd-scroll', tabindex: '0' });
   const empty = h('div', { class: 'fd-empty' });
-  const chips = h('div', { class: 'fd-chips' });
-  const modes = h('div', { class: 'fd-modes' }, [['foryou', 'For you'], ['follows', 'Following'], ['new', 'New'], ['hot', 'Hot']].map(([k, label]) => h('button', { 'data-m': k, onclick: () => setMode(k) }, label)));
-  const paintModes = () => modes.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === (S('feedMode') || 'foryou')));
-  const setMode = (k) => {
-    if (k === (S('feedMode') || 'foryou')) return;
-    setS('feedMode', k);
-    paintModes();
-    refreshFeed(true);
-  };
   const pullEl = h('div', { class: 'fd-pull', html: icon('refresh', 20) });
-  const head = h('div', { class: 'fd-head' }, chips, h('button', { class: 'ibtn', title: 'Refresh the feed', 'aria-label': 'Refresh the feed', html: icon('refresh', 19), onclick: () => refreshFeed() }), h('button', { class: 'ibtn', title: 'Feed settings', 'aria-label': 'Feed settings', html: icon('sliders', 19), onclick: (e) => feedSettings(e.currentTarget) }));
-  const suggestChip = h('button', { class: 'fd-suggest', hidden: true, onclick: (e) => suggestPopover(e.currentTarget) });
-  const el = h('div', { class: 'fd' }, head, modes, suggestChip, pullEl, scroller, empty);
+
+  /* ---------------------------------------------------------------- top bar */
+  const tabs = h('div', { class: 'fd-tabs' }, MODES.map(([k, label]) => h('button', { 'data-m': k, onclick: () => setMode(k) }, label)));
+  const paintTabs = () => tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === mode()));
+  const menuBtn = h('button', { class: 'fd-ib fd-menu', title: 'Feed settings', 'aria-label': 'Feed settings', html: icon('sliders', 20), onclick: (e) => feedSettings(e.currentTarget) });
+  const top = h('div', { class: 'fd-top' },
+    h('button', { class: 'fd-ib', title: 'Cloak the screen', 'aria-label': 'Cloak the screen', html: icon('cloak', 20), onclick: () => ctx.cloak?.() }),
+    tabs, menuBtn);
+  const el = h('div', { class: 'fd' }, scroller, top, pullEl, empty);
   root.replaceChildren(el);
+  el.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && el.classList.contains('idle') && wake());
 
-  const cards = []; // DOM per item
-  let enter = 0, activePost = null;
-
-  /* --- header: which sites */
-  const paintChips = () => {
-    const on = new Set(S('feedSources') || []);
-    chips.replaceChildren(...providerList.map((p) => h('button', { class: 'fd-chip' + (on.has(p.id) ? ' on' : ''), style: `--ph:${p.color}`, title: p.name + (needsKeyMissing(p) ? ' (needs an API key)' : ''), onclick: () => toggleSource(p) }, h('b', {}, p.short), h('span', {}, p.name))));
+  const setMode = (k) => {
+    if (k === mode()) return;
+    setS('feedMode', k);
+    paintTabs();
+    refreshFeed({ fromScratch: true });
   };
-  const toggleSource = (p) => {
-    const cur = new Set(S('feedSources') || []);
-    if (cur.has(p.id)) {
-      if (cur.size === 1) return toast('The Feed needs at least one site', { ms: 1800 });
-      cur.delete(p.id);
-    } else {
-      cur.add(p.id);
-      if (needsKeyMissing(p)) toast(`${p.name} needs an API key: add it in Settings`, { kind: 'err', ms: 3000 });
-    }
-    setS('feedSources', [...cur]);
-    paintChips();
-    dropUpcoming();
-    autoLearn();
-    fill();
-  };
-  const unsub = on('settings', (e) => e.detail.key === 'feedSources' && paintChips());
+  const paintSuggest = () => menuBtn.classList.toggle('dot', suggestions().length > 0);
 
-  /* --- cards */
+  /* ---------------------------------------------------------------- showing and hiding the buttons */
+  let idleT = 0;
+  const landscape = () => document.documentElement.classList.contains('phone') && innerWidth > innerHeight;
+  /** While a video plays (or the phone is sideways) the buttons fade after a moment; any touch brings them back. */
+  function wake() {
+    el.classList.remove('idle');
+    clearTimeout(idleT);
+    idleT = setTimeout(() => {
+      const card = cardAt(view.idx), v = card?.querySelector('video');
+      const busy = card?.querySelector('.fd-tags.open, .fd-desc.open') || document.querySelector('.sheet-back, .pop');
+      if (!busy && ((v && !v.paused) || (!v && landscape()))) el.classList.add('idle');
+    }, landscape() ? 1800 : 3000);
+  }
+  const setClean = (v) => {
+    view.clean = v;
+    el.classList.toggle('clean', v);
+    if (v) toast('Buttons hidden. Tap to bring them back', { ms: 1600 });
+    else wake();
+  };
+
+  /* ---------------------------------------------------------------- cards */
+  const cardAt = (i) => cards[i]?.firstChild || null;
+  const indexOf = (card) => cards.indexOf(card.parentElement);
+
+  const paintState = (card, p) => {
+    if (!card) return;
+    const q = (s) => card.querySelector(s);
+    q('.fd-btn.like')?.classList.toggle('on', isLiked(p));
+    q('.fd-btn.up')?.classList.toggle('on', isUp(p));
+    q('.fd-btn.down')?.classList.toggle('on', isDown(p));
+    const got = saved.has(p), dl = q('.fd-btn.dl');
+    if (dl && dl.classList.contains('on') !== got) (dl.classList.toggle('on', got), (dl.innerHTML = icon(got ? 'check' : 'download', 24)));
+    if (dl) dl.title = got ? 'Already downloaded' : 'Download (D)';
+    const chip = q('.fd-saved');
+    if (chip) chip.hidden = !got;
+    q('.fd-btn.pin')?.classList.toggle('on', boards.inAny(postKey(p)));
+  };
+  const paintAll = () => view.items.forEach((it, i) => paintState(cardAt(i), it.post));
+
+  const railButton = (cls, label, ic, run) => h('button', { class: 'fd-btn ' + cls, title: label, 'aria-label': label, html: icon(ic, 24), onclick: (e) => (e.stopPropagation(), wake(), run(e.currentTarget)) });
+
   const buildCard = (i) => {
     const it = view.items[i];
     const p = it.post, prov = getProvider(p.provider);
-    const model = modelOf(prov);
-    const liked = () => model.likes.has(p.id) || p.faved;
-    const likeBtn = h('button', { class: 'fd-btn like' + (liked() ? ' on' : ''), title: 'Like (L)', 'aria-label': 'Like', html: icon('heart', 26) + `<small>${fmtNum(p.favs)}</small>`, onclick: (e) => (e.stopPropagation(), toggleLike(p, likeBtn)) });
     const blurred = isBlurred(p);
     let media;
     if (p.kind === 'video') {
       media = h('video', { class: 'fd-media', loop: true, playsinline: true, muted: true, preload: 'metadata', poster: p.thumb });
       media.muted = S('muted') !== false;
-      media.dataset.src = mediaSrc(p);
+      // start the fade timer when it first plays, not again each time it loops
+      media.addEventListener('playing', () => { if (!media.dataset.woke && cardAt(view.idx)?.contains(media)) (media.dataset.woke = '1'), wake(); });
     } else media = h('img', { class: 'fd-media', alt: '', draggable: 'false', decoding: 'async' });
-    if (p.kind !== 'video') media.dataset.src = mediaSrc(p);
+    media.dataset.src = mediaSrc(p);
     const stage = h('div', { class: 'fd-stage' + (blurred ? ' blur' : '') }, media);
-    const soundBtn = p.kind === 'video' ? h('button', { class: 'fd-btn', title: 'Sound', 'aria-label': 'Sound', html: icon(media.muted ? 'mute' : 'sound', 24), onclick: (e) => { e.stopPropagation(); media.muted = !media.muted; setS('muted', media.muted); soundBtn.innerHTML = icon(media.muted ? 'mute' : 'sound', 24); } }) : null;
-    const card = h('section', { class: 'fd-card', 'data-i': i, style: `--ph:${prov.color}` },
+    const like = railButton('like', 'Like (L)', 'heart', () => toggleLike(p));
+    like.append(h('small', {}, fmtNum(p.favs)));
+    const card = h('section', { class: 'fd-card', style: `--ph:${prov.color}` },
       h('img', { class: 'fd-bg', src: p.thumb, alt: '', draggable: 'false' }),
       stage,
       h('div', { class: 'fd-shade' }),
       buildInfo(it),
       h('div', { class: 'fd-rail' },
-        likeBtn,
-        h('button', { class: 'fd-btn up' + (voted.has(p) ? ' on' : ''), title: 'Upvote (U)', 'aria-label': 'Upvote', html: icon('up', 24), onclick: (e) => (e.stopPropagation(), upvote(p, e.currentTarget)) }),
-        h('button', { class: 'fd-btn', title: 'Downvote / not interested (X)', 'aria-label': 'Downvote', html: icon('down', 24), onclick: (e) => (e.stopPropagation(), dislike(i, true)) }),
-        h('button', { class: 'fd-btn', title: 'Open (Enter)', 'aria-label': 'Open', html: icon('eye', 24), onclick: (e) => (e.stopPropagation(), openIt(i)) }),
-        h('button', { class: 'fd-btn', title: 'Download (D)', 'aria-label': 'Download', html: icon('download', 24), onclick: (e) => (e.stopPropagation(), ctx.savePost?.(p)) }),
-        h('button', { class: 'fd-btn', title: 'Pin', 'aria-label': 'Pin', html: icon('pin', 24), onclick: (e) => (e.stopPropagation(), quickPin([p])) }),
-        soundBtn),
+        like,
+        railButton('up', 'Upvote (U)', 'up', () => upvote(p)),
+        railButton('down', 'Downvote (X)', 'down', () => downvote(indexOf(card))),
+        railButton('dl', 'Download (D)', 'download', () => download(p)),
+        railButton('share', 'Share', 'share', () => ctx.share?.(p)),
+        railButton('pin', 'Pin', 'pin', () => (quickPin([p]), setTimeout(() => paintState(card, p), 60))),
+        p.kind === 'video' ? railButton('sound', 'Sound', media.muted ? 'mute' : 'sound', (b) => { media.muted = !media.muted; setS('muted', media.muted); b.innerHTML = icon(media.muted ? 'mute' : 'sound', 24); }) : null,
+        p.kind === 'video' && isAndroid() && p.w > p.h ? railButton('rotate', 'Turn sideways', 'rotate', () => turn()) : null),
       h('button', { class: 'fd-zoomreset', hidden: true, onclick: (e) => (e.stopPropagation(), card._zoom?.reset()) }, 'Reset zoom'),
       blurred ? h('button', { class: 'fd-reveal', onclick: (e) => (e.stopPropagation(), stage.classList.remove('blur'), e.currentTarget.remove()) }, 'Blurred: tap to show') : null);
-    attachTaps(card, stage, media, p, likeBtn);
     attachZoom(card, stage, media);
+    attachGestures(card, stage, media, p);
+    paintState(card, p);
     return card;
   };
 
-  /** Description and the heaviest tags: redrawn once e621's tag categories arrive. */
+  /** Artist, description and the heaviest tags: redrawn if tag categories arrive late. */
   const buildInfo = (it) => {
-    const p = it.post, prov = getProvider(p.provider), model = modelOf(prov);
+    const p = it.post, prov = getProvider(p.provider);
     const art = p.artists.slice(0, 2);
-    const desc = String(p.desc || '').replace(/\[\/?[a-z]+(=[^\]]*)?\]|"([^"]+)":\S+/gi, '$2').replace(/\s+/g, ' ').trim().slice(0, 140);
     return h('div', { class: 'fd-info' },
-      h('div', { class: 'fd-why ' + it.kind }, it.why, h('i', {}, prov.short)),
+      h('div', { class: 'fd-chips-row' },
+        it.why ? h('div', { class: 'fd-why ' + it.kind }, it.why) : null,
+        h('div', { class: 'fd-site' }, prov.short),
+        h('div', { class: 'fd-saved', hidden: !saved.has(p), html: icon('check', 12) + '<span>Downloaded</span>' })),
       art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openSearch(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
-      desc ? h('div', { class: 'fd-desc' }, desc) : null,
-      tagBox(p, model, heaviestTags(p, model)));
+      descBox(p),
+      tagBox(p, heaviestTags(p)));
   };
+
+  /** Two lines of the description; tap for all of it. */
+  const descBox = (p) => {
+    const short = cleanDesc(p.desc);
+    if (!short) return null;
+    const box = h('div', { class: 'fd-desc', role: 'button', tabindex: 0 });
+    let open = false;
+    const paint = () => {
+      box.classList.toggle('open', open);
+      if (!open) return box.replaceChildren(h('span', {}, short.slice(0, 220)));
+      box.replaceChildren(h('div', { class: 'fd-desc-full' }, renderDText(p.desc, { prov: getProvider(p.provider) })), h('b', {}, 'Show less'));
+    };
+    box.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const link = e.target.closest('a');
+      if (open && link) return;
+      open = !open;
+      paint();
+      wake();
+    });
+    paint();
+    return box;
+  };
+
   const isFollowed = (prov, name) => !!subs.find(prov.credKey, name);
   /** "Follow" next to an artist you don't follow yet; it says so when you keep liking their work. */
   const followButton = (p, name) => {
@@ -651,44 +176,33 @@ export function renderFeed(root, ctx) {
     const keen = (modelOf(prov).taste.a[name] || 0) >= SUGGEST_AT;
     return h('button', { class: 'fd-follow' + (keen ? ' keen' : ''), onclick: (e) => { e.stopPropagation(); follow(name, prov.id); e.currentTarget.remove(); paintSuggest(); } }, keen ? 'Follow · you like them' : 'Follow');
   };
-  /** Artists whose work keeps getting liked, not followed and not dismissed. */
-  const suggestions = () => {
-    const out = [], dismissed = new Set(kv.get('feed:nofollow', []));
-    for (const prov of enabled()) {
-      const m = modelOf(prov);
-      for (const a of m.taste.topArtists(SUGGEST_AT)) {
-        const key = prov.credKey + ':' + a.name;
-        if (!dismissed.has(key) && !isFollowed(prov, a.name) && !out.some((o) => o.key === key)) out.push({ key, prov, ...a });
-      }
-    }
-    return out.sort((x, y) => y.v - x.v).slice(0, 12);
-  };
-  const paintSuggest = () => {
-    const n = suggestions().length;
-    suggestChip.hidden = !n;
-    suggestChip.textContent = n === 1 ? '1 artist to follow' : `${n} artists to follow`;
-  };
-  const suggestList = () => {
-    const list = h('div', { class: 'fd-sugg-list' });
-    const paint = () => {
-      const items = suggestions();
-      list.replaceChildren(...(items.length ? items.map((s) => h('div', { class: 'fd-sugg', style: `--ph:${s.prov.color}` },
-        h('button', { class: 'fd-sugg-name', onclick: () => (closePopover(), ctx.go(ctx.roamHash([{ t: s.name, op: '+' }], null, s.prov.id))) }, h('b', {}, pretty(s.name)), h('small', {}, `${s.prov.name} · liked ${Math.round(s.v)}`)),
-        h('button', { class: 'btn primary', onclick: () => { follow(s.name, s.prov.id); paint(); paintSuggest(); } }, 'Follow'),
-        h('button', { class: 'ibtn', title: 'Not this one', 'aria-label': 'Dismiss', html: icon('close', 16), onclick: () => { kv.set('feed:nofollow', [...kv.get('feed:nofollow', []), s.key].slice(-300)); paint(); paintSuggest(); } }))) : [h('small', {}, 'Nobody to suggest right now.')]));
-    };
-    paint();
-    return list;
-  };
-  const suggestPopover = (anchor) => popover(anchor, h('div', { class: 'fd-set' }, h('h4', {}, 'Artists you keep liking'), suggestList()), { align: 'left', cls: 'fd-pop' });
 
   const refreshInfo = (it) => {
-    it.why = whyOf(it.post, modelOf(it.post.provider), it.kind);
-    const slot = cards[view.items.indexOf(it)];
-    const old = slot?.querySelector('.fd-info');
-    if (old && !old.querySelector('.fd-tags.open')) old.replaceWith(buildInfo(it));
+    const old = cardAt(view.items.indexOf(it))?.querySelector('.fd-info');
+    if (old && !old.querySelector('.fd-tags.open, .fd-desc.open')) old.replaceWith(buildInfo(it));
   };
 
+  /** The heaviest few tags like hashtags, and a button that opens the full list (grouped by category, in a scroll box). */
+  const tagBox = (p, heavy) => {
+    const box = h('div', { class: 'fd-tags' });
+    const chip = (t, cat) => h('button', { class: cat ? 'c-' + cat : '', onclick: (e) => (e.stopPropagation(), openSearch(p, t)) }, '#' + pretty(t));
+    const total = Object.entries(p.tags).filter(([c]) => c !== 'artist').reduce((n, [, l]) => n + l.length, 0);
+    let all = false;
+    const paint = () => {
+      box.classList.toggle('open', all);
+      if (!all) {
+        box.replaceChildren(...heavy.map((t) => chip(t)), total > heavy.length ? h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = true), paint(), wake()) }, `View all ${total}`) : null);
+        return;
+      }
+      const groups = CATS.filter((c) => c !== 'artist' && p.tags[c]?.length).map((c) => h('div', { class: 'fd-tg' }, h('small', {}, CAT_LABEL[c] || c), h('div', {}, p.tags[c].map((t) => chip(t, c)))));
+      box.replaceChildren(h('div', { class: 'fd-allscroll' }, groups), h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = false), paint(), wake()) }, 'Show fewer'));
+    };
+    paint();
+    box.addEventListener('click', (e) => e.stopPropagation());
+    return box;
+  };
+
+  /* ---------------------------------------------------------------- touch: zoom, taps, holds */
   /** Pinch to zoom (images and video), drag to pan while zoomed. It stays where you leave it; "Reset zoom", a double-tap or moving to another card puts it back. */
   const attachZoom = (card, stage, media) => {
     const z = { s: 1, x: 0, y: 0, moved: false };
@@ -714,15 +228,16 @@ export function renderFeed(root, ctx) {
         pinch = { d: dist(a, b), s: z.s, x: z.x, y: z.y, mid: { x: (ma.x + mb.x) / 2, y: (ma.y + mb.y) / 2 } };
         pan = null;
         z.moved = true;
-      } else if (e.touches.length === 1 && z.s > 1.02) {
-        pan = { px: e.touches[0].clientX, py: e.touches[0].clientY, x: z.x, y: z.y };
+      } else if (e.touches.length === 1) {
         z.moved = false;
+        if (z.s > 1.02) pan = { px: e.touches[0].clientX, py: e.touches[0].clientY, x: z.x, y: z.y };
       }
     }, { passive: true });
     card.addEventListener('touchmove', (e) => {
       if (pinch && e.touches.length === 2) {
         e.preventDefault();
         const [a, b] = e.touches, ma = rel(a), mb = rel(b), mid = { x: (ma.x + mb.x) / 2, y: (ma.y + mb.y) / 2 };
+        if (Math.abs(dist(a, b) - pinch.d) < 12 && z.s <= 1.02) return; // two resting fingers are a hold, not a pinch
         const s = Math.max(1, Math.min(8, (pinch.s * dist(a, b)) / pinch.d));
         const k = s / pinch.s;
         z.s = s;
@@ -746,8 +261,6 @@ export function renderFeed(root, ctx) {
       if (z.s <= 1.02) z.reset();
     }, { passive: true });
     card.addEventListener('touchcancel', () => { pinch = null; pan = null; }, { passive: true });
-    // a drag or pinch is not a tap
-    stage.addEventListener('click', (e) => { if (z.moved) (e.stopImmediatePropagation(), e.preventDefault(), (z.moved = false)); }, true);
     // desktop: ctrl + wheel (or a trackpad pinch) zooms, plain wheel pans while zoomed
     stage.addEventListener('wheel', (e) => {
       if (!e.ctrlKey && z.s <= 1.02) return;
@@ -761,52 +274,65 @@ export function renderFeed(root, ctx) {
       clampPan();
       apply();
     }, { passive: false });
-    z.reset = () => { z.s = 1; z.x = 0; z.y = 0; z.moved = false; apply(); };
+    z.reset = () => { z.s = 1; z.x = 0; z.y = 0; apply(); };
     z.zoomed = () => z.s > 1.02;
     card._zoom = z;
   };
 
-  /** The heaviest few tags like hashtags, and a button that opens the full list (grouped by category, in a scroll box). */
-  const tagBox = (p, model, top) => {
-    const box = h('div', { class: 'fd-tags' });
-    const chip = (t, cat) => h('button', { class: cat ? 'c-' + cat : '', onclick: (e) => (e.stopPropagation(), openSearch(p, t)) }, pretty(t));
-    const total = Object.entries(p.tags).filter(([c]) => c !== 'artist').reduce((n, [, l]) => n + l.length, 0);
-    let all = false;
-    const paint = () => {
-      box.classList.toggle('open', all);
-      if (!all) {
-        box.replaceChildren(...top.map((t) => chip(t)), total > top.length ? h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = true), paint()) }, `View all ${total}`) : null);
-        return;
+  /**
+   * Tap: pause a video / open a picture. Double-tap: like. Press and hold: the post's menu. Two fingers held still: hide the buttons.
+   * A tap that only brings hidden buttons back does nothing else.
+   */
+  const attachGestures = (card, stage, media, p) => {
+    let tapAt = 0, tapT = 0, holdT = 0, held = false, start = null;
+    const stop = () => clearTimeout(holdT);
+    const spread = (e) => (e.touches.length === 2 ? Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY) : 0);
+    stage.addEventListener('touchstart', (e) => {
+      stop();
+      if (e.touches.length === 1) held = false;
+      start = { n: e.touches.length, x: e.touches[0].clientX, y: e.touches[0].clientY, d: spread(e) };
+      if (e.touches.length === 1 && !card._zoom.zoomed()) holdT = setTimeout(() => ((held = true), haptic('heavy'), postMenu(indexOf(card), stage)), 500);
+      else if (e.touches.length === 2) holdT = setTimeout(() => ((held = true), haptic('heavy'), setClean(!view.clean)), 450);
+    }, { passive: true });
+    // the second finger may land on a button, outside the stage
+    card.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2 && !stage.contains(e.target)) {
+        stop();
+        start = { n: 2, x: e.touches[0].clientX, y: e.touches[0].clientY, d: spread(e) };
+        holdT = setTimeout(() => ((held = true), haptic('heavy'), setClean(!view.clean)), 450);
       }
-      const groups = CATS.filter((c) => c !== 'artist' && p.tags[c]?.length).map((c) => h('div', { class: 'fd-tg' }, h('small', {}, CAT_LABEL[c] || c), h('div', {}, p.tags[c].map((t) => chip(t, c)))));
-      box.replaceChildren(h('div', { class: 'fd-allscroll' }, groups), h('button', { class: 'fd-more', onclick: (e) => (e.stopPropagation(), (all = false), paint()) }, 'Show fewer'));
-    };
-    paint();
-    box.addEventListener('click', (e) => e.stopPropagation());
-    return box;
-  };
-
-  const attachTaps = (card, stage, media, p, likeBtn) => {
-    let t = 0, timer = 0;
+    }, { passive: true });
+    card.addEventListener('touchmove', (e) => {
+      if (!start) return;
+      const moved = Math.hypot(e.touches[0].clientX - start.x, e.touches[0].clientY - start.y);
+      if (moved > 12 || (start.n === 2 && Math.abs(spread(e) - start.d) > 14)) stop();
+    }, { passive: true });
+    for (const ev of ['touchend', 'touchcancel']) card.addEventListener(ev, stop, { passive: true });
+    stage.addEventListener('contextmenu', (e) => (e.preventDefault(), !isTouch() && postMenu(indexOf(card), stage)));
     stage.addEventListener('click', (e) => {
+      if (held || card._zoom.moved) return void ((held = false), (card._zoom.moved = false)); // a hold, drag or pinch is not a tap
       if (stage.classList.contains('blur')) return;
+      if (view.clean) return setClean(false);
+      const faded = el.classList.contains('idle');
+      wake();
       const now = Date.now();
-      if (card._zoom?.zoomed()) {
-        if (now - t < 300) (card._zoom.reset(), (t = 0));
-        else t = now;
+      if (card._zoom.zoomed()) {
+        if (now - tapAt < 300) (card._zoom.reset(), (tapAt = 0));
+        else tapAt = now;
         return;
       }
-      if (now - t < 300) {
-        clearTimeout(timer);
-        t = 0;
+      if (now - tapAt < 300) {
+        clearTimeout(tapT);
+        tapAt = 0;
         burst(card, e);
-        if (!modelOf(p.provider).likes.has(p.id) && !p.faved) toggleLike(p, likeBtn, true);
+        if (!isLiked(p)) toggleLike(p);
         return;
       }
-      t = now;
-      timer = setTimeout(() => {
+      tapAt = now;
+      tapT = setTimeout(() => {
+        if (faded) return;
         if (p.kind === 'video') togglePlay(media);
-        else openIt(+card.dataset.i);
+        else openIt(indexOf(card));
       }, 300);
     });
   };
@@ -814,21 +340,38 @@ export function renderFeed(root, ctx) {
   const togglePlay = (v) => {
     if (v.paused) (delete v.dataset.userPaused, v.play().catch(() => {}));
     else (v.dataset.userPaused = '1', v.pause());
+    wake();
   };
 
   const burst = (card, e) => {
     const r = card.getBoundingClientRect();
-    const b = h('div', { class: 'fd-burst', html: icon('heart', 90 ), style: `left:${e.clientX - r.left}px;top:${e.clientY - r.top}px` });
+    const b = h('div', { class: 'fd-burst', html: icon('heart', 90), style: `left:${e.clientX - r.left}px;top:${e.clientY - r.top}px` });
     card.append(b);
     haptic('tick');
     setTimeout(() => b.remove(), 800);
   };
 
+  /** Press-and-hold (or right-click) menu. */
+  function postMenu(i, anchor) {
+    const p = view.items[i]?.post;
+    if (!p) return;
+    el.classList.remove('idle');
+    const item = (label, ic, run, hint) => h('button', { class: 'fd-mi', onclick: () => (closePopover(), run()) }, h('i', { html: icon(ic, 20) }), h('div', {}, h('b', {}, label), hint ? h('small', {}, hint) : null));
+    popover(anchor, h('div', { class: 'fd-set fd-actions' },
+      item('Not interested', 'close', () => skip(i), 'Fewer like this. Nothing is sent to the site'),
+      item(view.clean ? 'Show buttons' : 'Hide buttons', 'eye', () => setClean(!view.clean), 'Or hold two fingers on the post'),
+      item('Rate its tags', 'tag', () => setTimeout(() => tagSheet(menuBtn, p), 60), 'Tell the Feed what you want more or less of'),
+      item('Open post', 'fit', () => openIt(i)),
+      item('Share link', 'share', () => ctx.share?.(p)),
+      isAndroid() ? item(p.kind === 'video' ? 'Share video' : 'Share picture', 'share', () => native.shareFile(p.kind === 'video' ? mediaSrc(p) : p.sample || p.full, `${p.provider}_${p.id}.${p.ext}`)) : null,
+      item('Copy link', 'link', () => (copyText(p.url), toast('Post link copied', { ms: 1400 })))), { align: 'left', cls: 'fd-pop' });
+  }
+
+  /* ---------------------------------------------------------------- the strip of cards */
   const mountCard = (i) => {
     if (i < 0 || i >= view.items.length) return;
     const slot = cards[i];
-    if (!slot || slot.firstChild) return;
-    slot.append(buildCard(i));
+    if (slot && !slot.firstChild) slot.append(buildCard(i));
   };
   const unmountCard = (i) => {
     const slot = cards[i];
@@ -837,40 +380,34 @@ export function renderFeed(root, ctx) {
       slot.replaceChildren();
     }
   };
+  /** Only the video on screen may play (and so make sound). */
+  const hush = (all = false) => {
+    const keep = all ? null : cardAt(view.idx);
+    scroller.querySelectorAll('video').forEach((v) => !keep?.contains(v) && !v.paused && v.pause());
+  };
   const loadMedia = (i, play) => {
-    const m = cards[i]?.querySelector('.fd-media');
+    const m = cardAt(i)?.querySelector('.fd-media');
     if (!m || !m.dataset.src) return;
     if (m.tagName === 'VIDEO' && i > view.idx + 1) return; // only this video and the next one: the others would just compete for the connection
     if (!m.getAttribute('src')) m.src = m.dataset.src;
     if (m.tagName === 'VIDEO') {
       // the next video starts buffering early, but only a small one: a big file would crowd out the pictures and burn mobile data
       if (i === view.idx + 1 && smallVideo(view.items[i]?.post)) m.preload = 'auto';
-      if (play && view.active()) m.play().catch(() => {});
+      if (play && view.active() && !m.dataset.userPaused) m.play().catch(() => {});
       else m.pause();
     }
   };
 
   const addSlot = () => {
-    const i = cards.length;
-    const slot = h('div', { class: 'fd-slot', 'data-i': i });
+    const slot = h('div', { class: 'fd-slot' });
     cards.push(slot);
     scroller.append(slot);
-    return i;
   };
 
   /* --- keeping the queue stocked */
   const ahead = () => Math.max(14, (S('feedPreload') || 20) + 4); // cards lined up past the one on screen, so a swipe never waits for the network
-  const MIN_AHEAD = 5;
-  /** An earlier card, far enough back to feel fresh, shown again. */
-  const recycle = () => {
-    if (view.items.length >= view.idx + MIN_AHEAD || (S('feedMode') || 'foryou') === 'follows') return null; // enough in hand: wait for real posts
-    const ahead = new Set(view.items.slice(view.idx).map((x) => x.post));
-    const old = view.items.slice(0, Math.max(0, view.idx - 12)).filter((x) => !ahead.has(x.post) && !x.post.faved && !modelOf(x.post.provider).likes.has(x.post.id));
-    if (old.length < 8) return null;
-    const it = old[Math.floor(Math.random() * old.length)];
-    return { post: it.post, kind: it.kind };
-  };
-  const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+  const withTimeout = (pr, ms) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]);
+  let run = 0; // a refresh starts a new run: picks still on their way from the old one are dropped
   async function fill() {
     if (view.busy) return void (view.again = true); // run once more when the current round ends
     view.busy = true;
@@ -880,13 +417,12 @@ export function renderFeed(root, ctx) {
         while (view.items.length < view.idx + ahead()) {
           if (!root.isConnected) return;
           if (view.items.length > view.idx + 1 && !view.active()) break; // nothing is looking: do not spend requests
-          let got = await withTimeout(nextPost(view), 40000);
-          if (!got) got = recycle(); // the site is slow or cooling down: never dead-end, repeats are fine
+          const mine = run;
+          const got = await withTimeout(nextPost(view), 40000);
+          if (mine !== run) continue;
           if (!got) break;
           const { post, kind } = got;
-          const it = { post, kind, why: whyOf(post, modelOf(post.provider), kind) };
-          view.items.push(it);
-          view.picks++;
+          view.items.push({ post, kind, why: whyOf(post, kind) });
           addSlot();
           paintEmpty();
           if (view.items.length === 1) activate(0);
@@ -909,19 +445,22 @@ export function renderFeed(root, ctx) {
     const list = enabled();
     if (view.items.length) return void (empty.hidden = true);
     empty.hidden = false;
-    const blocked = list.length && list.every(needsKeyMissing);
-    const cool = list.some((p) => srcOf(p).cool > Date.now());
-    if ((S('feedMode') || 'foryou') === 'follows' && !view.busy && !list.some((p) => subs.all().some((f) => f.p === p.credKey))) return void empty.replaceChildren(h('div', { class: 'fd-loading' }, h('b', {}, 'Follow some artists first'), h('small', {}, 'Follow an artist from the viewer or a search. Their new posts show up here.')));
-    empty.replaceChildren(h('div', { class: 'fd-loading' }, h('i'), h('b', {}, blocked ? 'Add an API key for this site' : cool ? 'The site asked us to slow down' : 'Tuning your feed…'), h('small', {}, blocked ? 'Open Settings > Accounts, or pick another site above.' : cool ? 'Trying again shortly. Requests are spaced out on purpose.' : 'Fetching a first batch.')));
+    const say = (title, text, spin = true) => empty.replaceChildren(h('div', { class: 'fd-loading' }, spin ? h('i') : null, h('b', {}, title), h('small', {}, text)));
+    if (mode() === 'follows' && !view.busy) {
+      if (!list.some((p) => subs.all().some((f) => f.p === p.credKey))) return say('Follow some artists first', 'Their new posts show up here.', false);
+      return say('Looking for new posts', 'Checking the artists you follow, a few at a time.');
+    }
+    if (list.length && list.every(needsKeyMissing)) return say('Add an API key for this site', 'Open the Feed settings and pick another site, or add the key in app settings.', false);
+    if (list.some((p) => srcOf(p).cool > Date.now())) return say('The site asked us to slow down', 'Trying again shortly. Requests are spaced out on purpose.');
+    say('Tuning your feed…', 'Fetching a first batch.');
   };
 
   /* Pictures are downloaded well before they are needed, nearest first, a few at a time (they come from the sites' file servers, not the API). */
   const warmed = new Map(); // url -> Image, kept so the download is not dropped
   let warming = 0;
-  const preloadCount = () => S('feedPreload') || 20;
   function warm() {
     if (!root.isConnected) return;
-    const next = view.items.slice(view.idx + 1, view.idx + 1 + preloadCount()).map((x) => (x.post.kind === 'video' ? x.post.thumb : mediaSrc(x.post)));
+    const next = view.items.slice(view.idx + 1, view.idx + 1 + (S('feedPreload') || 20)).map((x) => (x.post.kind === 'video' ? x.post.thumb : mediaSrc(x.post)));
     while (warming < 4) {
       const url = next.find((u) => u && !warmed.has(u));
       if (!url) break;
@@ -938,14 +477,15 @@ export function renderFeed(root, ctx) {
       if (Math.abs(i - view.idx) <= 2) mountCard(i);
       else unmountCard(i);
     }
-    for (let k = 0; k <= 2; k++) loadMedia(view.idx + k, k === 0);
+    hush();
+    for (let k = 0; k <= 1; k++) loadMedia(view.idx + k, k === 0);
+    loadMedia(view.idx + 2, false);
     warm();
-    // the pictures just behind are kept, the ones far behind are dropped with their card
   };
 
-  /* --- what is on screen now: learn from it */
-  let since = 0, shownT = 0, catBusy = false;
-  /** Categories for the cards about to be seen (not the whole queue): a single paced request, then their text is redrawn. */
+  /* ---------------------------------------------------------------- what is on screen now: learn from it */
+  let since = 0, catBusy = false, activePost = null;
+  /** Categories for the cards about to be seen, where a site sends none: one paced request, then their text is redrawn. */
   async function catsNear() {
     if (catBusy) return;
     catBusy = true;
@@ -958,130 +498,179 @@ export function renderFeed(root, ctx) {
   }
   function activate(i) {
     leave();
-    if (i !== view.idx) cards[view.idx]?.firstChild?._zoom?.reset();
+    if (i !== view.idx) cardAt(view.idx)?._zoom?.reset();
     view.idx = i;
     const it = view.items[i];
     syncWindow();
+    // each video starts with the sound setting as it is now
+    const v = cardAt(i)?.querySelector('video');
+    if (v) {
+      v.muted = S('muted') !== false;
+      delete v.dataset.woke;
+      const b = cardAt(i).querySelector('.fd-btn.sound');
+      if (b) b.innerHTML = icon(v.muted ? 'mute' : 'sound', 24);
+    }
     since = Date.now();
     activePost = it?.post || null;
-    clearTimeout(shownT);
-    if (it) {
-      shownT = setTimeout(() => {
-        const m = modelOf(it.post.provider);
-        if (m.seen.has(it.post.id)) return;
-        m.seen.add(it.post.id);
-        trim(m.seen, m.seenMax);
-        m.taste.learn(it.post, { l: 0, n: 1 });
-        m.save();
-      }, 700);
-    }
+    if (it) (markShown(it.post), paintState(cardAt(i), it.post));
+    wake();
     fill();
     catsNear();
     if (i % 5 === 0) paintSuggest();
+    if (i === 12 && !kv.get('feed:hint:tags', false)) { // said once, ever
+      kv.set('feed:hint:tags', true);
+      toast('Tip: you can tell the Feed which tags you like', { ms: 5000, action: { label: 'Your tags', run: () => tagSheet(menuBtn) } });
+    }
     for (const p of enabled()) { // keep the pool deep: one refill at a time, paced by the gate
       const src = srcOf(p);
       if (!needsKeyMissing(p) && src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now() && view.active()) refill(src, view);
     }
-    scrollSaved = i;
   }
-  let scrollSaved = 0;
   function leave() {
+    unturn();
     if (!activePost) return;
     const ms = Date.now() - since, p = activePost, m = modelOf(p.provider);
     const liked = m.likes.has(p.id);
-    const vid = cards[view.idx]?.querySelector('video');
-    if (ms < 1100 && !liked) {
-      if (m.seen.has(p.id)) m.taste.learn(p, { n: 0.3, post_n: 0 }); // flicked past
-    } else if (!liked && !document.hidden && ms > 0) {
+    const vid = cardAt(view.idx)?.querySelector('video');
+    if (ms < 1100 && !liked) m.taste.learn(p, { n: 0.3, post_n: 0 }); // flicked past
+    else if (!liked && !document.hidden) {
       const watched = vid ? ms > Math.min(14000, (vid.duration || 8) * 1000 * 0.9) : ms > 7000;
       if (watched) m.taste.learn(p, { l: 0.25, n: 0, post_n: 0 }); // stayed a while: a little in its favor
     }
     m.save();
-    clearTimeout(shownT);
     activePost = null;
   }
 
-  let ticking = 0;
+  let ticking = 0, resizing = 0;
   const settle = () => {
+    if (Date.now() < resizing) return;
     const hgt = scroller.clientHeight || 1;
     const i = Math.round(scroller.scrollTop / hgt);
     if (i !== view.idx && i >= 0 && i < view.items.length) activate(i);
   };
   // a short timer rather than a frame callback: frames are not delivered while the window is in the background
   scroller.addEventListener('scroll', () => { clearTimeout(ticking); ticking = setTimeout(settle, 60); }, { passive: true });
+  // turning the phone changes the height of every card: stay on the same one
+  let lastH = 0;
+  const sizer = new ResizeObserver(() => {
+    const hgt = scroller.clientHeight;
+    if (!hgt || hgt === lastH) return;
+    if (lastH) {
+      resizing = Date.now() + 500;
+      scroller.scrollTop = view.idx * hgt;
+      setTimeout(() => (scroller.scrollTop = view.idx * scroller.clientHeight), 250);
+      wake();
+    }
+    lastH = hgt;
+  });
+  sizer.observe(scroller);
 
-  /* --- actions */
+  /* ---------------------------------------------------------------- sideways video */
+  let turned = false;
+  function turn() {
+    turned = !turned;
+    native.orientation(turned ? 'landscape' : 'auto');
+  }
+  function unturn() {
+    if (turned) (turned = false), native.orientation('auto');
+  }
+
+  /* ---------------------------------------------------------------- actions */
   const goTo = (i) => {
     i = Math.max(0, Math.min(cards.length - 1, i));
-    const top = i * scroller.clientHeight;
-    scroller.scrollTo({ top, behavior: 'smooth' });
+    const y = i * scroller.clientHeight;
+    scroller.scrollTo({ top: y, behavior: 'smooth' });
     clearTimeout(view.snapT); // some web views drop a smooth scroll that snap points interrupt: finish it by hand
-    view.snapT = setTimeout(() => Math.abs(scroller.scrollTop - top) > 2 && scroller.scrollTo({ top, behavior: 'instant' }), 650);
+    view.snapT = setTimeout(() => Math.abs(scroller.scrollTop - y) > 2 && scroller.scrollTo({ top: y, behavior: 'instant' }), 650);
+  };
+  const repaint = (p) => view.items.forEach((it, i) => it.post === p && paintState(cardAt(i), p));
+  const setUp = (p, on) => {
+    voted.set(p, on);
+    p.myVote = on ? 1 : 0;
   };
 
-  async function toggleLike(p, btn, onlyAdd = false) {
+  /** The heart: favorite it, and (like a double-tap in the viewer) upvote it too. Both buttons show what happened. */
+  async function toggleLike(p) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
-    const was = m.likes.has(p.id) || !!p.faved;
-    const want = onlyAdd ? true : !was;
-    if (want === was) return;
+    const want = !isLiked(p);
     if (want) { m.likes.add(p.id); m.taste.learn(p, { l: 1, n: 0, post_n: 0 }); }
-    else { m.likes.delete(p.id); m.taste.learn(p, { l: -1, n: 0, post_n: 0 }); }
-    btn?.classList.toggle('on', want);
+    else { m.likes.delete(p.id); p.faved = false; m.taste.learn(p, { l: -1, n: 0, post_n: 0 }); }
     haptic(want ? 'tick' : 'soft');
     m.save();
-    if (S('feedSyncLikes')) {
-      const c = (S('creds') || {})[prov.credKey];
-      if (c?.user && c?.key) {
-        try {
-          const jobs = [];
-          if (prov.fav) jobs.push(prov.setFav(p, want).then(() => { p.faved = want; }));
-          if (want && prov.vote && !voted.has(p)) jobs.push(prov.setVote(p, 1, true).then(() => voted.set(p, true)));
-          await Promise.all(jobs);
-        } catch (e) {
-          toast(`Liked here, but ${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
-        }
-      } else if (want && !view.hintLike && (prov.fav || prov.vote)) {
-        view.hintLike = true;
-        toast('Saved to your taste. Sign in under Settings to favorite on the site too', { ms: 3200 });
-      }
+    const online = signedIn(prov) && S('feedSyncLikes');
+    if (want && prov.vote && !signedIn(prov)) setUp(p, true); // signed out: remembered here
+    repaint(p);
+    if (online) {
+      const jobs = [];
+      if (prov.fav) jobs.push(prov.setFav(p, want).then(() => { p.faved = want; }));
+      if (want && prov.vote && !isUp(p)) jobs.push(prov.setVote(p, 1, true).then(() => setUp(p, true)));
+      const failed = (await Promise.allSettled(jobs)).find((r) => r.status === 'rejected');
+      if (failed) toast(`Liked here, but ${prov.name} said: ${failed.reason.message}`, { kind: 'err', ms: 3600 });
+      repaint(p);
+    } else if (want && !signedIn(prov) && !view.hintLike && (prov.fav || prov.vote)) {
+      view.hintLike = true;
+      toast('Saved to your taste. Sign in under Settings to favorite on the site too', { ms: 3200 });
     }
   }
 
-  const signedIn = (prov) => { const c = (S('creds') || {})[prov.credKey]; return !!(c?.user && c?.key) && S('feedSyncLikes'); };
-
-  async function upvote(p, btn) {
+  async function upvote(p) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
-    let on = !voted.has(p);
+    let on = !isUp(p);
     haptic('tick');
-    if (prov.vote && signedIn(prov)) {
+    if (prov.vote && signedIn(prov) && S('feedSyncLikes')) {
       try {
         const r = await prov.setVote(p, 1);
         if (r?.our_score != null) on = r.our_score > 0;
       } catch (e) {
         return toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3600 });
       }
-      toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1100 });
-    } else toast(on ? (prov.vote ? 'Counted in your taste. Sign in to upvote on the site too' : 'Counted in your taste') : 'Upvote removed', { ms: 1600 });
-    voted.set(p, on);
-    btn?.classList.toggle('on', on);
-    if (on && !m.likes.has(p.id)) { m.likes.add(p.id); m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 }); m.save(); }
+    }
+    setUp(p, on);
+    if (on && !m.likes.has(p.id)) m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 });
+    m.save();
+    toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1100 });
+    repaint(p);
   }
 
-  function dislike(i, vote = false) {
+  async function downvote(i) {
     const p = view.items[i]?.post;
     if (!p) return;
     const prov = getProvider(p.provider);
-    if (vote && prov.vote && signedIn(prov)) prov.setVote(p, -1).catch((e) => toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3000 }));
-    const m = modelOf(p.provider);
-    m.taste.learn(p, { n: 1.5, post_n: 0.5 });
-    m.seen.add(p.id);
-    m.save();
+    haptic('tick');
+    notInterested(p);
+    voted.set(p, false);
+    p.myVote = -1;
+    repaint(p);
+    toast('Downvoted. Fewer like this', { ms: 1400 });
+    goTo(i + 1);
+    if (prov.vote && signedIn(prov) && S('feedSyncLikes')) {
+      try {
+        const r = await prov.setVote(p, -1, true);
+        if (r?.our_score != null) p.myVote = r.our_score;
+      } catch (e) {
+        toast(`${prov.name} said: ${e.message}`, { kind: 'err', ms: 3000 });
+      }
+    }
+  }
+
+  /** "Not interested": teaches the Feed, tells the site nothing. */
+  function skip(i) {
+    const p = view.items[i]?.post;
+    if (!p) return;
+    notInterested(p);
     haptic('tick');
     toast('Got it, fewer like this', { ms: 1400 });
     goTo(i + 1);
   }
 
+  async function download(p, again = false) {
+    if (saved.has(p) && !again) return void toast('Already downloaded', { action: { label: 'Download again', run: () => download(p, true) }, ms: 3500 });
+    await ctx.savePost?.(p);
+    repaint(p);
+  }
+
   function openIt(i) {
+    hush(true);
     const g = {
       viewList: () => view.items.map((x) => x.post),
       itemIndexOfView: (v) => v,
@@ -1092,46 +681,136 @@ export function renderFeed(root, ctx) {
     ctx.openViewer(g, i, null);
   }
 
-  function openSearch(p, tag) {
-    ctx.go(ctx.roamHash([{ t: tag, op: '+' }], null, p.provider));
+  function openSearch(p, t) {
+    hush(true);
+    ctx.go(ctx.roamHash([{ t, op: '+' }], null, p.provider));
   }
 
-  /* --- on-device learning from likes made anywhere (the viewer's heart, double-tap, upvote) */
-  const offLike = on('post-like', (e) => {
-    const { post, on: yes, vote } = e.detail;
-    const m = modelOf(post.provider);
-    if (yes && !m.likes.has(post.id)) { m.likes.add(post.id); m.taste.learn(post, { l: vote ? 0.7 : 1, n: 0, post_n: 0 }); m.save(); }
-    else if (!yes && m.likes.has(post.id)) { m.likes.delete(post.id); m.taste.learn(post, { l: -1, n: 0, post_n: 0 }); m.save(); }
-    const card = cards[view.items.findIndex((x) => x.post === post)];
-    card?.querySelector(vote ? '.fd-btn.up' : '.fd-btn.like')?.classList.toggle('on', !!yes);
-  });
+  /* ---------------------------------------------------------------- outside events */
+  const offs = [
+    // likes made anywhere (the viewer's heart, double-tap, upvote) teach the Feed too
+    on('post-like', (e) => {
+      const { post, on: yes, vote } = e.detail;
+      const m = modelOf(post.provider);
+      if (!vote) {
+        if (yes && !m.likes.has(post.id)) { m.likes.add(post.id); m.taste.learn(post, { l: 1, n: 0, post_n: 0 }); }
+        else if (!yes && m.likes.has(post.id)) { m.likes.delete(post.id); m.taste.learn(post, { l: -1, n: 0, post_n: 0 }); }
+      } else if (yes && !m.likes.has(post.id)) m.taste.learn(post, { l: 0.7, n: 0, post_n: 0 });
+      m.save();
+      repaint(post);
+    }),
+    on('saved', paintAll),
+    on('pins-changed', paintAll),
+    on('feed-learn', (e) => !e.detail.running && paintSuggest()),
+  ];
 
-  const offLearn = on('feed-learn', (e) => !e.detail.running && paintSuggest());
-
-  /* --- keys (arrows / J K / L / X / Enter) while the Feed is what you are looking at */
   const onKey = (e) => {
-    if (!view.active() || e.ctrlKey || e.metaKey || e.altKey || e.target.matches('input,textarea,select,[contenteditable]')) return;
+    if (!view.active() || e.ctrlKey || e.metaKey || e.altKey || e.target.matches?.('input,textarea,select,[contenteditable]')) return;
     const p = view.items[view.idx]?.post;
     const k = e.key;
     if (k === 'ArrowDown' || k === 'j' || k === 'PageDown') (e.preventDefault(), goTo(view.idx + 1));
     else if (k === 'ArrowUp' || k === 'k' || k === 'PageUp') (e.preventDefault(), goTo(view.idx - 1));
-    else if (k === 'l' || k === 'L') p && toggleLike(p, cards[view.idx]?.querySelector('.fd-btn.like'));
-    else if (k === 'x' || k === 'X') dislike(view.idx, true);
-    else if (k === 'u' || k === 'U') p && upvote(p, cards[view.idx]?.querySelector('.fd-btn[aria-label=Upvote]'));
+    else if (k === 'l' || k === 'L') p && toggleLike(p);
+    else if (k === 'x' || k === 'X') downvote(view.idx);
+    else if (k === 'n' || k === 'N') skip(view.idx);
+    else if (k === 'u' || k === 'U') p && upvote(p);
+    else if (k === 'h' || k === 'H') setClean(!view.clean);
     else if (k === 'Enter') (e.preventDefault(), openIt(view.idx));
-    else if (k === 'd' || k === 'D') p && ctx.savePost?.(p);
+    else if (k === 'd' || k === 'D') p && download(p);
     else if (k === ' ') {
-      const v = cards[view.idx]?.querySelector('video');
+      const v = cardAt(view.idx)?.querySelector('video');
       if (v) (e.preventDefault(), togglePlay(v));
     }
   };
   addEventListener('keydown', onKey);
 
-  /* --- settings popover */
+  /* tapping Feed again while on it: the first tap says so, the second refreshes */
+  let tappedFeed = 0;
+  const onRetap = (e) => {
+    if (!view.active() || !e.target.closest?.('a[data-view="feed"]')) return; // the nav link only: <body> carries data-view too
+    e.preventDefault();
+    e.stopPropagation();
+    if (Date.now() - tappedFeed < 3000) {
+      tappedFeed = 0;
+      refreshFeed();
+    } else {
+      tappedFeed = Date.now();
+      toast('Tap Feed again to refresh', { ms: 2200 });
+    }
+  };
+  document.addEventListener('click', onRetap, true);
+
+  /* ---------------------------------------------------------------- your say on tags */
+  const SAYS = [[-2, 'Never'], [-1, 'Less'], [1, 'More'], [2, 'Love']];
+  /** One row per tag: what was learned about it, and four buttons to overrule that. */
+  const tagRow = (prov, tag) => {
+    const m = modelOf(prov), row = h('div', { class: 'fd-tr' });
+    const paint = () => {
+      const said = m.taste.r[tag] || 0, lift = m.taste.lift(tag);
+      const cat = tagc.get(prov.id, tag)?.cat || 'general';
+      const learned = !m.taste.t[tag] ? 'not seen much yet' : m.taste.likes < 4 ? 'not enough to say yet' : lift > 0.8 ? 'you like it a lot' : lift > 0.25 ? 'you like it' : lift < -0.6 ? 'you tend to skip it' : lift < -0.2 ? 'not your favorite' : 'no strong opinion';
+      row.replaceChildren(
+        h('div', { class: 'fd-tr-name' }, h('b', { style: `color:var(--c-${cat})` }, pretty(tag)), h('small', {}, said ? 'set by you' : learned),
+          h('i', { class: 'fd-meter' + (lift < 0 ? ' neg' : '') }, h('i', { style: `width:${Math.round(Math.min(1, Math.abs(lift) / (lift < 0 ? 1.5 : 3)) * 100)}%` }))),
+        h('div', { class: 'fd-says' }, SAYS.map(([v, label]) => h('button', { class: (said === v ? 'on ' : '') + (v < 0 ? 'neg' : ''), onclick: (e) => { e.stopPropagation(); m.taste.say(tag, said === v ? 0 : v); m.save(); if (v === -2 && said !== v) dropUpcoming(true); paint(); } }, label))));
+    };
+    paint();
+    return row;
+  };
+  /** The tags sheet: everything the Feed has an opinion on (or just the tags of one post), and a box to add any other tag. */
+  function tagSheet(anchor, post) {
+    el.classList.remove('idle');
+    const provs = post ? [getProvider(post.provider)] : enabled().filter((p, i, a) => a.findIndex((x) => x.credKey === p.credKey) === i);
+    let prov = provs[0];
+    const list = h('div', { class: 'fd-trs' });
+    const paint = () => {
+      const m = modelOf(prov);
+      const tags = post ? [...new Set([...post.artists, ...heaviestTags(post, 40)])] : m.taste.opinions().map((x) => x.tag);
+      list.replaceChildren(...(tags.length ? tags.map((t) => tagRow(prov, t)) : [h('small', {}, 'Nothing learned yet. Add a tag above, or like a few posts.')]));
+    };
+    const input = h('input', { class: 'input', placeholder: 'Add any tag, e.g. dragon', spellcheck: 'false', autocapitalize: 'off' });
+    const add = () => {
+      const t = input.value.trim().toLowerCase().replace(/\s+/g, '_');
+      if (!t) return;
+      input.value = '';
+      list.prepend(tagRow(prov, t));
+    };
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), add()));
+    const pickSite = provs.length > 1 ? segmented(provs.map((p) => [p.id, p.name]), prov.id, (v) => { prov = getProvider(v); paint(); }) : null;
+    paint();
+    popover(anchor, h('div', { class: 'fd-set' },
+      h('h4', {}, post ? 'Tags on this post' : 'Your tags'),
+      h('small', { class: 'fd-hint' }, 'Never hides every post with the tag. Less and More nudge the Feed. Tap again to take it back.'),
+      pickSite,
+      post ? null : h('div', { class: 'fd-add' }, input, h('button', { class: 'btn', onclick: add }, 'Add')),
+      list), { align: 'right', cls: 'fd-pop' });
+  }
+
+  /* ---------------------------------------------------------------- settings */
+  const suggestList = () => {
+    const list = h('div', { class: 'fd-sugg-list' });
+    const paint = () => {
+      const items = suggestions();
+      list.replaceChildren(...(items.length ? items.map((s) => h('div', { class: 'fd-sugg', style: `--ph:${s.prov.color}` },
+        h('button', { class: 'fd-sugg-name', onclick: () => (closePopover(), openSearch({ provider: s.prov.id }, s.name)) }, h('b', {}, pretty(s.name)), h('small', {}, `${s.prov.name} · liked ${Math.round(s.v)}`)),
+        h('button', { class: 'btn primary', onclick: () => { follow(s.name, s.prov.id); paint(); paintSuggest(); } }, 'Follow'),
+        h('button', { class: 'ibtn', title: 'Not this one', 'aria-label': 'Dismiss', html: icon('close', 16), onclick: () => { dismissSuggestion(s.key); paint(); paintSuggest(); } }))) : [h('small', {}, 'Nobody to suggest right now.')]));
+    };
+    paint();
+    return list;
+  };
+
   function feedSettings(anchor) {
+    el.classList.remove('idle');
     const body = h('div', { class: 'fd-set' });
     const row = (label, hint, ctl) => h('div', { class: 'fd-row' }, h('div', {}, h('b', {}, label), hint ? h('small', {}, hint) : null), ctl);
     const tgl = (key, after) => { const b = h('button', { class: 'tgl' + (S(key) ? ' on' : ''), role: 'switch', onclick: () => { setS(key, !S(key)); b.classList.toggle('on', S(key)); after?.(); } }, h('i')); return b; };
+    const sites = h('div', { class: 'fd-sites' });
+    const paintSites = () => {
+      const picked = new Set(S('feedSources') || []);
+      sites.replaceChildren(...providerList.map((p) => h('button', { class: 'fd-chip' + (picked.has(p.id) ? ' on' : ''), style: `--ph:${p.color}`, title: p.name + (needsKeyMissing(p) ? ' (needs an API key)' : ''), onclick: () => (toggleSource(p), paintSites()) }, h('b', {}, p.short), h('span', {}, p.name))));
+    };
+    paintSites();
     const out = h('output', {}, (S('feedExplore') || 0) + '%');
     const sl = h('input', { type: 'range', min: 0, max: 60, step: 5, value: S('feedExplore') || 0, oninput: () => { setS('feedExplore', +sl.value); out.textContent = sl.value + '%'; } });
     const provs = enabled();
@@ -1139,48 +818,70 @@ export function renderFeed(root, ctx) {
     const paintStats = () => {
       stats.replaceChildren(...provs.map((p) => {
         const m = modelOf(p), t = m.taste;
-        const top = t.interests(undefined, 6, (f) => tagc.get(p.id, f)?.cat ?? null).map((x) => pretty(x.tag));
+        const likes = t.interests(undefined, 6, (f) => tagc.get(p.id, f)?.cat ?? null).map((x) => pretty(x.tag));
         const can = canLearn(p);
         return h('div', { class: 'fd-stat', style: `--ph:${p.color}` },
           h('div', { class: 'fd-stat-h' }, h('i', { class: 'prov-dot' }, p.short), h('b', {}, p.name), h('small', {}, `${m.likes.size} liked · ${Math.round(t.pn)} shown`)),
-          h('p', {}, top.length ? 'Learning: ' + top.join(', ') : t.ready ? 'Still finding your pattern.' : 'Not enough yet: like a few things' + (can ? ', or read your favorites below.' : '.')),
+          h('p', {}, likes.length ? 'Learning: ' + likes.join(', ') : t.ready ? 'Still finding your pattern.' : 'Not enough yet: like a few things' + (can ? ', or read your favorites below.' : '.')),
           can ? h('button', { class: 'btn', onclick: async (e) => { e.currentTarget.disabled = true; await learnAccount(p, { force: true }); paintStats(); } }, learning.has(p.credKey) ? 'Reading…' : 'Read my favorites again') : h('small', { class: 'dim' }, p.fav || p.vote ? 'Sign in under Settings to learn from your favorites' : `${p.name} has no favorites: hearts in the Feed teach it`));
       }));
     };
     paintStats();
+    const wanted = suggestions().length;
     body.append(
       h('h4', {}, 'Your Feed'),
+      h('small', { class: 'fd-hint' }, MENU_HINT),
+      h('div', { class: 'fd-sub' }, 'Sites'), sites,
       row('Exploring', 'How much is deliberately outside your taste', h('div', { class: 'fd-slide' }, sl, out)),
       row('Preload ahead', 'How many posts download before you reach them (more uses more data)', segmented([[8, '8'], [20, '20'], [40, '40']], S('feedPreload') || 20, (v) => { setS('feedPreload', v); fill(); warm(); })),
-      row('New from follows jump the queue', 'Fresh posts from artists you follow, about one card in three', tgl('feedFollows')),
-      row('Likes go to the site', 'A heart also favorites and upvotes there when you are signed in', tgl('feedSyncLikes')),
-      row('Learn from my favorites', 'Reads your favorites and upvotes (a few requests, then a quick top-up every 12 hours)', tgl('feedLearn', () => autoLearn())),
-      suggestions().length ? h('h4', {}, 'Artists you keep liking') : null,
-      suggestions().length ? suggestList() : null,
+      row('New from follows', 'Mix in fresh posts from artists you follow', tgl('feedFollows')),
+      row('Likes go to the site', 'Hearts and votes also happen there when you are signed in', tgl('feedSyncLikes')),
+      row('Learn from my favorites', 'Reads your favorites and upvotes once, then a quick top-up every 12 hours', tgl('feedLearn', () => autoLearn())),
+      wanted ? h('h4', {}, 'Artists you keep liking') : null,
+      wanted ? suggestList() : null,
+      h('button', { class: 'btn primary', onclick: () => (closePopover(), tagSheet(menuBtn)) }, 'Your tags: rate what you like'),
       stats,
+      h('div', { class: 'fd-btnrow' },
+        h('button', { class: 'btn', onclick: () => (closePopover(), refreshFeed()) }, 'Refresh feed'),
+        h('button', { class: 'btn', onclick: () => (closePopover(), ctx.openSettings?.()) }, 'App settings')),
       h('button', { class: 'btn danger', onclick: async () => {
         if (!await confirmDlg('Forget what the Feed learned?', 'This clears taste and the list of posts already shown, on this device. Favorites on the sites are not touched.', 'Forget')) return;
         provs.forEach((p) => modelOf(p).reset());
         closePopover();
-        dropUpcoming(true);
+        refreshFeed({ fromScratch: true });
         toast('Feed taste reset');
         autoLearn();
-        fill();
       } }, 'Forget my taste on this device'));
     popover(anchor, body, { align: 'right', cls: 'fd-pop' });
   }
 
-  /** New cards from scratch (what was already shown stays "seen"). At most one every 8 s, and the same pacing applies to the requests. */
+  function toggleSource(p) {
+    const cur = new Set(S('feedSources') || []);
+    if (cur.has(p.id)) {
+      if (cur.size === 1) return toast('The Feed needs at least one site', { ms: 1800 });
+      cur.delete(p.id);
+    } else {
+      cur.add(p.id);
+      if (needsKeyMissing(p)) toast(`${p.name} needs an API key: add it in Settings`, { kind: 'err', ms: 3000 });
+    }
+    setS('feedSources', [...cur]);
+    dropUpcoming();
+    autoLearn();
+    fill();
+  }
+
+  /* ---------------------------------------------------------------- starting over */
   let lastRefresh = 0;
-  function refreshFeed(force = false) {
-    if (!force && Date.now() - lastRefresh < 8000) return toast('Just refreshed', { ms: 1200 });
+  /** New cards (what was already shown stays seen). In For you the posts already fetched are reused, so it is instant. */
+  function refreshFeed({ fromScratch = false } = {}) {
+    if (!fromScratch && Date.now() - lastRefresh < 4000) return toast('Just refreshed', { ms: 1200 });
     lastRefresh = Date.now();
     leave();
-    // pulling down in For you reuses the pool already in hand (new picks, instantly); switching mode starts from scratch
-    const keepPool = !force && (S('feedMode') || 'foryou') === 'foryou';
-    for (const s of srcs.values()) (keepPool ? 0 : ((s.pool = []), (s.streams = null), (s.hotLevel = 0)));
-    dropUpcoming(true, keepPool);
-    view.picks = 0;
+    run++;
+    const keepPool = !fromScratch && mode() === 'foryou';
+    if (!keepPool) dropPools({ all: true });
+    view.items.length = 0;
+    while (cards.length) (unmountCard(cards.length - 1), cards.pop().remove());
     view.idx = 0;
     scroller.scrollTop = 0;
     paintEmpty();
@@ -1192,13 +893,26 @@ export function renderFeed(root, ctx) {
     }
   }
 
+  /** Drops the cards picked ahead: those from sites that are no longer on, or (recheck) any that now carry a banned tag. */
+  function dropUpcoming(recheck = false) {
+    const keep = new Set(enabled().map((p) => p.id));
+    run++;
+    const tail = view.items.splice(view.idx + 1).filter((x) => keep.has(x.post.provider) && !(recheck && modelOf(x.post.provider).taste.banned(x.post)));
+    while (cards.length > view.items.length) (unmountCard(cards.length - 1), cards.pop().remove());
+    for (const x of tail) (view.items.push(x), addSlot());
+    dropPools();
+    syncWindow();
+    paintEmpty();
+    if (recheck) fill();
+  }
+
   /* pull down on the first card to refresh */
   let pull = null;
   scroller.addEventListener('touchstart', (e) => { pull = scroller.scrollTop <= 0 && e.touches.length === 1 ? { y: e.touches[0].clientY, dy: 0 } : null; }, { passive: true });
   scroller.addEventListener('touchmove', (e) => {
     if (!pull) return;
     pull.dy = e.touches[0].clientY - pull.y;
-    if (pull.dy < 0 || scroller.scrollTop > 0) return (pull = null), pullEl.classList.remove('show');
+    if (pull.dy < 0 || scroller.scrollTop > 0 || e.touches.length > 1) return (pull = null), pullEl.classList.remove('show');
     pullEl.style.setProperty('--p', Math.min(1, pull.dy / 110));
     pullEl.classList.toggle('show', pull.dy > 12);
     pullEl.classList.toggle('go', pull.dy > 110);
@@ -1212,19 +926,6 @@ export function renderFeed(root, ctx) {
   scroller.addEventListener('touchend', endPull, { passive: true });
   scroller.addEventListener('touchcancel', () => (pull = null, pullEl.classList.remove('show', 'go')), { passive: true });
 
-
-  /** Posts picked ahead from sites that are no longer on, or after a reset. */
-  function dropUpcoming(all = false, keepPool = false) {
-    const keep = new Set(enabled().map((p) => p.id));
-    const tail = view.items.splice(view.idx + 1).filter((x) => !all && keep.has(x.post.provider));
-    while (cards.length > view.idx + 1) (unmountCard(cards.length - 1), cards.pop().remove());
-    if (all && view.items.length) { view.items.length = 0; while (cards.length) cards.pop().remove(); view.idx = 0; }
-    for (const x of tail) (view.items.push(x), addSlot());
-    syncWindow();
-    for (const s of srcs.values()) if ((all && !keepPool) || !keep.has(s.prov.id)) (s.pool = []), (s.fresh = []);
-    paintEmpty();
-  }
-
   function autoLearn() {
     if (!S('feedLearn')) return;
     for (const p of enabled()) if (canLearn(p)) learnAccount(p);
@@ -1232,7 +933,6 @@ export function renderFeed(root, ctx) {
 
   /* --- background upkeep while the Feed is open: follow checks, a top-up of pools */
   const upkeep = setInterval(() => {
-    if (!root.isConnected) return;
     if (!view.active()) return;
     for (const p of enabled()) {
       if (needsKeyMissing(p)) continue;
@@ -1242,22 +942,37 @@ export function renderFeed(root, ctx) {
     }
     if (view.items.length < view.idx + ahead()) fill();
   }, 20000);
-  const onVis = () => { if (!document.hidden) { fill(); loadMedia(view.idx, true); } else cards[view.idx]?.querySelector('video')?.pause(); };
+  const onVis = () => { if (!document.hidden) { fill(); loadMedia(view.idx, true); } else hush(true); };
   document.addEventListener('visibilitychange', onVis);
+  // leaving for another screen: silence at once
+  const onHash = () => setTimeout(() => { if (!view.active()) (hush(true), unturn()); }, 0);
+  addEventListener('hashchange', onHash);
   // pause video when the viewer or another page covers the feed, and resume when it comes back
   const watch = setInterval(() => {
-    if (!root.isConnected) { clearInterval(watch); clearInterval(upkeep); unsub(); offLike(); offLearn(); removeEventListener('keydown', onKey); document.removeEventListener('visibilitychange', onVis); leave(); return; }
-    const v = cards[view.idx]?.querySelector('video');
-    if (v) (view.active() && v.paused && !v.dataset.userPaused ? v.play().catch(() => {}) : !view.active() && v.pause());
-  }, 1500);
+    if (!root.isConnected) {
+      clearInterval(watch);
+      clearInterval(upkeep);
+      offs.forEach((off) => off());
+      sizer.disconnect();
+      removeEventListener('keydown', onKey);
+      removeEventListener('hashchange', onHash);
+      document.removeEventListener('click', onRetap, true);
+      document.removeEventListener('visibilitychange', onVis);
+      hush(true);
+      leave();
+      return;
+    }
+    if (!view.active()) return hush(true);
+    hush();
+    const v = cardAt(view.idx)?.querySelector('video');
+    if (v && v.paused && !v.dataset.userPaused) v.play().catch(() => {});
+  }, 700);
 
-  /* --- go */
-  paintChips();
-  paintModes();
+  /* ---------------------------------------------------------------- go */
+  paintTabs();
   paintEmpty();
   paintSuggest();
   setTimeout(autoLearn, 15000); // reading favorites can wait: the first cards come first
-  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, 8000);
+  setTimeout(() => { for (const p of enabled()) !needsKeyMissing(p) && followTick(srcOf(p), view); }, mode() === 'follows' ? 0 : 8000);
   fill();
 }
-
