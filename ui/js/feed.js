@@ -12,6 +12,7 @@ import { haptic, isAndroid, isTouch, native } from './platform.js';
 import {
   SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
   isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools, feel, likely, putBack,
+  styleOn, styleLike, seedStyle, scout,
 } from './feedengine.js';
 
 const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
@@ -576,7 +577,7 @@ export function renderFeed(root, ctx, list = null) {
   };
 
   /* ---------------------------------------------------------------- what is on screen now: learn from it */
-  let since = 0, catBusy = false, activePost = null, activePostSet = false;
+  let since = 0, catBusy = false, activePost = null, activePostSet = false, activePostsSeen = 0;
   /** Categories for the cards about to be seen, where a site sends none: one paced request, then their text is redrawn. */
   async function catsNear() {
     if (catBusy) return;
@@ -620,6 +621,8 @@ export function renderFeed(root, ctx, list = null) {
       const src = srcOf(p);
       if (!needsKeyMissing(p) && src.pool.length < POOL_LOW && !src.filling && src.cool <= Date.now() && view.active()) refill(src, view);
     }
+    clearTimeout(view.scoutT);
+    view.scoutT = setTimeout(() => root.isConnected && view.active() && scout(view), activePostsSeen++ ? 900 : 5000); // not while a swipe or the first cards need the device
   }
   function leave() {
     unturn();
@@ -633,7 +636,7 @@ export function renderFeed(root, ctx, list = null) {
       if (!liked) (m.taste.learn(p, { n: 0.1, post_n: 0 }), react(p, -0.25));
     } else if (!liked && !document.hidden && ms < 90000) {
       const stayed = vid ? ms > Math.min(10000, (vid.duration || 8) * 700) : ms > 4500;
-      if (stayed) (m.taste.learn(p, { l: 0.12, n: 0, post_n: 0 }), react(p, vid || ms > 9000 ? 0.5 : 0.3));
+      if (stayed) (m.taste.learn(p, { l: 0.12, n: 0, post_n: 0 }), react(p, vid || ms > 9000 ? 0.5 : 0.3), styleLike(p, 0.15));
     }
     m.save();
     activePost = null;
@@ -746,8 +749,8 @@ export function renderFeed(root, ctx, list = null) {
   async function toggleLike(p, { vote = false } = {}) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
     const want = !isLiked(p);
-    if (want) { m.likes.add(p.id); m.taste.learn(p, { l: 1, n: 0, post_n: 0 }); }
-    else { m.likes.delete(p.id); p.faved = false; m.taste.learn(p, { l: -1, n: 0, post_n: 0 }); }
+    if (want) { m.likes.add(p.id); m.taste.learn(p, { l: 1, n: 0, post_n: 0 }); styleLike(p, 1); }
+    else { m.likes.delete(p.id); p.faved = false; m.taste.learn(p, { l: -1, n: 0, post_n: 0 }); styleLike(p, -1); }
     haptic(want ? 'tick' : 'soft');
     m.save();
     react(p, want ? 1 : -0.5);
@@ -777,7 +780,7 @@ export function renderFeed(root, ctx, list = null) {
     haptic('tick');
     castVote(p, on ? 1 : 0);
     react(p, on ? 0.8 : -0.4);
-    if (on && !m.likes.has(p.id)) m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 });
+    if (on && !m.likes.has(p.id)) (m.taste.learn(p, { l: 0.8, n: 0, post_n: 0 }), styleLike(p, 0.8));
     m.save();
     toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1100 });
   }
@@ -837,9 +840,9 @@ export function renderFeed(root, ctx, list = null) {
       const { post, on: yes, vote } = e.detail;
       const m = modelOf(post.provider);
       if (!vote) {
-        if (yes && !m.likes.has(post.id)) { m.likes.add(post.id); m.taste.learn(post, { l: 1, n: 0, post_n: 0 }); }
-        else if (!yes && m.likes.has(post.id)) { m.likes.delete(post.id); m.taste.learn(post, { l: -1, n: 0, post_n: 0 }); }
-      } else if (yes && !m.likes.has(post.id)) m.taste.learn(post, { l: 0.7, n: 0, post_n: 0 });
+        if (yes && !m.likes.has(post.id)) { m.likes.add(post.id); m.taste.learn(post, { l: 1, n: 0, post_n: 0 }); styleLike(post, 1); }
+        else if (!yes && m.likes.has(post.id)) { m.likes.delete(post.id); m.taste.learn(post, { l: -1, n: 0, post_n: 0 }); styleLike(post, -1); }
+      } else if (yes && !m.likes.has(post.id)) (m.taste.learn(post, { l: 0.7, n: 0, post_n: 0 }), styleLike(post, 0.7));
       m.save();
       repaint(post);
       if (yes && !solo) (clearTimeout(restirT), (restirT = setTimeout(restir, 600))); // today's mood heard it too
@@ -985,6 +988,7 @@ export function renderFeed(root, ctx, list = null) {
         return h('div', { class: 'fd-stat', style: `--ph:${p.color}` },
           h('div', { class: 'fd-stat-h' }, h('i', { class: 'prov-dot' }, p.short), h('b', {}, p.name), h('small', {}, `${m.likes.size} liked · ${Math.round(t.pn)} shown`)),
           h('p', {}, likes.length ? 'Learning: ' + likes.join(', ') : t.ready ? 'Still finding your pattern.' : 'Not enough yet: like a few things' + (can ? ', or read your favorites below.' : '.')),
+          styleOn() ? h('small', { class: 'dim' }, m.style.known ? 'Art style: learned, and updating as you go' : 'Art style: not learned yet') : null,
           can ? h('button', { class: 'btn', onclick: async (e) => { e.currentTarget.disabled = true; await learnAccount(p, { force: true }); paintStats(); } }, learning.has(p.credKey) ? 'Reading…' : 'Read my favorites again') : h('small', { class: 'dim' }, p.fav || p.vote ? 'Sign in under Settings to learn from your favorites' : `${p.name} has no favorites: hearts in the Feed teach it`));
       }));
     };
@@ -1001,6 +1005,7 @@ export function renderFeed(root, ctx, list = null) {
       row('New from follows', 'Mix in fresh posts from artists you follow', tgl('feedFollows')),
       row('Likes go to the site', 'Hearts and votes also happen there when you are signed in', tgl('feedSyncLikes')),
       row('Learn from my favorites', 'Reads your favorites and upvotes once, then a quick top-up every 12 hours', tgl('feedLearn', () => autoLearn())),
+      row('Match art style', 'Compares thumbnails with what you like, on this device. Uses a little more battery', tgl('feedStyle', () => (autoLearn(), paintStats()))),
       wanted ? h('h4', {}, 'Artists you keep liking') : null,
       wanted ? suggestList() : null,
       h('button', { class: 'btn primary', onclick: () => (closePopover(), tagSheet(menuBtn)) }, 'Your tags: rate what you like'),
@@ -1092,7 +1097,7 @@ export function renderFeed(root, ctx, list = null) {
 
   function autoLearn() {
     if (!S('feedLearn')) return;
-    for (const p of enabled()) if (canLearn(p)) learnAccount(p);
+    for (const p of enabled()) if (canLearn(p)) learnAccount(p).then(() => seedStyle(p));
   }
 
   /* --- background upkeep while the Feed is open: follow checks, a top-up of pools */
@@ -1119,6 +1124,7 @@ export function renderFeed(root, ctx, list = null) {
     clearInterval(watch);
     clearInterval(upkeep);
     clearTimeout(idleT);
+    clearTimeout(view.scoutT);
     offs.forEach((off) => off());
     sizer.disconnect();
     removeEventListener('keydown', onKey);
