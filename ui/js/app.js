@@ -16,6 +16,7 @@ import { ComicReader } from './reader.js';
 import { renderBoards, renderBoard, updateCover, refreshBoards } from './boards.js';
 import { renderTrail } from './trail.js';
 import { renderFeed } from './feed.js';
+import { SuggestFeed } from './feedengine.js';
 import { renderFollows, refreshAll, follow } from './follows.js';
 import { renderPoolView, renderPools, poolInfo, loadPool, poolKey, dtext as poolText } from './pools.js';
 import { openSettings, closeSettings, showHelp } from './settings.js';
@@ -35,7 +36,7 @@ import { M, postMenu, tagMenu } from './menus.js';
 let prov = getProvider(S('provider'));
 const st = {
   terms: [], filters: null, feed: null, loaded: [], total: null, sig: null, loading: null,
-  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null, boardMark: null, multi: null,
+  smartId: null, trailTs: 0, dossierOff: new Set(), isNew: null, followMarks: null, boardMark: null, multi: null, foryou: false,
 };
 let boardGal = null; // gallery of the board / pool view currently on screen
 let viewerGal = null;
@@ -234,7 +235,7 @@ function parseHash() {
   return { view: seg[0] || homeView(), id: seg[1], p: new URLSearchParams(qstr) };
 }
 
-function roamHash(terms, filters, provId, post, mb) {
+function roamHash(terms, filters, provId, post, mb, foryou) {
   const p = new URLSearchParams();
   p.set('p', provId);
   if (terms.length) p.set('q', termsStr(terms));
@@ -247,19 +248,21 @@ function roamHash(terms, filters, provId, post, mb) {
   if (filters.age) p.set('ag', filters.age);
   if (post) p.set('post', post);
   if (mb) p.set('mb', mb); // a board that reads several sites
+  if (foryou) p.set('fy', '1'); // the Feed's suggestions instead of a search
   return '#/roam?' + p.toString();
 }
 
 /** What makes one search different from another (a multi-site board counts its sites too). */
-const sigOf = (terms, filters, multi) => JSON.stringify([prov.id, terms, filters, multi ? multi.id + JSON.stringify(multi.sources) : '']);
+const sigOf = (terms, filters, multi, foryou) => JSON.stringify([prov.id, terms, filters, multi ? multi.id + JSON.stringify(multi.sources) : '', !!foryou]);
 
-function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.id } = {}) {
+function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.id, foryou = false } = {}) {
   viewerPushed = false;
-  const next = roamHash(terms, filters, provider);
+  const next = roamHash(terms, filters, provider, undefined, undefined, foryou);
   const cur = parseHash();
-  if (location.hash === next || (cur.view === 'roam' && roamHash(st.terms, st.filters, prov.id) === next && !cur.p.get('post'))) {
+  if (location.hash === next || (cur.view === 'roam' && roamHash(st.terms, st.filters, prov.id, undefined, undefined, st.foryou) === next && !cur.p.get('post'))) {
     st.terms = clone(terms);
     st.filters = clone(filters);
+    st.foryou = foryou;
     return startSearch();
   }
   setHash(next);
@@ -317,6 +320,7 @@ function parseHashStr(hash) {
 function tabTitleFor(hash) {
   const { view, id, p } = parseHashStr(hash);
   if (view === 'roam') {
+    if (p.get('fy')) return 'For you';
     const mbName = p.get('mb') && boards.get(p.get('mb'))?.name;
     if (mbName) return mbName;
     const names = parseTerms(p.get('q') || '').filter((t) => t.op !== '-').slice(0, 3).map((t) => pretty(t.t));
@@ -337,7 +341,7 @@ function snapshotView() {
   const { view, id } = parseHash();
   const snap = { scroll: scrollEl()?.scrollTop || 0, thumb: '' };
   if (view === 'roam') {
-    snap.roam = { sig: st.sig, terms: st.terms, filters: st.filters, feed: st.feed, loaded: st.loaded, total: st.total, smartId: st.smartId };
+    snap.roam = { sig: st.sig, foryou: st.foryou, terms: st.terms, filters: st.filters, feed: st.feed, loaded: st.loaded, total: st.total, smartId: st.smartId };
     snap.thumb = st.loaded[0]?.thumb || '';
   } else if (view === 'board') snap.thumb = boards.get(id)?.posts?.[0]?.thumb || '';
   return snap;
@@ -348,6 +352,7 @@ function restoreRoam(r) {
   st.terms = r.terms;
   st.filters = r.filters;
   st.sig = r.sig;
+  st.foryou = !!r.foryou;
   st.feed = r.feed;
   if (r.feed._stash?.length) { r.loaded.push(...r.feed._stash); r.feed._stash = []; }
   st.loaded = r.loaded;
@@ -487,7 +492,8 @@ function applyRouteCore() {
     const filters = parseFilters(p);
     const mb = p.get('mb') ? boards.get(p.get('mb')) : null;
     st.multi = mb?.kind === 'smart' && mb.sources?.length ? mb : null;
-    const sig = sigOf(terms, filters, st.multi);
+    st.foryou = p.get('fy') === '1' && !terms.length && !st.multi;
+    const sig = sigOf(terms, filters, st.multi, st.foryou);
     if (restore?.roam && restore.roam.sig === sig && st.feed !== restore.roam.feed) restoreRoam(restore.roam);
     else if (sig !== st.sig) {
       st.terms = terms;
@@ -850,9 +856,9 @@ function setFoot(kind, extra) {
 
 async function startSearch() {
   const filters = clone(st.filters);
-  st.sig = sigOf(st.terms, filters, st.multi);
-  const multi = st.multi;
-  const feed = multi
+  st.sig = sigOf(st.terms, filters, st.multi, st.foryou);
+  const multi = st.multi, foryou = st.foryou;
+  const feed = foryou ? new SuggestFeed(prov) : multi
     ? new MultiFeed([{ prov: getProvider(multi.provider), terms: clone(multi.terms) }, ...multi.sources.map((s) => ({ prov: getProvider(s.provider), terms: clone(s.terms) }))], filters)
     : new Feed(prov, clone(st.terms), filters);
   st.feed = feed;
@@ -875,9 +881,10 @@ async function startSearch() {
   dossierEl.replaceChildren();
   updateStatus();
   setFoot('loading');
-  if (!multi) trailStore.push({ provider: prov.id, terms: clone(st.terms), filters: clone(filters), thumbs: [] });
-  st.trailTs = multi ? 0 : trailStore.all()[0]?.ts;
-  if (!multi && prov.count) prov.count(feed.tags).then((n) => feed === st.feed && ((st.total = n), updateStatus())).catch(() => {});
+  const remember = !multi && !foryou; // For you is not a search to come back to
+  if (remember) trailStore.push({ provider: prov.id, terms: clone(st.terms), filters: clone(filters), thumbs: [] });
+  st.trailTs = remember ? trailStore.all()[0]?.ts : 0;
+  if (remember && prov.count) prov.count(feed.tags).then((n) => feed === st.feed && ((st.total = n), updateStatus())).catch(() => {});
   await loadMore();
   if (feed === st.feed) {
     marks?.forEach((id) => subs.markSeen(id)); // you've now seen what was new
@@ -924,7 +931,7 @@ function updateStatus() {
   status.replaceChildren(...[
     h('span', { class: 'odo' }, fmtNum(st.loaded.length)),
     h('span', { class: 'st-l' }, ' loaded'),
-    st.multi ? h('span', { class: 'st-t' }, ` · ${1 + st.multi.sources.length} sites`) : total ? h('span', { class: 'st-t' }, ` · ${st.total == null ? '≈' : ''}${fmtNum(total)} on ${prov.name}`) : null,
+    st.foryou ? h('span', { class: 'st-t' }, ` · picked for you from ${prov.name}`) : st.multi ? h('span', { class: 'st-t' }, ` · ${1 + st.multi.sources.length} sites`) : total ? h('span', { class: 'st-t' }, ` · ${st.total == null ? '≈' : ''}${fmtNum(total)} on ${prov.name}`) : null,
     gal.hiddenCount ? h('span', { class: 'st-h' }, ` · ${gal.hiddenCount} hidden by blacklist`) : null,
     st.feed?.busy ? h('i', { class: 'spin' }) : null,
   ].filter(Boolean));
@@ -947,9 +954,12 @@ const ROUTES = [
 function renderRoutes() {
   const f = st.filters;
   const chips = ROUTES.filter(([, , o]) => (!o.age || prov.ages) && (!o.media || prov.media) && (!o.order || prov.sorts.some(([v]) => v === o.order))).map(([label, ic, o]) => {
-    const active = (f.order || '') === (o.order || '') && (f.age || '') === (o.age || '') && (f.media || '') === (o.media || '');
+    const active = !st.foryou && (f.order || '') === (o.order || '') && (f.age || '') === (o.age || '') && (f.media || '') === (o.media || '');
     return h('button', { class: 'route' + (active ? ' on' : ''), html: icon(ic, 14) + `<span>${label}</span>`, onclick: () => navigateRoam({ filters: { ...f, order: o.order || '', age: o.age || '', media: o.media || '' } }) });
   });
+  // the Feed's suggestions as a grid: offered, never the default (it sits after Latest)
+  chips.splice(1, 0, h('button', { class: 'route' + (st.foryou ? ' on' : ''), title: 'Suggested for you, learned from what you like', html: icon('sparkle', 14) + '<span>For you</span>',
+    onclick: () => navigateRoam({ terms: [], filters: { ...defaultFilters(), ratings: { ...f.ratings } }, foryou: true }) }));
   const mine = subs.all().filter((x) => x.p === prov.credKey);
   if (mine.length && prov.maxTags >= 6) {
     const fresh = mine.reduce((n, x) => n + (x.newCount || 0), 0);
