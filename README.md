@@ -198,6 +198,13 @@ ui/             embedded frontend (vanilla ES modules, no build step)
 - **Phone layout**: bottom tab bar, sheets instead of popovers, swipe/pinch/long-press gestures, pull to refresh, Back
   button support, and a touch-friendly comic reader.
 
+**Dual-screen phones, foldables and split-screen.** On a Surface Duo with the window spanned across both screens, Board Roamer
+treats each screen as a phone: the gallery, tabs and bars stay on the first screen and the viewer, reader and settings open on
+the second, so nothing is drawn under the hinge (side by side or one above the other). The Android shell reports the hinge
+(display cutout) to the page; try the layout in a desktop browser with `?hinge=x,y,width,height` (CSS pixels, for example
+`?hinge=557,0,28,720` in a 1114 x 720 window). A single Duo screen held sideways (720 x 540) and short split-screen windows
+also use the phone layout, with slimmer bars.
+
 ## Building and releasing
 
 Every push to `main` builds all platforms in GitHub Actions (`.github/workflows/build.yml`). Pushing a tag publishes a release:

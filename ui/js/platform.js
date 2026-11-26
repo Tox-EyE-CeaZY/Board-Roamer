@@ -5,31 +5,77 @@
  *   html.landscape  wider than tall
  *   html.touch      the primary pointer is a finger              → no hover affordances, bigger targets
  *   html.android    running inside the Android app
+ *   html.dual       the window is split by a hinge or fold (Surface Duo spanned, tabletop postures)
+ *   html.dual-v / html.dual-h   the two screens sit side by side / one above the other
+ *   html.short      a very short window (split-screen, a phone held sideways)
  *
  * Everything degrades gracefully: in a plain browser or the desktop app the bridge calls are no-ops.
  */
 const root = document.documentElement;
-const mqPhone = matchMedia('(max-width: 700px), (max-height: 500px) and (pointer: coarse)');
+// 560px tall covers a Surface Duo screen held sideways (720 x 540), which is nowhere near a desktop window
+const mqPhone = matchMedia('(max-width: 700px), (max-height: 560px) and (pointer: coarse)');
 const mqTouch = matchMedia('(hover: none) and (pointer: coarse)');
 const listeners = new Set();
 
 const A = () => window.AndroidBridge;
 export const isAndroid = () => !!A();
-export const isPhone = () => mqPhone.matches;
+export const isPhone = () => mqPhone.matches || !!panes;
 export const isTouch = () => mqTouch.matches || isAndroid();
-export const isLandscape = () => innerWidth > innerHeight;
+export const isLandscape = () => (panes ? panes[0].w > panes[0].h : innerWidth > innerHeight); // on a dual-screen device: the main screen
+
+/* ------------------------------------------------------------------ hinges and folds */
+/**
+ * The two screens of a dual-screen device (or the two halves of a half-open foldable), in CSS pixels, or null.
+ * Sources, best first: the web's window segments API, the Android shell (the hinge shows up as a display cutout), and a
+ * `?hinge=x,y,w,h` override in the address (or localStorage 'br.hinge') for trying the layout on a desktop browser.
+ */
+function readHinge() {
+  let h = null;
+  try {
+    const q = new URLSearchParams(location.search).get('hinge') || localStorage.getItem('br.hinge');
+    if (q) { const [x, y, w, hh] = q.split(',').map(Number); if (w >= 0 && hh > 0) h = { x, y, w, h: hh }; }
+  } catch { /* storage can be blocked */ }
+  if (!h) {
+    try {
+      const segs = typeof window.getWindowSegments === 'function' ? window.getWindowSegments() : null;
+      if (segs && segs.length === 2) {
+        return [rectOf(segs[0]), rectOf(segs[1])];
+      }
+    } catch { /* not supported */ }
+    try { const j = A() && typeof A().hinge === 'function' ? A().hinge() : ''; if (j) h = JSON.parse(j); } catch { /* old shell */ }
+  }
+  if (!h || !(h.w >= 0) || !(h.h > 0)) return null;
+  const W = innerWidth, H = innerHeight;
+  // a hinge runs the full height (screens side by side) or the full width (one above the other)
+  if (h.h >= H * 0.9 && h.w < W * 0.3) { const x = Math.max(0, h.x), x2 = Math.min(W, h.x + h.w); return x > 120 && W - x2 > 120 ? [{ x: 0, y: 0, w: x, h: H }, { x: x2, y: 0, w: W - x2, h: H }] : null; }
+  if (h.w >= W * 0.9 && h.h < H * 0.3) { const y = Math.max(0, h.y), y2 = Math.min(H, h.y + h.h); return y > 120 && H - y2 > 120 ? [{ x: 0, y: 0, w: W, h: y }, { x: 0, y: y2, w: W, h: H - y2 }] : null; }
+  return null;
+}
+const rectOf = (r) => ({ x: r.x ?? r.left, y: r.y ?? r.top, w: r.width, h: r.height });
+let panes = null;
+/** [main, detail] screens when the window is split by a hinge, else null. */
+export const getPanes = () => panes;
+export const isDual = () => !!panes;
 
 function apply() {
-  root.classList.toggle('phone', isPhone());
+  panes = readHinge();
+  const dual = !!panes;
+  root.classList.toggle('phone', isPhone() || dual); // each screen of a dual-screen device is phone-sized
+  root.classList.toggle('dual', dual);
+  root.classList.toggle('dual-v', dual && panes[0].y === panes[1].y);
+  root.classList.toggle('dual-h', dual && panes[0].y !== panes[1].y);
+  root.classList.toggle('short', innerHeight <= 480 || (dual && Math.min(panes[0].h, panes[1].h) <= 480));
   root.classList.toggle('touch', isTouch());
   root.classList.toggle('android', isAndroid());
   root.classList.toggle('landscape', isLandscape());
+  ['1', '2'].forEach((n, i) => ['x', 'y', 'w', 'h'].forEach((k) => (panes ? root.style.setProperty(`--p${n}-${k}`, panes[i][k] + 'px') : root.style.removeProperty(`--p${n}-${k}`))));
   listeners.forEach((fn) => fn());
 }
 mqPhone.addEventListener?.('change', apply);
 mqTouch.addEventListener?.('change', apply);
 addEventListener('resize', apply);
 addEventListener('orientationchange', apply);
+window.__layout = apply; // the Android shell calls this when the window or hinge changes
 apply();
 export const onLayout = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 

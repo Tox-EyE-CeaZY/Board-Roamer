@@ -936,7 +936,7 @@ video.media { background: transparent; backface-visibility: hidden; }
 .fit-height .rd-img { height: 100%; }
 .fit-orig .rd-spread { width: max-content; }
 .rd-stage.zoomed .rd-spread { align-items: flex-start; width: max-content; min-width: 100%; }
-.rd-stage.zoomed .rd-img { width: calc(100vw / var(--n, 1) * var(--z)); max-width: none; max-height: none; height: auto; }
+.rd-stage.zoomed .rd-img { width: calc(var(--pw, 100vw) / var(--n, 1) * var(--z)); max-width: none; max-height: none; height: auto; }
 .rd-stage.scroll { display: block; }
 .rd-col { width: min(96%, 880px); margin: 0 auto; padding: 64px 0 140px; }
 .rd-pg { width: 100%; background: #151a1a; }
