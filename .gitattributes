@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+*.wasm binary
+*.onnx binary
+# third-party files, kept byte for byte
+ui/vendor/ort/*.mjs -text

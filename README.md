@@ -64,6 +64,7 @@ On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev li
   on the sites (and the hearts you tap here, for sites without favorites or when signed out), mixes in some wandering, and puts new posts from followed artists first.
 - Pick which sites it draws from (remembered), and switch between Following, For you, New and Hot. Pull down, or tap Feed twice, to refresh.
 - It also reads today's mood (what you like, skip or linger on right now) on top of your long-term taste; that fades by the next day.
+- Match art style (on by default, switch in the Feed settings): a small image model on your device compares thumbnails with the look of what you favorite, like and linger on. Nothing is trained or uploaded.
 - Roam also has a For you button: the same suggestions as a grid.
 - Swipe a post to the left for the artist's page; their posts open there as a feed of their own, in order. Rate tags (never, less, neutral, more, love), mark posts not interested, press and hold for more, hold two fingers to hide the buttons.
 - Gentle on the sites: one request at a time, spaced out, 40 posts per request, cool-downs after errors.
@@ -150,6 +151,7 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   js/gallery.js     virtualized layout engine
   js/viewer.js      lightbox
   js/search.js      chip search bar
+  vendor/           the style model and its runtime (licenses in vendor/NOTICE.md)
 ```
 
 ## Library, sync and phone

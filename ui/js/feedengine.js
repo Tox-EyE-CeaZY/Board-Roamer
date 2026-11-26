@@ -1,6 +1,6 @@
 /* ==========================================================================================================================
    The Feed's engine: what gets shown next, and how politely it is fetched. The screen itself is feed.js; the long-term taste model is
-   taste.js and the short-lived "today" layer on top of it is mood.js.
+   taste.js, the short-lived "today" layer on top of it is mood.js, and the art-style signal is style.js (fed by stylist.js).
 
    What comes up is learned on this device from what you like (your favorites / upvotes on the sites, and the hearts you tap), mixed
    with deliberate wandering, and new posts from artists you follow.
@@ -17,6 +17,8 @@ import { S, on, emit, subs, tagc, kv, voted } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit } from './providers.js';
 import { Taste, softPick, features } from './taste.js';
 import { Mood } from './mood.js';
+import { Style } from './style.js';
+import * as stylist from './stylist.js';
 import { isPhone } from './platform.js';
 
 const GAP = { e621: 1500, e926: 1500 };
@@ -47,6 +49,7 @@ class Model {
     this.cred = cred;
     this.taste = new Taste(kv.get('feed:t:' + cred, null));
     this.mood = new Mood(kv.get('feed:mood:' + cred, null)); // today's lean, on top of the taste
+    this.style = new Style(kv.get('feed:style:' + cred, null)); // what the pictures you like look like
     this.seen = new Set(kv.get('feed:seen:' + cred, []));
     this.likes = new Set(kv.get('feed:likes:' + cred, []));
     this.hidden = new Set(kv.get('feed:hide:' + cred, [])); // "not interested": never shown again
@@ -59,6 +62,7 @@ class Model {
     trim(this.hidden, SEEN_MAX);
     kv.set('feed:t:' + this.cred, this.taste.toJSON());
     kv.set('feed:mood:' + this.cred, this.mood.toJSON());
+    kv.set('feed:style:' + this.cred, this.style.toJSON());
     kv.set('feed:seen:' + this.cred, [...this.seen]);
     kv.set('feed:likes:' + this.cred, [...this.likes].slice(-8000));
     kv.set('feed:hide:' + this.cred, [...this.hidden]);
@@ -68,6 +72,7 @@ class Model {
   reset() {
     this.taste.reset();
     this.mood.reset();
+    this.style.reset();
     this.seen.clear();
     this.likes.clear();
     this.hidden.clear();
@@ -259,6 +264,7 @@ export async function learnAccount(prov, { force = false } = {}) {
           model.taste.learn(p, { l: q.w, n: 1 });
           fresh++;
           added++;
+          if (!full && fresh <= 10) styleLike(p, 0.6 * q.w, stylist.SEED); // favorited elsewhere since last time
         }
         if (full) Object.assign(st, { pages: i + 1, cursor: feed.cursor, pageNo: feed.pageNo });
         model.save();
@@ -288,6 +294,92 @@ async function baseline(prov, model, src) {
     for (const p of posts) model.taste.learn(p, { l: 0, n: 1 });
   }
   model.save();
+}
+
+/* ------------------------------------------------------------------ art style */
+export const styleOn = () => S('feedStyle') !== false;
+const STYLE = 0.9; // how much looking like what you like counts, next to the tags (1.2) and today (1.4)
+const SEEDS = 30; // favorites looked at once
+const BACKGROUND = 24; // and ordinary posts beside them, so "particular to what you like" has something to be measured against
+/** Posts picked without knowing whether you like them: only these make up the average picture (liked ones would cancel themselves out). */
+const ordinary = new WeakSet();
+stylist.onFingerprint((post, v) => {
+  if (!ordinary.has(post)) return;
+  const m = modelOf(post.provider);
+  m.style.see(v);
+  m.save();
+});
+const someOf = (list, n) => list.map((p) => [Math.random(), p]).sort((a, b) => a[0] - b[0]).slice(0, n).map((x) => x[1]);
+/** Runs `use(model, fingerprint)` for a post: at once if it was looked at already, otherwise after looking (when `look` allows it). */
+function withStyle(post, look, rank, use) {
+  if (!styleOn()) return;
+  const m = modelOf(post.provider);
+  const have = stylist.peek(post);
+  const run = (v) => (use(m, v), m.save());
+  if (have) run(have);
+  else if (look) stylist.fingerprint(post, rank).then((v) => v && run(v));
+}
+/** A like (or, below zero, one taken back) tells the style profile what you go for. */
+export function styleLike(post, weight, rank = stylist.NOW) {
+  withStyle(post, weight > 0, rank, (m, v) => (weight > 0 ? m.style.like(v, weight) : m.style.unlike(v, -weight)));
+}
+/**
+ * Once: looks at a sample of your favorites, so the style signal has something to go on before you like anything new. One request, and
+ * thumbnails only. (Without favorites it learns from your likes and what you linger on.)
+ */
+export async function seedStyle(prov) {
+  const model = modelOf(prov), src = srcOf(prov);
+  if (!styleOn() || model.style.seeded || src.seeding || !canLearn(prov) || stylist.stats().broken) return;
+  src.seeding = true;
+  try {
+    const q = LEARN[prov.engine]((S('creds') || {})[prov.credKey] || {})[0];
+    const feed = new Feed(prov, [{ t: q.t, op: '+' }], filtersFor({ ratings: ALL_RATINGS }));
+    feed.limit = 40;
+    const posts = (await pageOf(src, feed, 'learn')).filter((p) => p.thumb).slice(0, SEEDS);
+    for (const p of someOf(src.pool, BACKGROUND)) (ordinary.add(p), stylist.fingerprint(p, stylist.SEED));
+    const got = await Promise.all(posts.map((p) => stylist.fingerprint(p, stylist.SEED).then((v) => v && (model.style.like(v, 0.5), true))));
+    if (got.some(Boolean) || !posts.length) model.style.seeded = true; // otherwise: next time
+    model.save();
+  } catch {
+    /* next time */
+  } finally {
+    src.seeding = false;
+  }
+}
+/** How much each of these posts looks like your style, against the average of those looked at: the others count as average. */
+function styleScores(model, posts) {
+  if (!styleOn() || !model.style.known) return () => 0;
+  const rate = model.style.rater(), raw = new Map();
+  let sum = 0;
+  for (const p of posts) {
+    const v = stylist.peek(p);
+    if (!v) continue;
+    const x = rate(v);
+    raw.set(p, x);
+    sum += x;
+  }
+  const base = sum / (raw.size + 4);
+  return (p) => (raw.has(p) ? Math.max(-1, Math.min(1.5, (raw.get(p) - base) * 2.5)) : 0);
+}
+/**
+ * As you move on: have the model look at a few of the posts that may come up (the likeliest by tags, and one at random, so that a look
+ * you like can surface something the tags would not). A few thumbnails at a time, fewer on slow devices.
+ */
+export function scout(view) {
+  if (!styleOn() || modeFor(view) !== 'foryou') return;
+  const n = stylist.quota();
+  if (!n) return;
+  const list = [];
+  for (const prov of enabled()) {
+    const model = modelOf(prov);
+    if (!model.style.known) continue;
+    const open = poolFor(view, prov).pool.filter((p) => !stylist.peek(p));
+    const by = new Map(open.map((p) => [p, tagScore(model, p)]));
+    list.push(...open.sort((a, b) => by.get(b) - by.get(a)).slice(0, Math.max(1, n - 1)));
+    if (n > 1 && open.length > n) list.push(open[n - 1 + Math.floor(Math.random() * (open.length - n + 1))]);
+  }
+  list.forEach((p) => ordinary.add(p));
+  stylist.consider(list, () => view.active());
 }
 
 /* ------------------------------------------------------------------ candidate queries */
@@ -454,6 +546,8 @@ export function feel(post, signal) {
   const m = modelOf(post.provider);
   m.mood.feel(post, signal, commonness(m));
   m.save();
+  // the same for today's art style. A picture is only looked at for a clear signal: a quick skip uses what is already known
+  withStyle(post, signal >= 0.3 || signal <= -0.8, stylist.NOW, (x, v) => x.style.feel(v, signal));
 }
 // likes made in the viewer (from the Feed, the artist page or Roam) count for today too
 on('post-like', (e) => feel(e.detail.post, e.detail.on ? (e.detail.vote ? 0.8 : 1) : -0.5));
@@ -536,12 +630,15 @@ function nextProbe(view, list) {
   return null;
 }
 
+/** What the tags, today and freshness say about a candidate. */
+const tagScore = (model, p) => flat(model.taste.rate(p).score) * 1.2 + model.mood.score(p) * MOOD + lean(p);
+
 /** The posts most likely to come next (not taken): their pictures are worth downloading early. */
 export function likely(view, count) {
   const out = [];
   for (const prov of enabled()) {
-    const model = modelOf(prov);
-    out.push(...poolFor(view, prov).pool.map((p) => [flat(model.taste.rate(p).score) * 1.2 + model.mood.score(p) * MOOD + lean(p), p]));
+    const model = modelOf(prov), pool = poolFor(view, prov).pool, look = styleScores(model, pool);
+    out.push(...pool.map((p) => [tagScore(model, p) + look(p) * STYLE, p]));
   }
   return out.sort((a, b) => b[0] - a[0]).slice(0, count).map((x) => x[1]);
 }
@@ -587,14 +684,17 @@ function takeFrom(src, view, explore) {
   if (m !== 'foryou') return src.pool.shift(); // New / Hot: the site's own order
   let idx;
   model.mood.fade();
-  if (!model.taste.ready) idx = softPick(src.pool.map((p) => lean(p) + model.mood.score(p) * MOOD + Math.random() * 0.4), 0.5);
+  model.style.fade();
+  const look = styleScores(model, src.pool);
+  if (!model.taste.ready) idx = softPick(src.pool.map((p) => lean(p) + model.mood.score(p) * MOOD + look(p) * STYLE + Math.random() * 0.4), 0.5);
   else {
     const dull = sameness(view, model);
     const scores = src.pool.map((p) => {
       const r = model.taste.rate(p);
       const liking = flat(r.score);
-      if (explore) return r.novelty * 1.2 + Math.max(-1, Math.min(0.6, liking)) * 0.3 + lean(p) * 0.6 + model.mood.score(p) * 0.3 + Math.random() * 0.5 - dull(p) * 0.5;
-      return liking * 1.2 + model.mood.score(p) * MOOD + lean(p) + Math.random() * 0.6 - dull(p);
+      // exploring leans on style more than on known tags: new subjects, drawn in ways you like
+      if (explore) return r.novelty * 1.2 + Math.max(-1, Math.min(0.6, liking)) * 0.3 + lean(p) * 0.6 + model.mood.score(p) * 0.3 + look(p) * STYLE * 0.7 + Math.random() * 0.5 - dull(p) * 0.5;
+      return liking * 1.2 + model.mood.score(p) * MOOD + look(p) * STYLE + lean(p) + Math.random() * 0.6 - dull(p);
     });
     idx = softPick(scores, explore ? 0.5 : 0.75);
   }
