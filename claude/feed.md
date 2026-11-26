@@ -85,6 +85,8 @@ Candidate queries: interest (1-2 liked tags, random order / random page on Danbo
 - The heart (button and L) only favorites. Upvoting along with it happens only for `feedDtap: 'both'` (the default double-tap).
 - Votes go through `castVote(p, 1|0|-1)` in `feed.js`: buttons change at once, requests are chained per post, a refusal repaints what the site last had.
 - Double-tap: `feedDtap` (synced; fav | up | both | down), separate from the viewer's `dtap`. Only adds; `down` also advances.
+- Today's mood (`mood.js`, `feed:mood:<cred>`): a per-tag lean from -1.5 to 1.5 fed by `feel(post, signal)` (likes, votes, downloads, opening, share, follow, dwell, skips, not interested). Halves every 5 h, mostly wiped on a new day; ranking = long-term x1.2 + mood x1.4; never written into `Taste`. For you lines up only 8 cards and `restir()` re-picks past `idx+4` after enough reactions; `likely()` preloads candidates.
+- Probes (`planProbes`): while the mood is `fresh` and the taste `ready`, cards 2-11 include one per separate liked subject (up to 4), one loved artist on a cooler subject (one extra small request, `seedArtists`) and one wildcard. No label.
 - Not interested: `notInterested()` (local only, `feed:hide:<cred>`). Downvote also does it and sends -1 when signed in.
 - `.fd-media` is absolutely positioned inside `.fd-stage` (inset 0, object-fit contain). Do not make it a plain grid/flex child with height 100%: tall pictures then overflow and are cut off (seen on square screens such as the Surface Duo).
 - The app's floating back-to-top (`.fab`) only updates on scroll: `showView` hides it when the screen changes, and the artist page hides it on open / post open / close (late scroll events from a closing or covered artist grid are ignored in `setupTouch`).

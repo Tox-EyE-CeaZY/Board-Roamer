@@ -90,7 +90,7 @@ export const DEFAULTS = {
   feedMode: 'foryou', // foryou | follows | new | hot
   feedPreload: 20, // posts downloaded ahead of the one on screen (per device)
   feedDtap: 'both', // double-tap in the Feed: fav | up | both | down (the viewer has its own, `dtap`)
-  feedExplore: 25, // % of the Feed that is deliberately off your usual taste
+  feedExplore: 15, // % of the Feed that is deliberately off your usual taste
   feedFollows: true, // new posts from followed artists jump the queue
   feedSyncLikes: true, // hearts and votes in the Feed also happen on the site when you are signed in
   feedLearn: true, // read your favorites / upvotes from the site to learn your taste
@@ -98,6 +98,8 @@ export const DEFAULTS = {
 };
 
 let settings = { ...structuredClone(DEFAULTS), ...load('settings', {}) };
+if (settings.feedExplore === 25 && !settings.exploreEased) (settings.feedExplore = 15); // 25 was the first default
+settings.exploreEased = true;
 settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEFAULTS.filters.ratings, ...(settings.filters || {}).ratings } };
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
