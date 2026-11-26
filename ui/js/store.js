@@ -89,6 +89,7 @@ export const DEFAULTS = {
   homeAsked: false, // the one-time "pick your home screen" question has been answered
   feedMode: 'foryou', // foryou | follows | new | hot
   feedPreload: 20, // posts downloaded ahead of the one on screen (per device)
+  feedDtap: 'both', // double-tap in the Feed: fav | up | both | down (the viewer has its own, `dtap`)
   feedExplore: 25, // % of the Feed that is deliberately off your usual taste
   feedFollows: true, // new posts from followed artists jump the queue
   feedSyncLikes: true, // a like in the Feed also favorites + upvotes on the site when you are signed in
@@ -101,7 +102,7 @@ settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEF
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
 export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'poolMostly', 'poolWarn', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
-  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters', 'feedSources', 'feedMode', 'feedExplore', 'feedFollows', 'feedSyncLikes', 'feedLearn'];
+  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters', 'feedSources', 'feedMode', 'feedDtap', 'feedExplore', 'feedFollows', 'feedSyncLikes', 'feedLearn'];
 let settingsT = load('settingsT', {}); // when each synced setting was last changed here
 
 export const S = (k) => settings[k];
