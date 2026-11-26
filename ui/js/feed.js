@@ -673,8 +673,8 @@ export function renderFeed(root, ctx, list = null) {
     p.myVote = on ? 1 : 0;
   };
 
-  /** The heart: favorite it, and (like a double-tap in the viewer) upvote it too, unless `vote` is off. Both buttons show what happened. */
-  async function toggleLike(p, { vote = true } = {}) {
+  /** The heart favorites, nothing more (like the viewer's heart). Only a double-tap set to "Both" passes `vote` to upvote as well. */
+  async function toggleLike(p, { vote = false } = {}) {
     const m = modelOf(p.provider), prov = getProvider(p.provider);
     const want = !isLiked(p);
     if (want) { m.likes.add(p.id); m.taste.learn(p, { l: 1, n: 0, post_n: 0 }); }
