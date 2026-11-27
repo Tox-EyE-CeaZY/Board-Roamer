@@ -41,6 +41,8 @@ export const DEFAULTS = {
   autoplay: true,
   muted: true,
   wheel: 'zoom', // zoom | nav
+  lightbox: 'classic', // classic | feed: what a click on a post in a grid opens
+  lightboxScroll: 'horizontal', // horizontal | vertical: which way the classic viewer moves between posts
   slideshowSec: 5,
   filmstrip: true,
   panelOpen: true,

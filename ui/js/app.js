@@ -393,6 +393,7 @@ function restoreScroll(top) {
 function showTab(tab) {
   pendingRestore = tab.snap || null;
   if (viewer.isOpen) closeViewerQuiet();
+  if (reel) closeReel(true);
   if (reader.isOpen) closeReaderQuiet();
   history.replaceState({ n: 0, t: tab.id }, '', tab.hash); // each tab starts its own Back trail
   navDepth = 0;
@@ -557,6 +558,7 @@ function applyRouteCore() {
 
 async function handlePost(postId, g) {
   if (!postId) {
+    if (reel) closeReel(true);
     if (viewer.isOpen) {
       suppressClose = true;
       viewer.close();
@@ -662,7 +664,46 @@ async function saveOne(p) {
   }
 }
 
+/** "Opening a post: Feed style" (Settings > Viewer): a plain click on a post in a grid opens it the way the Feed shows posts. */
+const feedStyleOpen = (g, slideshow, poolOpts) => S('lightbox') === 'feed' && !slideshow && !poolOpts && !g.fromFeed && parseHash().view !== 'local' && !viewer.isOpen && !reel;
+
+let reel = null; // the Feed-style lightbox while it is open: { el, screen, off, g, offKey }
+function openReel(g, viewIndex) {
+  const list = g.viewList();
+  if (!list[viewIndex]) return;
+  viewerGal = g;
+  const { p } = parseHash();
+  p.set('post', list[viewIndex].id);
+  const [path] = location.hash.slice(1).split('?');
+  history.pushState({ n: ++navDepth, t: activeTabId() }, '', '#' + path + '?' + p.toString());
+  const el = document.createElement('div');
+  el.className = 'fd-reel over';
+  document.body.append(el);
+  const off = onBack(() => (closeReel(), true));
+  const onKey = (e) => {
+    if ((e.key === 'Escape' || e.key === 'ArrowLeft') && !e.target.matches?.('input,textarea,select') && !document.querySelector('.pop,.dlg-back,.help-back,.sheet-back,.settings.in') && !menuOpen()) (e.preventDefault(), e.stopPropagation(), closeReel());
+  };
+  addEventListener('keydown', onKey, true);
+  const screen = renderFeed(el, viewCtx(), { title: '', start: viewIndex, over: true, posts: () => g.viewList(), more: async () => { if (g === gal) await loadMore(); }, onClose: () => closeReel() });
+  reel = { el, screen, off, g, offKey: () => removeEventListener('keydown', onKey, true) };
+}
+/** Back to the grid, at the post you were on. `quiet`: the Back button already took the history entry away. */
+function closeReel(quiet = false) {
+  if (!reel) return;
+  const { el, screen, off, offKey, g } = reel;
+  reel = null;
+  const at = screen.index();
+  off();
+  offKey();
+  screen.destroy();
+  el.remove();
+  const item = g.itemIndexOfView(at);
+  if (item >= 0) g.scrollTo(item);
+  if (!quiet) history.back();
+}
+
 function openViewer(g, viewIndex, tileEl, slideshow = false, poolOpts = null) {
+  if (feedStyleOpen(g, slideshow, poolOpts)) return openReel(g, viewIndex);
   const list = g.viewList();
   if (!list[viewIndex]) return;
   viewerGal = g;
@@ -1388,7 +1429,7 @@ addEventListener('keydown', (e) => {
   if (e.key === '`' || (e.key === 'F9')) return (e.preventDefault(), toggleCloak());
   if (!cloak.hidden) return;
   if (e.target.matches('input,textarea,select,[contenteditable]') || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (viewer.isOpen || reader.isOpen || document.querySelector('.dlg-back,.help-back')) return;
+  if (viewer.isOpen || reel || reader.isOpen || document.querySelector('.dlg-back,.help-back')) return;
   const view = parseHash().view;
   switch (e.key) {
     case '/': e.preventDefault(); if (view !== 'roam') go('#/roam'); setTimeout(() => searchBar.focus(), 30); break;

@@ -162,6 +162,7 @@ export class Viewer {
     this.i = clamp(index, 0, list.length - 1);
     this.open_ = true;
     this.root.hidden = false;
+    this._paintScrollDir();
     this.root.classList.toggle('no-panel', !S('panelOpen'));
     this.root.classList.toggle('no-film', !(isPhone() ? S('filmPhone') : S('filmstrip')));
     this.root.classList.remove('sheet-open', 'chrome-off');
@@ -235,7 +236,8 @@ export class Viewer {
   }
 
   _bump(d) {
-    this.stage.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${-d * 18}px)` }, { transform: 'translateX(0)' }], { duration: 260, easing: 'ease-out' });
+    const ax = this._vert() ? 'Y' : 'X';
+    this.stage.animate([{ transform: `translate${ax}(0)` }, { transform: `translate${ax}(${-d * 18}px)` }, { transform: `translate${ax}(0)` }], { duration: 260, easing: 'ease-out' });
     toast(this.poolCtx ? (d > 0 ? 'Last page of the pool' : 'First page of the pool') : d > 0 ? 'End of the trail' : 'First post', { ms: 1200 });
   }
 
@@ -256,6 +258,16 @@ export class Viewer {
     const im = new Image();
     im.src = url;
     im.decode ? im.decode().then(apply, apply) : (im.onload = apply);
+  }
+
+  /** Settings > Viewer > Scroll direction: pictures change by swiping, dragging and pressing up / down instead of left / right. */
+  _vert() { return S('lightboxScroll') === 'vertical'; }
+
+  _paintScrollDir() {
+    const v = this._vert();
+    this.root.classList.toggle('vert', v);
+    this.prevBtn.title = v ? 'Previous (↑)' : 'Previous (←)';
+    this.nextBtn.title = v ? 'Next (↓)' : 'Next (→)';
   }
 
   async show(dir, fromRect, fromX = 0) {
@@ -288,9 +300,9 @@ export class Viewer {
     if (fromRect && post.kind !== 'video') this._flip(el, fromRect);
     else if (slide) {
       // the two pictures travel together, one screen apart, starting from wherever the finger let go
-      const span = this.stage.clientWidth + 24, ms = 280, ease = 'cubic-bezier(.22,.8,.24,1)';
+      const vert = this._vert(), span = (vert ? this.stage.clientHeight : this.stage.clientWidth) + 24, ms = 280, ease = 'cubic-bezier(.22,.8,.24,1)';
       const mk = (node, from, to, keep) => {
-        const a = node.animate([{ translate: `${from}px 0` }, { translate: `${to}px 0` }], { duration: ms, easing: ease, fill: keep ? 'forwards' : 'none' });
+        const a = node.animate([{ translate: vert ? `0 ${from}px` : `${from}px 0` }, { translate: vert ? `0 ${to}px` : `${to}px 0` }], { duration: ms, easing: ease, fill: keep ? 'forwards' : 'none' });
         (this._anims ||= new Set()).add(a);
         const done = () => this._anims?.delete(a);
         a.addEventListener('finish', done);
@@ -472,14 +484,14 @@ export class Viewer {
   _paintSwipe() {
     const m = this.media;
     if (!m) return;
-    const k = this.swy ? 1 - Math.min(Math.abs(this.swy) / 1400, 0.14) : 1;
+    const k = this.swy && !this._vert() ? 1 - Math.min(Math.abs(this.swy) / 1400, 0.14) : 1;
     m.style.transform = `translate(${this.tx + this.swx}px,${this.ty + this.swy}px) rotate(${this.rot}deg) scale(${this.sc * k})`;
   }
 
   _paint() {
     const m = this.media;
     if (!m) return;
-    const k = this.swy ? 1 - Math.min(Math.abs(this.swy) / 1400, 0.14) : 1;
+    const k = this.swy && !this._vert() ? 1 - Math.min(Math.abs(this.swy) / 1400, 0.14) : 1;
     m.style.transform = `translate(${this.tx + this.swx}px,${this.ty + this.swy}px) rotate(${this.rot}deg) scale(${this.sc * k})`;
     this.stage.classList.toggle('zoomed', this.tsc > this.fit * 1.02);
     this.root.classList.toggle('free', this.mode !== 'fit'); // (not `zoomed`: that follows the fit, which moves when the stage resizes)
@@ -624,7 +636,10 @@ export class Viewer {
     // one finger on an un-zoomed picture: the picture follows the finger sideways (previous / next) or vertically (close / info)
     if (d.touch && d.moved && d.axis !== 'pinch' && !this.stage.classList.contains('zoomed') && this.pointers.size === 1) {
       if (!d.axis) d.axis = Math.abs(dx) > Math.abs(dy) * 1.1 ? 'x' : 'y';
-      if (d.axis === 'x') this.swx = dx * (this.i === 0 && dx > 0 || this.i === this.list.length - 1 && dx < 0 ? 0.35 : 1);
+      if (this._vert()) {
+        // vertical scroll: the picture follows the finger up or down (next / previous); a sideways drag does nothing
+        if (d.axis === 'y') this.swy = dy * (this.i === 0 && dy > 0 || this.i === this.list.length - 1 && dy < 0 ? 0.35 : 1);
+      } else if (d.axis === 'x') this.swx = dx * (this.i === 0 && dx > 0 || this.i === this.list.length - 1 && dx < 0 ? 0.35 : 1);
       else if (d.axis === 'y') {
         this.swy = dy;
         this.root.style.setProperty('--vbg-a', Math.max(0.2, 0.97 - Math.max(0, dy) / 520));
@@ -658,7 +673,9 @@ export class Viewer {
     } else if (d && !d.moved && d.video && this.player && e.button === 0) this.player.toggle(); // click the picture = play/pause
     if (d && !d.touch && !this.stage.classList.contains('zoomed') && d.moved) {
       const dx = e.clientX - d.x;
-      if (Math.abs(dx) > 90 && Math.abs(e.clientY - d.y) < 80) this.go(dx < 0 ? 1 : -1); // mouse drag swipe
+      const dy = e.clientY - d.y;
+      if (this._vert()) { if (Math.abs(dy) > 90 && Math.abs(dx) < 80) this.go(dy < 0 ? 1 : -1); } // mouse drag swipe
+      else if (Math.abs(dx) > 90 && Math.abs(dy) < 80) this.go(dx < 0 ? 1 : -1);
     }
     if (!this.pointers.size) this._drag = null;
   }
@@ -669,6 +686,16 @@ export class Viewer {
     if (d.axis === 'x' || d.axis === 'y') {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
       this.root.style.removeProperty('--vbg-a');
+      if (this._vert()) {
+        if (d.axis === 'y' && (Math.abs(dy) > 70 || Math.abs(d.vy) > 0.5) && Math.sign(dy || d.vy) !== 0) {
+          const dir = (dy || d.vy) < 0 ? 1 : -1; // swiping up shows the next one
+          const edge = dir > 0 ? this.i >= this.list.length - 1 && this.poolCtx : this.i === 0;
+          if (edge) return this._bump(dir), this._springBack(), true;
+          this.go(dir, this.swy);
+          return true;
+        }
+        return this._springBack(), true;
+      }
       if (d.axis === 'x' && (Math.abs(dx) > 70 || Math.abs(d.vx) > 0.5) && Math.sign(dx || d.vx) !== 0) {
         const dir = (dx || d.vx) < 0 ? 1 : -1; // swiping left shows the next one
         const edge = dir > 0 ? this.i >= this.list.length - 1 && this.poolCtx : this.i === 0;
@@ -1109,7 +1136,7 @@ export class Viewer {
     const map = {
       arrowright: () => (e.shiftKey && pl ? pl.seekBy(5) : this.go(1)), d: nav(1), j: nav(1),
       arrowleft: () => (e.shiftKey && pl ? pl.seekBy(-5) : this.go(-1)), a: nav(-1), k: nav(-1),
-      arrowup: () => pl?.volumeBy(0.05), arrowdown: () => pl?.volumeBy(-0.05),
+      arrowup: () => (this._vert() && !(e.shiftKey && pl) ? this.go(-1) : pl?.volumeBy(0.05)), arrowdown: () => (this._vert() && !(e.shiftKey && pl) ? this.go(1) : pl?.volumeBy(-0.05)),
       pageup: () => (this._poolGo ? this._poolGo(-1) : this.go(-1)), pagedown: () => (this._poolGo ? this._poolGo(1) : this.go(1)),
       home: () => this.jump(0), end: () => this.jump(this.list.length - 1),
       i: () => this.togglePanel(), f: () => this.fullscreen(), z: () => this.cycleZoom(), r: () => this.rotate(),
