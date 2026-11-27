@@ -570,6 +570,10 @@ video.media { background: #000; outline: 0; }
 .vw-nav { position: absolute; top: 50%; translate: 0 -50%; z-index: 4; width: 54px; height: 150px; display: grid; place-items: center; color: #fff; opacity: 0; background: linear-gradient(90deg, oklch(0 0 0 / .45), transparent); transition: opacity .2s; }
 .vw-nav.prev { left: 0; } .vw-nav.next { right: 0; transform: scaleX(-1); }
 .vw-nav.next svg { transform: scaleX(-1); }
+#viewer.vert .vw-nav { left: 50%; right: auto; top: 62px; width: 150px; height: 54px; translate: -50% 0; background: linear-gradient(180deg, oklch(0 0 0 / .45), transparent); }
+#viewer.vert .vw-nav.prev svg { transform: rotate(90deg); }
+#viewer.vert .vw-nav.next { top: auto; bottom: calc(var(--film) + 8px); transform: scaleY(-1); }
+#viewer.vert .vw-nav.next svg { transform: scaleY(-1) rotate(90deg); }
 @media (hover: hover) {
   .vw-stage:hover .vw-nav { opacity: .55; }
 } @media (hover: hover) {
@@ -1421,6 +1425,7 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 
 /* a post opened from the artist's page: the Feed's screen over their list */
 .fd-reel { position: absolute; inset: 0; z-index: 5; display: flex; background: #050808; }
+.fd-reel.over { position: fixed; inset: var(--tb) 0 0 0; z-index: 90; }
 .fd-solo-title { justify-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 15px var(--f-display); text-shadow: 0 1px 6px #000; }
 
 /* pairing: scanning the computer's code, and showing it */

@@ -398,6 +398,8 @@ export function openSettings(section) {
       h('div', { class: 'row-btns' }, h('button', { class: 'btn', onclick: () => (closeSettings(), setTimeout(showHelp, 280)) }, 'Gestures & shortcuts'))) : null,
     sec('viewer', 'Viewer',
       toggle('Load original after preview', 'fullOriginal', 'Turn off to save bandwidth'), toggle('Autoplay videos', 'autoplay'), toggle('Start videos muted', 'muted'),
+      seg('Opening a post', 'lightbox', [['classic', 'Viewer'], ['feed', 'Feed style']], 'Feed style shows it full screen like the Feed, one post at a time. Pools, comics and slideshows always use the viewer'),
+      seg('Viewer scrolls', 'lightboxScroll', [['horizontal', 'Sideways'], ['vertical', 'Up / down']], 'Which way you swipe, drag or press the arrow keys to reach the next post'),
       seg('Mouse wheel', 'wheel', [['zoom', 'Zoom'], ['nav', 'Next / prev']], 'Hold Ctrl for the other'),
       slider('Slideshow delay', 'slideshowSec', 2, 30, 1, (v) => v + 's')),
     sec('starred', 'Starred', starBox),

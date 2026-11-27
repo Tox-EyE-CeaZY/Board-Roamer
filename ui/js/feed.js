@@ -37,7 +37,7 @@ export function renderFeed(root, ctx, list = null) {
     busy: false,
     clean: false, // buttons hidden by you
     artist: null, // the artist page, while it covers the Feed
-    active: () => root.isConnected && !root.hidden && !document.hidden && document.body.dataset.view === 'feed' && !view.artist && !viewerOpen(),
+    active: () => root.isConnected && !root.hidden && !document.hidden && (list?.over || document.body.dataset.view === 'feed') && !view.artist && !viewerOpen(),
   };
   const cards = []; // one slot per item; only the ones near the screen have content
   const scroller = h('div', { class: 'fd-scroll', tabindex: '0' });
@@ -861,6 +861,7 @@ export function renderFeed(root, ctx, list = null) {
       viewIndexOf: (v) => v,
       scrollTo: (n) => { scroller.scrollTop = n * scroller.clientHeight; },
       refreshMarks() {},
+      fromFeed: true, // the viewer opens as asked, whatever "Opening a post" says
     };
     ctx.openViewer(g, i, null);
   }
