@@ -438,7 +438,7 @@ export class Viewer {
       this._upgrade = upgrade;
       // Fur Affinity's own preview is small (600px or so), so its full file is always worth fetching at once, touch screen or not
       if (isTouch() && !post.viaProxy) this.ring.hidden = true;
-      else upgrade();
+      else queueMicrotask(upgrade); // not at once: `this.media` is only set to this picture after this function returns, and `upgrade` gives up if it is not
     } else this.ring.hidden = true;
     img.addEventListener('load', () => {
       if (!post.w && img.naturalWidth) { post.w = img.naturalWidth; post.h = img.naturalHeight; this._relayoutMedia(); }
