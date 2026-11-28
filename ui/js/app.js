@@ -5,8 +5,8 @@ import { refreshLib, toggleLibrary } from './library.js';
 import { startWatch } from './watch.js';
 import { startWidgets } from './widgets.js';
 import { renderLocal } from './local.js';
-import { renderFa, initFaBanner } from './fapage.js';
-import { faSupported, faUserIn, faLink } from './fa.js';
+import { renderFa, initFaBanner, faHomeView, richNodes } from './fapage.js';
+import { faSupported, faUserIn, faLink, faIndex, faUrl } from './fa.js';
 import { MultiFeed } from './multi.js';
 import { editSources } from './sources.js';
 import { getProvider, providerList, Feed, catName, linkToHash } from './providers.js';
@@ -584,7 +584,9 @@ async function handlePost(postId, g) {
     return;
   }
   if (viewer.isOpen && String(viewer.post?.id) === postId) return;
-  const list = g ? g.viewList() : [];
+  let list = g ? g.viewList() : [];
+  // an artist's Home tab has no gallery of its own: step through the pictures it shows
+  if (!list.some((p) => String(p.id) === postId) && parseHash().view === 'fa') list = faHomeView();
   const idx = list.findIndex((p) => String(p.id) === postId);
   viewerGal = g;
   if (idx >= 0) return viewer.open(list, idx, null), poolRoot(g);
@@ -609,6 +611,8 @@ function poolRoot(g, opts) {
 
 /* ================================================================== viewer wiring */
 const viewer = new Viewer($('#viewer'), {
+  richDesc: (nodes) => richNodes(nodes, (u) => (closeViewerQuiet(), setHash(`#/fa/user/${encodeURIComponent(u)}`)), false, (to) => { if (!to.includes('post=')) closeViewerQuiet(); setHash(to); }),
+  faStep: (id) => { setHash(`#/fa?post=${id}`); },
   onNeedMore: async () => {
     if (viewerGal === gal) {
       await loadMore();
@@ -748,6 +752,27 @@ function toggleStar(tag, p = prov) {
 const isFollowing = (tag, pv) => !!subs.find(getProvider(pv || prov.id).credKey, tag);
 const toggleFollow = (tag, pv) => follow(tag, pv || prov.id);
 
+/**
+ * Fur Affinity's own search is closed to apps (its robots.txt), so a tag there cannot be searched in the app itself.
+ * Say what each way does instead of silently filtering the local history.
+ */
+async function faTagChoice(tag) {
+  const n = faIndex.size();
+  const r = await dialog({
+    title: '“' + pretty(tag) + '”',
+    body: h('div', { class: 'dlg-text' },
+      h('p', {}, 'Fur Affinity does not let apps run its search, so pick where to look:'),
+      h('ul', { class: 'dlg-list' },
+        h('li', {}, h('b', {}, 'Seen here'), ` looks through the ${fmtNum(n)} submissions this device has already loaded.`),
+        h('li', {}, h('b', {}, 'Fur Affinity'), ' runs the real search on the site, in your browser.'),
+        h('li', {}, h('b', {}, 'e621'), ' searches the same word there, inside Board Roamer.'))),
+    actions: [{ label: 'Cancel', value: null }, { label: 'Seen here', value: 'seen' }, { label: 'e621', value: 'e621' }, { label: 'Fur Affinity (browser)', cls: 'primary', value: 'site' }],
+  });
+  if (r === 'seen') go(`#/fa?t=seen&q=${encodeURIComponent(tag)}`);
+  else if (r === 'site') openExternal(faUrl.search(tag.replace(/_/g, ' ')));
+  else if (r === 'e621') go(roamHash([{ t: tag.replace(/\s+/g, '_'), op: '+' }], null, 'e621'));
+}
+
 function tagAction(tag, mode, provId) {
   if (!tag) return;
   const vp = provId || viewer.post?.provider || prov.id;
@@ -758,7 +783,8 @@ function tagAction(tag, mode, provId) {
   if (vp === 'fa') { // a Fur Affinity tag stays in the Fur Affinity section: the artist's page, or the local index
     const artist = viewer.post?.artists?.includes(tag) || mode === 'artist';
     if (viewer.isOpen) closeViewerQuiet();
-    return go(artist ? `#/fa/user/${encodeURIComponent(tag)}` : `#/fa?t=seen&q=${encodeURIComponent(tag)}`);
+    if (artist) return go(`#/fa/user/${encodeURIComponent(tag)}`);
+    return faTagChoice(tag);
   }
   if (viewer.isOpen) closeViewerQuiet();
   if (reader.isOpen) closeReaderQuiet();

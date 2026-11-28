@@ -291,6 +291,24 @@ const toBytes = (s) => {
   return m ? Math.round(+m[1] * { b: 1, kb: 1024, mb: 1048576, gb: 1073741824 }[m[2].toLowerCase()]) : 0;
 };
 
+/** The Previous / First / Next links a comic's description carries: {prev, first, next} as submission ids, or null. */
+export function comicNav(nodes) {
+  const found = {};
+  const text = (n) => (typeof n === 'string' ? n : (n.kids || []).map(text).join(''));
+  const walk = (list) => (list || []).forEach((n) => {
+    if (!n || typeof n === 'string') return;
+    if (n.t === 'a') {
+      const id = faLink(n.href)?.post;
+      const w = text(n).replace(/[<>‹›«»\-–—|\s]+/g, ' ').trim().toLowerCase();
+      const k = id && (/^(prev|previous|back)( page)?$/.test(w) ? 'prev' : /^(first|start|beginning)( page)?$/.test(w) ? 'first' : /^(next|continue)( page)?$/.test(w) ? 'next' : '');
+      if (k && !found[k]) found[k] = id;
+    }
+    walk(n.kids);
+  });
+  walk(nodes);
+  return Object.keys(found).length ? found : null;
+}
+
 /** One thumbnail's data as a Board Roamer post (the full picture and details arrive when it is opened, see `fill`). */
 function fromItem(it, prov) {
   const tags = {};
@@ -352,6 +370,8 @@ function applySubmission(p, s) {
   if (s.w && s.h) (p.w = s.w), (p.h = s.h);
   p.size = toBytes(s.fileSize);
   p.desc = s.desc;
+  p.descRich = s.descRich || null;
+  p.comicNav = comicNav(s.descRich);
   p.favs = s.favs;
   p.comments = s.comments;
   p.views = s.views;

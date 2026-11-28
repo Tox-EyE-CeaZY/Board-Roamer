@@ -380,14 +380,54 @@ pub fn image(rq: Request, query: &str) {
     // one shared agent: pictures reuse connections instead of a new TLS handshake each
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     let agent = AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).max_idle_connections_per_host(16).build());
-    let resp = match agent.get(&target).set("User-Agent", DEFAULT_UA).set("Referer", referer).call() {
-        Ok(r) => r,
-        Err(ureq::Error::Status(code, _)) => return err(rq, code, "upstream refused"),
-        Err(e) => return err(rq, 502, &format!("upstream failed: {e}")),
+    // Fur Affinity's picture host sheds load when a page asks for dozens at once: at most 4 at a time, and a refused or
+    // dropped one is asked for again after a pause (it used to show as a picture that "did not load")
+    let fa = crate::fa::is_fa(&host);
+    let _slot = fa.then(fa_slot);
+    let mut tries = 0;
+    let resp = loop {
+        match agent.get(&target).set("User-Agent", DEFAULT_UA).set("Referer", referer).call() {
+            Ok(r) => break r,
+            Err(ureq::Error::Status(code, r)) => {
+                if fa && tries < 3 && (code == 429 || code >= 500) {
+                    let wait = r.header("Retry-After").and_then(|v| v.parse::<u64>().ok()).unwrap_or(1).clamp(1, 5);
+                    tries += 1;
+                    std::thread::sleep(Duration::from_secs(wait * tries));
+                    continue;
+                }
+                return err(rq, code, "upstream refused");
+            }
+            Err(e) => {
+                if fa && tries < 3 {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(600 * tries));
+                    continue;
+                }
+                return err(rq, 502, &format!("upstream failed: {e}"));
+            }
+        }
     };
     // streamed: the browser starts receiving while the picture is still arriving, instead of waiting for all of it
     let ct = resp.content_type().to_string();
     let len = resp.header("Content-Length").and_then(|v| v.parse::<usize>().ok()).filter(|n| *n <= 64 << 20);
     let reader = resp.into_reader().take(64 << 20);
     let _ = rq.respond(Response::new(tiny_http::StatusCode(200), vec![hdr("Content-Type", &ct), hdr("Cache-Control", "public, max-age=86400")], reader, len, None));
+}
+
+/// Holds one of four places for fetching Fur Affinity pictures; the place frees when this is dropped.
+struct FaSlot;
+static FA_BUSY: (std::sync::Mutex<u32>, std::sync::Condvar) = (std::sync::Mutex::new(0), std::sync::Condvar::new());
+fn fa_slot() -> FaSlot {
+    let mut n = FA_BUSY.0.lock().unwrap_or_else(|e| e.into_inner());
+    while *n >= 4 {
+        n = FA_BUSY.1.wait(n).unwrap_or_else(|e| e.into_inner());
+    }
+    *n += 1;
+    FaSlot
+}
+impl Drop for FaSlot {
+    fn drop(&mut self) {
+        *FA_BUSY.0.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        FA_BUSY.1.notify_one();
+    }
 }
