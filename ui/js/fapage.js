@@ -22,7 +22,7 @@ import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faName, faPosts } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -398,7 +398,18 @@ function renderUser(root, ctx, name, p) {
     const on = !!subs.find('fa', name);
     actions.replaceChildren(...[
       h('button', { class: 'btn' + (on ? ' primary' : ''), title: 'Board Roamer’s own follow: new posts show up in Follows. It does not watch them on Fur Affinity', onclick: () => (follow(name, 'fa'), setTimeout(paintFollow, 50)), html: icon(on ? 'bellOn' : 'bell', 15) + `<span>${on ? 'Following' : 'Follow'}</span>` }),
-      home ? h('button', { class: 'btn fa-watch' + (watching ? ' primary' : ''), title: watching ? 'You watch them on Fur Affinity. Their page there opens in your browser' : 'Fur Affinity does not let apps watch for you: its page opens in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon(watching ? 'check' : 'eye', 15) + `<span>${watching ? 'Watched' : 'Watch on Fur Affinity'}</span>` }) : null,
+      home ? h('button', { class: 'btn fa-watch' + (watching ? ' primary' : ''), title: watching ? 'You watch them on Fur Affinity. Tap to stop watching' : 'Watch them on Fur Affinity (needs your sign-in)', onclick: async (e) => {
+        if (!faState.loggedIn) return toast('Sign in to Fur Affinity first (Settings > Fur Affinity)', { ms: 2600 }), faLogin();
+        const b = e.currentTarget;
+        b.disabled = true;
+        const want = !watching;
+        toast(want ? 'Watching on Fur Affinity…' : 'Stopping the watch…', { ms: 1800 });
+        const r = await faWatchAct(name, want);
+        b.disabled = false;
+        if (r.ok) (watching = r.watching), toast(watching ? 'Now watching ' + pretty(name) : 'No longer watching', { ms: 2000 });
+        else toast(r.error || 'That did not work', { ms: 3000 });
+        paintFollow();
+      }, html: icon(watching ? 'check' : 'eye', 15) + `<span>${watching ? 'Watched' : 'Watch'}</span>` }) : null,
       home ? h('button', { class: 'btn', onclick: () => openExternal(faUrl.journals(name)), html: icon('book', 15) + '<span>Journals</span>', title: 'Journals open on Fur Affinity' }) : null,
       linked(name),
     ].filter(Boolean));
