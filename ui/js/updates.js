@@ -35,7 +35,25 @@ export function getUpdateState() {
   return { ...state, current: cur, os: app?.os, arch: app?.arch, available: !!(state.latest && cur && isNewer(state.latest.version, cur)) };
 }
 
-const stripMd = (t) => String(t || '').replace(/\r/g, '').replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+/** The changelog part of a release body: what the pull request said, without the boilerplate or markdown noise. */
+export function releaseNotes(body, max = 1600) {
+  let t = String(body || '').replace(/\r/g, '').split('<!-- end-of-changes -->')[0];
+  t = t.replace(/<!--[\s\S]*?-->/g, '').split(/\n{2,}/).filter((p) => !/^Android: Android or Play Protect/.test(p.trim())).join('\n\n');
+  t = t.replace(/^#+\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^\s*[-*]\s+/gm, '• ').replace(/\n{3,}/g, '\n\n').trim();
+  return t.length > max ? t.slice(0, max).replace(/\s+\S*$/, '') + '…' : t;
+}
+
+const toRelease = (j) => ({ version: String(j.tag_name || '').replace(/^v/i, ''), name: j.name || j.tag_name, notes: releaseNotes(j.body), url: j.html_url || RELEASES_URL, published: j.published_at });
+
+let recent = null; // newest releases with their notes, for "What's new" and "All releases"
+/** The newest releases (with changelogs), newest first. Cached for the session unless forced. */
+export async function fetchReleases({ force = false } = {}) {
+  if (recent && !force) return recent;
+  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=15`, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!res.ok) throw new Error(res.status === 403 ? 'GitHub is limiting requests right now. Try again in a while' : `GitHub answered ${res.status}`);
+  recent = (await res.json()).filter((j) => !j.draft && !j.prerelease).map(toRelease);
+  return recent;
+}
 
 /** Ask GitHub for the newest release. */
 export async function checkForUpdate({ force = false } = {}) {
@@ -50,7 +68,7 @@ export async function checkForUpdate({ force = false } = {}) {
     const j = await res.json();
     const wanted = assetName();
     const asset = (j.assets || []).find((a) => a.name === wanted);
-    state.latest = { version: String(j.tag_name || '').replace(/^v/i, ''), name: j.name || j.tag_name, notes: stripMd(j.body).slice(0, 900), url: j.html_url || RELEASES_URL, published: j.published_at, asset: asset ? asset.browser_download_url : null, size: asset ? asset.size : 0 };
+    state.latest = { version: String(j.tag_name || '').replace(/^v/i, ''), name: j.name || j.tag_name, notes: releaseNotes(j.body), url: j.html_url || RELEASES_URL, published: j.published_at, asset: asset ? asset.browser_download_url : null, size: asset ? asset.size : 0 };
     state.checked = Date.now();
     save();
     push({ checking: false });

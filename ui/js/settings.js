@@ -11,7 +11,7 @@ import { segmented, toast, confirmDlg, dialog } from './ui.js';
 import { sendTest } from './notify.js';
 import { devices } from './local.js';
 import { reveal, openExternal } from './actions.js';
-import { checkForUpdate, installUpdate, onUpdate, appInfo } from './updates.js';
+import { checkForUpdate, installUpdate, onUpdate, appInfo, fetchReleases } from './updates.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
 import { isNative } from './titlebar.js';
 
@@ -311,6 +311,19 @@ export function openSettings(section) {
 
   /* --- updates */
   const updBox = h('div', { class: 'upd-box' });
+  /* the recent releases with their changelogs, in the app */
+  const allBox = h('div', { class: 'rel-list' });
+  let showAll = false, allList = null, allErr = '';
+  const paintAll = () => {
+    if (!showAll) return allBox.replaceChildren();
+    if (allErr) return allBox.replaceChildren(h('div', { class: 'st-note upd-err' }, allErr));
+    if (!allList) return allBox.replaceChildren(h('div', { class: 'st-note' }, 'Loading releases…'));
+    allBox.replaceChildren(...allList.map((r) => h('details', { class: 'rel' },
+      h('summary', {}, h('b', {}, r.version), h('small', {}, r.published ? ago(r.published) : '')),
+      h('p', {}, r.notes || 'No changelog for this release.'),
+      h('button', { class: 'btn', onclick: () => openExternal(r.url) }, 'Open on GitHub'))));
+  };
+  const loadAll = () => { allErr = ''; fetchReleases({ force: true }).then((l) => (allList = l), (e) => (allErr = e.message)).then(paintAll); };
   offUpd?.();
   offUpd = onUpdate((u) => {
     const kids = [];
@@ -319,7 +332,7 @@ export function openSettings(section) {
       kids.push(h('div', { class: 'upd-new' },
         h('b', {}, `Version ${u.latest.version} is available`),
         u.latest.published ? h('small', {}, ago(u.latest.published)) : null,
-        u.latest.notes ? h('p', {}, u.latest.notes) : null,
+        u.latest.notes ? h('p', {}, u.latest.notes) : h('small', {}, 'This release came without a changelog.'),
         h('div', { class: 'row-btns' },
           h('button', { class: 'btn primary', disabled: u.installing, onclick: () => installUpdate() }, u.installing ? (u.progress ? `Downloading… ${u.progress}%` : 'Working…') : 'Update now'),
           h('button', { class: 'btn', onclick: () => openExternal(u.latest.url) }, 'Release notes'))));
@@ -330,7 +343,9 @@ export function openSettings(section) {
     if (u.error) kids.push(h('div', { class: 'st-note upd-err' }, u.error));
     kids.push(h('div', { class: 'row-btns' },
       h('button', { class: 'btn', disabled: u.checking || u.installing, onclick: () => checkForUpdate({ force: true }) }, u.checking ? 'Checking…' : 'Check now'),
-      h('button', { class: 'btn', onclick: () => openExternal(RELEASES_URL) }, 'All releases')));
+      h('button', { class: 'btn', onclick: () => ((showAll = !showAll), showAll && loadAll(), paintAll()) }, showAll ? 'Hide releases' : 'All releases'),
+      h('button', { class: 'btn', onclick: () => openExternal(RELEASES_URL) }, 'On GitHub')));
+    kids.push(allBox);
     updBox.replaceChildren(...kids);
   });
   appInfo().then(() => checkForUpdate().catch(() => {}));

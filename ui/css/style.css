@@ -1680,3 +1680,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fd-lt { display: flex; }
 .fd-menu { justify-self: end; }
 .fd-scope.on { color: var(--accent); }
+.rel-list { display: flex; flex-direction: column; gap: 6px; }
+.rel { border: 1px solid var(--line, color-mix(in oklch, currentColor 15%, transparent)); padding: 8px 10px; }
+.rel summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px; }
+.rel summary small { font: 500 11px var(--f-mono); color: var(--faint); }
+.rel p { margin: 8px 0; font: 500 12px/1.5 var(--f-mono); color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14em; overflow: auto; }
