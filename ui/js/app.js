@@ -152,7 +152,8 @@ function setActiveNav(view) {
   rail.querySelector('.nav').classList.toggle('none', key === 'fa'); // Fur Affinity lives below, next to the source dial
   rail.querySelectorAll('.fa-rail').forEach((a) => a.classList.toggle('on', key === 'fa'));
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
-  tabbar.style.setProperty('--i', Math.max(0, i));
+  // the tab bar counts its own visible tabs (the rail keeps Fur Affinity out of its list, so its index would point at Feed)
+  tabbar.style.setProperty('--i', Math.max(0, [...tabbar.querySelectorAll('.tab')].filter((a) => !a.hidden).findIndex((a) => a.dataset.view === key)));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));
   appbarTitle.textContent = { roam: 'Roam', feed: 'Feed', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local', fa: 'Fur Affinity' }[view] || 'Roam';
 }
