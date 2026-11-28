@@ -35,3 +35,9 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - The Fur Affinity button sits above the source dial in the rail. Layout and tile-size controls are shared with the boards.
 - Following > "Import my watch list": on a tap, the Fur Affinity window opens the person's own watch list page (signing in there if asked), reads the names once, and closes; the person confirms the list before anything is followed. Pasting the page is the fallback. No background requests.
 - Profile tab (default on an artist): bio, info and contact, featured, latest submissions and favorites, shouts (markup unseen, best effort). Journals, watchers and watching lists open on the site.
+
+## Artist page layout
+- Laid out like an FA userpage in Board Roamer's style: name block (avatar, stats, actions), tabs (Home, Gallery, Scraps, Favorites, Folders). Home has About, Gallery, Favorites and shouts on the left; journal, profile info, contact, stats and watch lists on the right (one column under 1040px). Other tabs keep a one-line name block.
+- Profile pictures follow the rating switches, blacklist (veil or hide), #blur rules and "blur thumbnails". A picture with no stated rating (the profile ID one) counts as Adult.
+- Gallery and Favorites each have a large preview over their thumbnails, as FA does: it starts on `#gallery-preview` / `#favorite-preview`, loads the 600px picture, and a mouse resting 300 ms on a thumbnail swaps it in.
+- `featured` comes from `#gallery-preview`; the `.section-submission` picture is `profileId`.

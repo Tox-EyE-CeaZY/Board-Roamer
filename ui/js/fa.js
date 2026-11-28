@@ -28,6 +28,10 @@ export const faUrl = {
   scraps: (n) => `${P.FA_WEB}/scraps/${enc(n)}/`,
   favorites: (n) => `${P.FA_WEB}/favorites/${enc(n)}/`,
   journals: (n) => `${P.FA_WEB}/journals/${enc(n)}/`,
+  /** These three are only ever opened in the user's browser. */
+  journal: (id) => `${P.FA_WEB}/journal/${id}/`,
+  watchers: (n) => `${P.FA_WEB}/watchlist/to/${enc(n)}/`,
+  watchingList: (n) => `${P.FA_WEB}/watchlist/by/${enc(n)}/`,
   /** Search is closed to apps by robots.txt: this address is only ever opened in the user's own browser. */
   search: (q) => `${P.FA_WEB}/search/?q=${enc(q)}`,
 };
@@ -284,6 +288,9 @@ function fromItem(it, prov) {
     title: it.title || '', type: it.type, facts: [], folders: [], _lazy: true, _ts: ts,
   };
 }
+
+/** Thumbnails shown outside a gallery (the profile page) as posts, so the blacklist and blur rules apply to them too. */
+export const faPosts = (items, prov) => items.map((it) => fromItem(it, prov));
 
 /** The details a submission page adds to a post. */
 function applySubmission(p, s) {

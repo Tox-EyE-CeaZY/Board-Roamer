@@ -312,7 +312,8 @@ export function parseUserpage(doc) {
     for (const m of clean(sec.querySelector('.section-body')?.textContent).matchAll(/([A-Za-z][A-Za-z ]*?):\s*(\d[\d,]*)/g)) stats[m[1].trim().toLowerCase()] = +m[2].replace(/,/g, '');
   }
   const count = (sel) => num(page.querySelector(`${sel} .section-header h3 a`)?.textContent);
-  const featured = /\/view\/(\d+)/.exec(page.querySelector('.section-submission a[href*="/view/"]')?.getAttribute('href') || '');
+  const people = (sel) => [...page.querySelectorAll(`${sel} .c-usernameBlockSimple a[href*="/user/"]`)]
+    .map((a) => ({ user: nameFromHref(a.getAttribute('href')), display: txt(a) })).filter((x) => x.user);
   return {
     ...head,
     bio: plainText(page.querySelector('.userpage-layout-profile .userpage-profile')),
@@ -321,11 +322,67 @@ export function parseUserpage(doc) {
     watching_count: count('.is-watching-block'),
     fields: [...page.querySelectorAll('#userpage-contact-item .table-row')].map((r) => [txt(r.querySelector('.userpage-profile-question')), clean(r.textContent).replace(txt(r.querySelector('.userpage-profile-question')), '').trim()]).filter(([k]) => k),
     contacts: [...page.querySelectorAll('#userpage-contact .user-contact-item')].map((c) => ({ label: txt(c.querySelector('strong')), url: c.querySelector('a[href^="http"]')?.getAttribute('href') || '', text: txt(c.querySelector('a')) })),
-    featured: featured ? featured[1] : '',
+    recentWatchers: people('.watched-by-block'),
+    recentWatching: people('.is-watching-block'),
+    featured: parsePreview(page.querySelector('#gallery-preview')),
+    favPreview: parsePreview(page.querySelector('#favorite-preview')),
+    profileId: parsePreview(page.querySelector('.section-submission')),
+    journal: parseFeaturedJournal(page),
     latest: parseFigures(doc, { root: '#gallery-latest-submissions' }),
     latestFavs: parseFigures(doc, { root: '#gallery-latest-favorites' }),
     shouts: parseShouts(doc),
   };
+}
+
+/** One large picture on a profile (the featured submission, the latest favorite, or the "profile ID" picture): null when there is none. */
+export function parsePreview(box) {
+  const a = box?.querySelector('a[href*="/view/"] img')?.closest('a');
+  const id = (/\/view\/(\d+)/.exec(a?.getAttribute('href') || '') || [])[1];
+  if (!id) return null;
+  const img = a.querySelector('img');
+  const src = img.getAttribute('src') || '';
+  const parts = thumbParts(src);
+  const t = parseTagString(img.getAttribute('data-tags'));
+  const date = box.querySelector('.preview_date .popup_date, .popup_date');
+  return {
+    id,
+    title: txt(box.querySelector('.preview_title a')),
+    user: t.user,
+    // the profile ID picture carries no rating class: it stays empty rather than being guessed
+    rating: (/\br-(general|mature|adult)\b/.exec(a.className || '') || [])[1] || '',
+    type: 'image',
+    category: t.category,
+    theme: t.theme,
+    species: t.species,
+    keywords: t.keywords,
+    thumb: parts ? thumbUrl(id, parts.ts, parts.size, parts.ext) : cdn(src),
+    ts: parts?.ts || '',
+    created: unixIso(date?.getAttribute('data-time')),
+  };
+}
+
+/** The journal a profile puts forward: {id, title, created, text}, or null. */
+export function parseFeaturedJournal(page) {
+  for (const sec of page.querySelectorAll('.userpage-right-column')) {
+    if (!/^featured journal$/i.test(txt(sec.querySelector('.section-header h2')))) continue;
+    const id = (/\/journal\/(\d+)/.exec(sec.querySelector('a[href*="/journal/"]')?.getAttribute('href') || '') || [])[1];
+    if (!id) return null;
+    const body = sec.querySelector('.section-body');
+    const head = body?.querySelector('h2');
+    // the heading is the title followed by "(rating)": keep the words before the rating
+    const parts = [];
+    for (const n of head?.childNodes || []) {
+      if (n.nodeType === 1 && /contentRating/i.test((n.id || '') + ' ' + (n.className || ''))) break;
+      parts.push(n.textContent);
+    }
+    return {
+      id,
+      title: clean(parts.join('')).replace(/\s*\($/, ''),
+      created: unixIso(body?.querySelector('.popup_date')?.getAttribute('data-time')),
+      text: plainText(body?.querySelector('.user-submitted-links')),
+    };
+  }
+  return null;
 }
 
 /** Shouts on a profile (markup not seen in a saved page yet: read defensively, empty when it does not match). */
@@ -336,7 +393,14 @@ export function parseShouts(doc) {
     const text = plainText(c.querySelector('.comment_text, .comment-text, .user-submitted-links')).trim();
     const date = c.querySelector('.popup_date');
     if (!who || !text) continue;
-    out.push({ user: nameFromHref(who.getAttribute('href')), text, at: date?.getAttribute('title') || clean(date?.textContent) || '' });
+    out.push({
+      user: nameFromHref(who.getAttribute('href')),
+      display: txt(c.querySelector('.js-displayName')),
+      avatar: cdn(c.querySelector('img.comment_useravatar')?.getAttribute('src')),
+      text,
+      at: date?.getAttribute('title') || clean(date?.textContent) || '',
+      created: unixIso(date?.getAttribute('data-time')),
+    });
     if (out.length >= 40) break;
   }
   return out;

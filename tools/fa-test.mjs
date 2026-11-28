@@ -111,7 +111,12 @@ const up = await run(fixture('userpage'), (P, d) => P.parseUserpage(d));
 ok('user page', () => {
   assert.equal(up.lower, 'user3'); assert.equal(up.bio, 'Hello there\nSome bio text\nsecond line');
   assert.equal(up.stats.views, 100053); assert.equal(up.stats.submissions, 229); assert.equal(up.stats['comments earned'], 2514);
-  assert.equal(up.watchers, 6242); assert.equal(up.watching_count, 69); assert.equal(up.featured, '10000057');
+  assert.equal(up.watchers, 6242); assert.equal(up.watching_count, 69);
+  assert.deepEqual([up.featured.id, up.featured.title, up.featured.rating, up.featured.thumb], ['10000014', 'Sample Title', 'mature', 'https://t.furaffinity.net/10000014@600-1700000015.jpg']);
+  assert.deepEqual([up.favPreview.id, up.favPreview.user, up.favPreview.rating], ['10000048', 'user95', 'adult']);
+  assert.equal(up.profileId.id, '10000057'); assert.equal(up.profileId.rating, '', 'the profile ID picture carries no rating');
+  assert.deepEqual(up.journal, { id: '10000055', title: 'Journal title', created: '2023-11-14T22:14:16.000Z', text: 'Journal text\nmore' });
+  assert.deepEqual(up.recentWatchers, [{ user: 'user108', display: 'User108' }]); assert.deepEqual(up.recentWatching, []);
   assert.equal(up.latest.length, 2); assert.equal(up.latestFavs.length, 1); assert.equal(up.latestFavs[0].user, 'user95');
   assert.deepEqual(up.fields, [['Accepting Commissions', 'Yes']]);
   assert.deepEqual(up.contacts, [{ label: 'Website', url: 'https://example.com/', text: 'example.com' }]);
