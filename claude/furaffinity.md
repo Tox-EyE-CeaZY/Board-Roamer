@@ -27,3 +27,11 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - Sign-in window, cookie capture and Cloudflare clearance reuse (cannot be tested without the site).
 - Browse paging and favorites paging follow the page's own "Next" form; only page 1 fixtures exist.
 - Saved pages still wanted: browse page 1 and 2, favorites p1/p2, gallery p2, multi-page search, story and music submissions, a Mature/Adult submission with comments, a Cloudflare challenge page.
+
+## 2.15.1 additions
+- Pictures load through the local proxy (own Referer, one pooled connection agent); tiles use the thumbnail the page listed.
+- Writing and music: tiles without a cover become text cards; the viewer shows a reading page (`fadoc.js`: the page's own text, or a .txt/.rtf file; .pdf/.docx open on the site) or an audio player. The story-body and audio selectors are guesses: a saved story page and song page are still needed to confirm them.
+- The front page has no next page: after the list, "Load more" continues through Browse, keeping the section's kind of work.
+- The Fur Affinity button sits above the source dial in the rail. Layout and tile-size controls are shared with the boards.
+- Following > "Import my watch list": paste text copied from your own watch list page (no request is made to the site).
+- Profile tab (default on an artist): bio, info and contact, featured, latest submissions and favorites, shouts (markup unseen, best effort). Journals, watchers and watching lists open on the site.
