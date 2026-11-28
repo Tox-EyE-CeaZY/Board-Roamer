@@ -1617,6 +1617,11 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
   .fa-hero, .fa-hero.slim { padding-left: 14px; padding-right: 14px; }
   .fa-hero.slim { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'back out' 'av who' 'act act'; }
   .fa-av { width: 72px; height: 72px; align-self: start; }
+  /* touch: the buttons get their own full-width rows under the name instead of squeezing in beside the picture */
+  .fa-hero:not(.slim) { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'back back out' 'av who who' 'act act act' 'nums nums nums'; column-gap: 14px; }
+  .fa-hero:not(.slim) .fa-act { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fa-hero:not(.slim) .fa-act .btn { min-height: 46px; justify-content: center; }
+  .fa-nums { grid-template-columns: repeat(2, 1fr); }
   .fa-tabs { margin-left: 14px; margin-right: 14px; }
   .fa-profile { padding-left: 14px; padding-right: 14px; }
   .fa-rows { --th: 118px; }
