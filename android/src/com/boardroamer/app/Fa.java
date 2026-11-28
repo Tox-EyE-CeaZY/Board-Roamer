@@ -259,17 +259,17 @@ final class Fa {
             col.setOrientation(LinearLayout.VERTICAL);
             col.setBackgroundColor(0xFF0A1113);
             // Board Roamer's own bar: mono labels on the app's dark ground, a lime mark, a hairline under it
-            float d = act.getResources().getDisplayMetrics().density;
+            float dp = act.getResources().getDisplayMetrics().density;
             LinearLayout bar = new LinearLayout(act);
             bar.setOrientation(LinearLayout.HORIZONTAL);
             bar.setGravity(Gravity.CENTER_VERTICAL);
-            bar.setPadding((int) (14 * d), 0, 0, 0);
+            bar.setPadding((int) (14 * dp), 0, 0, 0);
             bar.setBackgroundColor(0xFF0A1113);
             android.view.View mark = new android.view.View(act);
             mark.setBackgroundColor(0xFF9BE84A);
             mark.setRotation(45);
-            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams((int) (8 * d), (int) (8 * d));
-            mp.rightMargin = (int) (10 * d);
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams((int) (8 * dp), (int) (8 * dp));
+            mp.rightMargin = (int) (10 * dp);
             bar.addView(mark, mp);
             TextView title = new TextView(act);
             title.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
@@ -289,11 +289,11 @@ final class Fa {
             close.setContentDescription("Close");
             close.setOnClickListener(v -> closeWin());
             bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            bar.addView(close, new LinearLayout.LayoutParams((int) (56 * d), (int) (44 * d)));
+            bar.addView(close, new LinearLayout.LayoutParams((int) (56 * dp), (int) (44 * dp)));
             col.addView(bar);
             android.view.View line = new android.view.View(act);
             line.setBackgroundColor(0xFF1F2D30);
-            col.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, (int) d)));
+            col.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, (int) dp)));
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             col.addView(web, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             dialog.setContentView(col);
