@@ -386,10 +386,11 @@ export class Viewer {
     }
     // animated GIFs go straight to the real file: a static "sample" would swap in noticeably later
     const first = post.kind === 'anim' ? post.full : post.sample || post.full;
-    const img = h('img', { class: 'media', alt: '', draggable: 'false', src: first });
+    const via = (u) => (post.viaProxy ? '/img?u=' + encodeURIComponent(u) : u); // Fur Affinity pictures go through the local proxy (own Referer, reused connections)
+    const img = h('img', { class: 'media', alt: '', draggable: 'false', src: via(first) });
     // until the picture itself has loaded, show the thumbnail (already in memory from the gallery) instead of a blank box
     if (post.thumb && post.thumb !== first) {
-      img.style.cssText = `background:url("${post.thumb}") center/100% 100% no-repeat`;
+      img.style.cssText = `background:url("${via(post.thumb)}") center/100% 100% no-repeat`;
       img.addEventListener('load', () => (img.style.background = ''), { once: true });
     }
     // The full-size original is only a sharper copy. Swapping it in by changing `src` blanks the picture while a
@@ -407,7 +408,7 @@ export class Viewer {
           if (post.full === first) throw new Error('nothing bigger');
           let next = img.cloneNode(false); // same size, position and transform as the one on screen
           next.style.background = '';
-          next.src = post.full;
+          next.src = via(post.full);
           try {
             await next.decode();
           } catch {

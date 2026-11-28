@@ -271,7 +271,8 @@ function fromItem(it, prov) {
   const w = (it.w || 200) * 5, h = (it.h || 200) * 5;
   return {
     provider: prov.id, id, rating: P.FA_RATING[it.rating] || 'q', w: Math.round(w), h: Math.round(h), ext: it.type === 'image' ? 'jpg' : it.type, kind: 'image', md5: '', size: 0,
-    thumb: ts ? P.thumbUrl(id, ts, THUMB) : it.thumb, sample: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb, full: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb,
+    // the picture the page itself listed is known to exist and is small; the 600px version is only for the viewer's first look
+    thumb: it.thumb || (ts ? P.thumbUrl(id, ts, THUMB) : ''), sample: it.thumb || (ts ? P.thumbUrl(id, ts, THUMB) : ''), full: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb, viaProxy: true,
     score: 0, up: 0, down: 0, favs: 0, noScore: true, tags, artists: it.user ? [it.user] : [], sources: [], created: '', desc: unBB(it.desc),
     parent: null, children: [], pools: [], duration: 0, comments: 0, faved: faLikes.isFav(id), url: faUrl.view(id), alts: [], isComic: false,
     title: it.title || '', type: it.type, facts: [], folders: [], _lazy: true, _ts: ts,

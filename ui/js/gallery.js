@@ -271,13 +271,14 @@ export class Gallery {
       const img = h('img', { alt: '', decoding: 'async', draggable: 'false' });
       img.onload = () => el.classList.add('ready');
       let tries = 0;
+      const px = (u) => (p.viaProxy ? '/img?u=' + encodeURIComponent(u) : u); // viaProxy: the site's picture host wants its own Referer and is slow for the browser directly
       img.onerror = () => {
         // sample -> preview -> preview through the local proxy (sends the site's own Referer)
-        if (tries === 0 && p.thumb && img.src !== p.thumb) (tries = 1), (img.src = p.thumb);
-        else if (tries < 2) (tries = 2), (img.src = '/img?u=' + encodeURIComponent(p.thumb));
+        if (tries === 0 && p.thumb && this._src(p, r) !== p.thumb) (tries = 1), (img.src = px(p.thumb));
+        else if (tries < 2 && !p.viaProxy) (tries = 2), (img.src = '/img?u=' + encodeURIComponent(p.thumb));
         else el.classList.add('broken');
       };
-      img.src = this._src(p, r);
+      img.src = px(this._src(p, r));
       clip.append(img);
       if (isBlurred(p)) el.classList.add('blurred');
       el.append(
