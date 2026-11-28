@@ -42,7 +42,13 @@ export async function savePost(p, { dir = '', name = '' } = {}) {
 }
 
 export const reveal = (path) => (isAndroid() ? native.reveal(path) : fetch('/open?reveal=' + encodeURIComponent(path), { method: 'POST' }));
-export const openExternal = (url) => (isAndroid() ? native.open(url) : fetch('/open?u=' + encodeURIComponent(url), { method: 'POST' }));
+let intercept = null;
+/** The app registers what should open inside it (Fur Affinity links): every "open this link" in the app goes through here first. */
+export const interceptLinks = (fn) => (intercept = fn);
+export const openExternal = (url, browser = false) => {
+  try { if (!browser && intercept?.(url)) return Promise.resolve(); } catch { /* fall through to the browser */ }
+  return isAndroid() ? native.open(url) : fetch('/open?u=' + encodeURIComponent(url), { method: 'POST' });
+};
 
 /** opts.dir saves into a sub-folder; opts.numbered prefixes 001_, 002_… (keeps pool/comic order). */
 export async function downloadMany(posts, opts = {}) {

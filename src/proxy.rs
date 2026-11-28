@@ -385,12 +385,9 @@ pub fn image(rq: Request, query: &str) {
         Err(ureq::Error::Status(code, _)) => return err(rq, code, "upstream refused"),
         Err(e) => return err(rq, 502, &format!("upstream failed: {e}")),
     };
+    // streamed: the browser starts receiving while the picture is still arriving, instead of waiting for all of it
     let ct = resp.content_type().to_string();
-    let mut out = Vec::new();
-    let _ = resp.into_reader().take(64 << 20).read_to_end(&mut out);
-    let _ = rq.respond(
-        Response::from_data(out)
-            .with_header(hdr("Content-Type", &ct))
-            .with_header(hdr("Cache-Control", "public, max-age=86400")),
-    );
+    let len = resp.header("Content-Length").and_then(|v| v.parse::<usize>().ok()).filter(|n| *n <= 64 << 20);
+    let reader = resp.into_reader().take(64 << 20);
+    let _ = rq.respond(Response::new(tiny_http::StatusCode(200), vec![hdr("Content-Type", &ct), hdr("Cache-Control", "public, max-age=86400")], reader, len, None));
 }

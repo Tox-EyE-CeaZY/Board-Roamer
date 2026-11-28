@@ -222,8 +222,9 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
 
 /// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
 fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
-    // on the watch list page it also reads the names the person can see there (links to user pages in the page's content)
-    let js = "JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,names:/^\\/controls\\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*=\\\"/user/\\\"]')].map(a=>(/\\/user\\/([^/?#]+)/.exec(a.getAttribute('href'))||[])[1]).filter(Boolean))]:[]})";
+    // on the watch list page it also reads the users listed there: links to user pages whose text is that user's own name
+    // (the list itself; navigation, news and the footer never match). Same rule as parseWatchNames in ui/js/fa-parse.js.
+    let js = r#"JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,names:/^\/controls\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*="/user/"]')].map(a=>{const m=/\/user\/([^/?#]+)/.exec(a.getAttribute('href')||'');if(!m)return '';let n=m[1];try{n=decodeURIComponent(n)}catch(e){}const f=s=>String(s||'').toLowerCase().replace(/[\s_~@.\-]+/g,'');return f(a.textContent)===f(n)?n:''}).filter(Boolean))]:[]})"#;
     let _ = w.webview.evaluate_script_with_callback(js, move |raw| {
         // the callback gets the JSON text of a string; unwrap that once
         let inner: String = serde_json::from_str(&raw).unwrap_or_default();
