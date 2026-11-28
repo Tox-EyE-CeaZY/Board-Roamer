@@ -77,8 +77,13 @@ final class Fa {
         try { args = q == null || q.isEmpty() ? new JSONObject() : new JSONObject(q); } catch (Exception e) { args = new JSONObject(); }
         switch (path) {
             case "/fa/status": return json(200, status());
-            case "/fa/login": if (post) open(LOGIN, null, false); return json(200, "{\"ok\":true}");
-            case "/fa/verify": if (post) open(VERIFY, null, false); return json(200, "{\"ok\":true}");
+            case "/fa/log":
+                if (post) FaNet.logClear();
+                return json(200, post ? "{\"ok\":true}" : FaNet.logJson());
+            case "/fa/login": if (post) FaNet.log("sign-in window requested");
+                if (post) open(LOGIN, null, false); return json(200, "{\"ok\":true}");
+            case "/fa/verify": if (post) FaNet.log("quick-check window requested");
+                if (post) open(VERIFY, null, false); return json(200, "{\"ok\":true}");
             case "/fa/paste": {
                 String a = args.optString("a", "").trim(), b = args.optString("b", "").trim();
                 if (!(FaNet.sane(a) && FaNet.sane(b))) return json(400, "{\"error\":\"Those do not look like the two cookie values (a and b).\"}");
@@ -185,7 +190,7 @@ final class Fa {
                 UI.post(() -> {
                     try { startReader(); syncCookies(); runInReader(js, 0); } catch (RuntimeException e) { readerBroken = true; latch.countDown(); }
                 });
-                if (!latch.await(25, TimeUnit.SECONDS)) { readerBroken = true; return null; }
+                if (!latch.await(25, TimeUnit.SECONDS)) { readerBroken = true; FaNet.log("page reader gave no answer in 25 s for " + FaNet.logPath(target) + ": switching to plain requests"); return null; }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
@@ -197,7 +202,8 @@ final class Fa {
             try {
                 JSONObject o = new JSONObject(raw);
                 int status = o.optInt("s", 0);
-                if (status == 0) return null;
+                if (status == 0) { FaNet.log("page reader failed for " + FaNet.logPath(target) + ": " + o.optString("e", "").replaceAll("https?://\\S+", "")); return null; }
+                if (status >= 400 || "challenge".equalsIgnoreCase(o.optString("m", ""))) FaNet.log("page reader: " + FaNet.logPath(target) + " answered HTTP " + status + ", cf-mitigated: " + o.optString("m", "none"));
                 return FaNet.fromBrowser(status, o.optString("u", ""), "challenge".equalsIgnoreCase(o.optString("m", "")), o.optString("t", ""));
             } catch (Exception e) {
                 return null;
@@ -210,6 +216,7 @@ final class Fa {
         UI.post(() -> {
             if (act == null || act.isFinishing()) return;
             closeWin();
+            FaNet.log("window opened: " + (mode == ACT ? "watch/unwatch" : mode == WATCH ? "watch list" : mode == LOGIN ? "sign-in" : "quick check"));
             try { win = new Win(mode, user, want); } catch (RuntimeException e) { win = null; }
         });
     }
@@ -302,6 +309,7 @@ final class Fa {
         }
 
         void close() {
+            if (!finished) FaNet.log("window closed before it finished");
             if (!finished && mode == ACT && actResult == null) fail("Closed before it finished");
             finished = true;
             try { if (dialog != null) dialog.dismiss(); } catch (RuntimeException ignored) { }
@@ -358,6 +366,7 @@ final class Fa {
             String title = v.optString("title", "").toLowerCase(java.util.Locale.ROOT);
             boolean checking = title.startsWith("just a moment") || title.contains("attention required");
             String path = v.optString("path", "");
+            FaNet.log("window page " + path + ": " + (checking ? "Cloudflare check showing" : "normal page") + "; cookies a:" + (a != null) + " b:" + (b != null) + " cf_clearance:" + (cf != null));
             if (mode == ACT) {
                 if (checking || path.startsWith("/login")) { show(); return; } // the person has to deal with this one
                 if (path.replaceAll("/+$", "").equalsIgnoreCase("/user/" + user)) {
@@ -396,6 +405,7 @@ final class Fa {
                 return;
             }
             boolean done = mode == LOGIN ? FaNet.connected() && !path.startsWith("/login") : !checking && cf != null;
+            FaNet.log(done ? "window finished and closed by itself" : "window stays open (" + (checking ? "still on the check" : mode == LOGIN ? "not signed in yet" : "no clearance cookie yet") + ")");
             if (done) { finished = true; closeWin(); }
         }
 

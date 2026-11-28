@@ -225,6 +225,7 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
     let window = wb.build(target).ok()?;
     // its own profile, so signing out here cannot touch the app's settings
     let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
+    fa::log(format!("window opened: {}", if act.is_some() { "watch/unwatch" } else if watch { "watch list" } else if login { "sign-in" } else { "quick check" }));
     let mode = if act.is_some() { "WATCH" } else if watch { "YOUR WATCH LIST" } else if login { "SIGN IN" } else { "QUICK CHECK" };
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
         .with_background_color((10, 17, 19, 255))
@@ -280,6 +281,7 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
     let title = v["title"].as_str().unwrap_or("").to_lowercase();
     let checking = title.starts_with("just a moment") || title.contains("attention required");
     let path = v["path"].as_str().unwrap_or("");
+    fa::log(format!("window page {path}: {}; cookies a:{} b:{} cf_clearance:{}; user agent {}", if checking { "Cloudflare check showing" } else { "normal page" }, get("a").is_some(), get("b").is_some(), get("cf_clearance").is_some(), if v["ua"].as_str().unwrap_or("").is_empty() { "missing" } else { "read" }));
     if let Some((user, want)) = w.act.clone() {
         let user_page = path.trim_end_matches('/').eq_ignore_ascii_case(&format!("/user/{user}"));
         if checking || path.starts_with("/login") {
@@ -370,6 +372,7 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
         return;
     }
     let done = if w.login { fa::connected() && !path.starts_with("/login") } else { !checking && get("cf_clearance").is_some() };
+    fa::log(if done { "window finished and closed by itself".to_string() } else { format!("window stays open ({})", if checking { "still on the check" } else if w.login { "not signed in yet" } else { "no clearance cookie yet" }) });
     if done {
         *fa_win = None;
     }
@@ -377,6 +380,7 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
 
 /// The person closed the Fur Affinity window: a pending Watch answers "not changed" instead of waiting out its minute.
 fn fa_shut(fa_win: &mut Option<FaWin>) {
+    fa::log("window closed by the person");
     if let Some((u, want)) = fa_win.as_ref().and_then(|w| w.act.clone()) {
         fa::set_act(&u, !want, "The Fur Affinity window was closed before it finished");
     }

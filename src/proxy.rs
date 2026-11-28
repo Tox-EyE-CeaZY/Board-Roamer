@@ -197,8 +197,14 @@ pub fn api(mut rq: Request, query: &str) {
     if fa_page {
         // Cloudflare's "checking your browser" page: say so, never try to get past it (the page shows a banner and waits)
         if crate::fa::is_challenge(code, mitigated, &out) {
+            if !CHALLENGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                crate::fa::log(format!("Cloudflare check on {} (HTTP {code}, cf-mitigated: {mitigated}, clearance cookie sent: {})", crate::fa::log_path(&final_url), crate::fa::status()["cleared"]));
+            }
             let body = serde_json::json!({ "error": "Fur Affinity needs a quick check in a browser window", "challenge": true });
             return reply_h(rq, 503, "application/json", body.to_string().into_bytes(), &[("X-BR-FA", "challenge")]);
+        }
+        if CHALLENGED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            crate::fa::log(format!("pages load again: {} answered HTTP {code}", crate::fa::log_path(&final_url)));
         }
         let extra = [("X-BR-FA", "ok"), ("X-BR-Final", final_url.as_str())];
         if method == Method::Get && code == 200 {
@@ -211,6 +217,8 @@ pub fn api(mut rq: Request, query: &str) {
     }
     reply(rq, code, &ct, out);
 }
+
+static CHALLENGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn cache_put(key: String, code: u16, ct: &str, out: &[u8]) {
     let mut c = CACHE.get_or_init(Default::default).lock().unwrap();

@@ -10,7 +10,8 @@
  * What the app never does by itself (FA's robots.txt closes it to apps): search the site, read the watch feed, favorite or
  * watch for real. Those open Fur Affinity in the browser. Favorites and upvotes here are saved on this device only.
  */
-import { h, pretty, fmtNum, ago, debounce } from './util.js';
+import { h, pretty, fmtNum, ago, debounce, copyText } from './util.js';
+import { isAndroid, native } from './platform.js';
 import { icon } from './icons.js';
 import { S, setS, on, subs, kv, tagLinks } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
@@ -25,7 +26,7 @@ import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
 import { cachedImg } from './thumbcache.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts, faLink } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts, faLink, faLogText, faLogClear } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -804,7 +805,23 @@ export function faSettingsBox(rerender) {
         const b = h('input', { class: 'input', placeholder: 'cookie b', spellcheck: 'false', autocomplete: 'off' });
         return h('div', { class: 'row-btns' }, a, b, h('button', { class: 'btn', onclick: async () => { try { const { faPaste } = await import('./fa.js'); await faPaste(a.value.trim(), b.value.trim()); a.value = b.value = ''; toast('Saved', { ms: 1200 }); paint(); } catch (e) { toast(e.message, { kind: 'err' }); } } }, 'Save'));
       })());
-    box.replaceChildren(...sign, paste,
+    const diag = h('details', { class: 'st-diag' }, h('summary', {}, 'Diagnostics: what the verification did'),
+      h('p', { class: 'st-note' }, 'A log of each Fur Affinity check, the window, and whether the session came across. It never holds a cookie value, a password or a search. If verifying fails, tap Copy and send it along.'));
+    diag.append((() => {
+        const pre = h('pre', { class: 'st-log', tabindex: '0' }, 'Loading…');
+        let timer = 0, text = '';
+        const refresh = async () => { text = await faLogText(); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30; pre.textContent = text; if (atEnd) pre.scrollTop = pre.scrollHeight; };
+        diag.addEventListener('toggle', () => {
+          clearInterval(timer);
+          if (diag.open) { refresh(); timer = setInterval(() => (box.isConnected && diag.open ? refresh() : clearInterval(timer)), 2500); }
+        });
+        return h('div', {}, pre, h('div', { class: 'row-btns' },
+          h('button', { class: 'btn', onclick: async () => { await refresh(); copyText(text); toast('Log copied', { ms: 1400 }); }, html: icon('copy', 15) + '<span>Copy</span>' }),
+          isAndroid() ? h('button', { class: 'btn', onclick: async () => { await refresh(); native.share(text, 'Board Roamer Fur Affinity log'); }, html: icon('share', 15) + '<span>Share</span>' }) : null,
+          h('button', { class: 'btn', onclick: refresh, html: icon('refresh', 15) + '<span>Refresh</span>' }),
+          h('button', { class: 'btn', onclick: async () => { await faLogClear(); await refresh(); toast('Log cleared', { ms: 1200 }); }, html: icon('trash', 15) + '<span>Clear</span>' })));
+      })());
+    box.replaceChildren(...sign, paste, diag,
       h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Quick check'), h('small', {}, 'If Fur Affinity asks to confirm you are a person, a banner appears. This opens the check on the site; Board Roamer never tries to get past it')), h('button', { class: 'btn', onclick: () => faVerify() }, 'Open the check')),
       h('div', { class: 'st-row' }, h('div', {}, h('b', {}, 'Remembered submissions'), h('small', {}, `${fmtNum(faIndex.size())} on this device, searchable in Fur Affinity > Seen. ${fmtNum(faLikes.favIds().length)} liked here`)),
         h('button', { class: 'btn', onclick: () => { faIndex.clear(); toast('Cleared', { ms: 1200 }); paint(); } }, 'Forget what I have seen')),

@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "board-roamer"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",

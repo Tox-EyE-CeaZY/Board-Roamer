@@ -18,6 +18,36 @@ import java.util.Map;
  * No Android classes in here, so it can be tested on a JVM. The session is kept by Fa.java.
  */
 final class FaNet {
+    /* ------------------------------------------------------------------ diagnostics (Settings > Fur Affinity > Diagnostics): never a cookie value, password or query string */
+    private static final java.util.ArrayList<String> LOG = new java.util.ArrayList<>();
+    private static final java.util.ArrayList<Long> LOG_T = new java.util.ArrayList<>();
+    static synchronized void log(String m) {
+        LOG.add(m.length() > 300 ? m.substring(0, 300) : m);
+        LOG_T.add(System.currentTimeMillis());
+        if (LOG.size() > 400) { LOG.remove(0); LOG_T.remove(0); }
+    }
+    static synchronized void logClear() { LOG.clear(); LOG_T.clear(); }
+    static synchronized String logJson() {
+        StringBuilder sb = new StringBuilder("{\"lines\":[");
+        for (int i = 0; i < LOG.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"t\":").append(LOG_T.get(i)).append(",\"m\":").append(org.json.JSONObject.quote(LOG.get(i))).append('}');
+        }
+        return sb.append("]}").toString();
+    }
+    /** The path of an address without its query. */
+    static String logPath(String url) {
+        if (url == null) return "";
+        int i = url.indexOf("://");
+        String rest = i >= 0 ? url.substring(i + 3) : url;
+        int sl = rest.indexOf('/');
+        String p = sl >= 0 ? rest.substring(sl) : "/";
+        int q = p.indexOf('?'); if (q >= 0) p = p.substring(0, q);
+        int hs = p.indexOf('#'); if (hs >= 0) p = p.substring(0, hs);
+        return p.length() > 80 ? p.substring(0, 80) : p;
+    }
+    private static volatile boolean challenged;
+
     private FaNet() {}
 
     static final String SITE = "furaffinity.net";
@@ -164,7 +194,8 @@ final class FaNet {
     interface Fetcher { Page fetch(String target); }
     static volatile Fetcher fetcher;
 
-    private static Page challengePage() {
+    private static Page challengePage(String where) {
+        if (!challenged) { challenged = true; log("Cloudflare check on " + logPath(where) + ", clearance cookie sent: " + cleared()); }
         Page p = json(503, "{\"error\":\"Fur Affinity needs a quick check in a browser window\",\"challenge\":true}");
         p.headers.put("X-BR-FA", "challenge");
         return p;
@@ -173,7 +204,8 @@ final class FaNet {
     /** What the web view read, as the page the app's own request would have answered. */
     static Page fromBrowser(int status, String finalUrl, boolean mitigated, String text) {
         byte[] data = (text == null ? "" : text).getBytes(StandardCharsets.UTF_8);
-        if (isChallenge(status, mitigated, data)) return challengePage();
+        if (isChallenge(status, mitigated, data)) return challengePage(finalUrl);
+        if (challenged) { challenged = false; log("pages load again: " + logPath(finalUrl) + " answered HTTP " + status); }
         Page p = new Page(status, "text/html; charset=utf-8", data);
         p.headers.put("X-BR-FA", "ok");
         p.headers.put("X-BR-Final", finalUrl == null || finalUrl.isEmpty() ? "" : finalUrl);
@@ -208,7 +240,7 @@ final class FaNet {
             String ct = c.getContentType();
             boolean mitigated = "challenge".equalsIgnoreCase(c.getHeaderField("cf-mitigated"));
             if (isChallenge(code, mitigated, data)) {
-                return challengePage();
+                return challengePage(target);
             }
             Page p = new Page(code, ct == null ? "text/html" : ct, data);
             p.headers.put("X-BR-FA", "ok");
