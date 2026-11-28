@@ -421,8 +421,10 @@ export class Viewer {
           const fetchIt = (src) => new Promise((res, rej) => {
             const n = img.cloneNode(false); // same size, position and transform as the one on screen
             n.style.background = '';
-            n.onload = () => res(n);
-            n.onerror = () => rej(new Error('did not load'));
+            // a stalled download is given up on and asked for again, instead of waiting for ever
+            const t = setTimeout(() => (n.onload = n.onerror = null, n.removeAttribute('src'), rej(new Error('took too long'))), 45000);
+            n.onload = () => (clearTimeout(t), res(n));
+            n.onerror = () => (clearTimeout(t), rej(new Error('did not load')));
             n.src = src;
           });
           let next;

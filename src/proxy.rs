@@ -379,11 +379,13 @@ pub fn image(rq: Request, query: &str) {
     };
     // one shared agent: pictures reuse connections instead of a new TLS handshake each
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    let agent = AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).max_idle_connections_per_host(16).build());
+    let agent = AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(8)).timeout_read(Duration::from_secs(20)).max_idle_connections_per_host(16).build());
     // Fur Affinity's picture host sheds load when a page asks for dozens at once: at most 4 at a time, and a refused or
     // dropped one is asked for again after a pause (it used to show as a picture that "did not load")
+    // a slow picture must not make the rest wait: the small pictures (t.) and the originals (d.) have places of their own, and a place
+    // is only held until the site has answered, not while the picture itself downloads
     let fa = crate::fa::is_fa(&host);
-    let _slot = fa.then(fa_slot);
+    let slot = fa.then(|| fa_slot(host.starts_with("t.")));
     let mut tries = 0;
     let resp = loop {
         match agent.get(&target).set("User-Agent", DEFAULT_UA).set("Referer", referer).call() {
@@ -407,6 +409,7 @@ pub fn image(rq: Request, query: &str) {
             }
         }
     };
+    drop(slot);
     // streamed: the browser starts receiving while the picture is still arriving, instead of waiting for all of it
     let ct = resp.content_type().to_string();
     let len = resp.header("Content-Length").and_then(|v| v.parse::<usize>().ok()).filter(|n| *n <= 64 << 20);
@@ -414,20 +417,21 @@ pub fn image(rq: Request, query: &str) {
     let _ = rq.respond(Response::new(tiny_http::StatusCode(200), vec![hdr("Content-Type", &ct), hdr("Cache-Control", "public, max-age=86400")], reader, len, None));
 }
 
-/// Holds one of four places for fetching Fur Affinity pictures; the place frees when this is dropped.
-struct FaSlot;
-static FA_BUSY: (std::sync::Mutex<u32>, std::sync::Condvar) = (std::sync::Mutex::new(0), std::sync::Condvar::new());
-fn fa_slot() -> FaSlot {
+/// Holds one of a few places for asking Fur Affinity's picture hosts (4 for thumbnails, 2 for originals); freed when dropped.
+struct FaSlot(usize);
+static FA_BUSY: (std::sync::Mutex<[u32; 2]>, std::sync::Condvar) = (std::sync::Mutex::new([0, 0]), std::sync::Condvar::new());
+fn fa_slot(small: bool) -> FaSlot {
+    let (k, max) = if small { (0, 4) } else { (1, 2) };
     let mut n = FA_BUSY.0.lock().unwrap_or_else(|e| e.into_inner());
-    while *n >= 4 {
+    while n[k] >= max {
         n = FA_BUSY.1.wait(n).unwrap_or_else(|e| e.into_inner());
     }
-    *n += 1;
-    FaSlot
+    n[k] += 1;
+    FaSlot(k)
 }
 impl Drop for FaSlot {
     fn drop(&mut self) {
-        *FA_BUSY.0.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
-        FA_BUSY.1.notify_one();
+        FA_BUSY.0.lock().unwrap_or_else(|e| e.into_inner())[self.0] -= 1;
+        FA_BUSY.1.notify_all();
     }
 }

@@ -128,16 +128,40 @@ async function pump() {
 
 let waiters = [];
 let pollTimer = 0;
+let starting = false;
+/** One polite look at the front page, to find out whether the check has been passed (the banner must not outlive it). */
+async function checkPassed() {
+  try {
+    const r = await serial(() => once(P.FA_WEB + '/'), 1);
+    if (r.via === 'challenge' || r.res.status === 503) return false;
+    return !P.inspect(P.parseHtml(r.text)).challenge;
+  } catch {
+    return false;
+  }
+}
 async function startChallenge() {
+  if (faState.challenge || starting) return;
+  starting = true; // several requests can meet the same check at once: only the first one starts the watch
+  try {
+    await faStatus();
+  } finally {
+    starting = false;
+  }
   if (faState.challenge) return;
-  await faStatus();
   const gen0 = faState.gen;
   faState.challenge = true;
   touch();
   clearInterval(pollTimer);
+  let ticks = 0, probing = false;
   pollTimer = setInterval(async () => {
     await faStatus();
-    if (faState.gen !== gen0) endChallenge();
+    if (faState.gen !== gen0) return endChallenge();
+    // the session can already have changed before this started watching, so the generation alone is not proof: look every few seconds
+    if (++ticks % 4 || probing) return;
+    probing = true;
+    const ok = await checkPassed();
+    probing = false;
+    if (ok) endChallenge();
   }, 1500);
 }
 export function endChallenge() {
