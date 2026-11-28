@@ -22,6 +22,7 @@ import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
+import { cachedImg } from './thumbcache.js';
 import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts } from './fa.js';
 
 const enc = encodeURIComponent;
@@ -280,7 +281,7 @@ function followingPane(ctx) {
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
-        h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => h('img', { src: '/img?u=' + encodeURIComponent(u), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))),
+        h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => cachedImg(u))),
         h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
   };
   paint();

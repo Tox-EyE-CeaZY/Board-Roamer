@@ -58,3 +58,8 @@ Maven chose (2026-11-28) a hidden background page for Watch/Unwatch even though 
 - Unverified: never built or run on a device (no Android SDK here); only compiled against API stubs for the new files. CookieManager reading of HttpOnly cookies `a`/`b` assumed to work.
 
 - Watch list pages (2.17.1): when the list page shows no recognisable next link, the import tries `/controls/buddylist/?page=N`, then `/controls/buddylist/N/`, one request a second, until a page adds nothing new (desktop in src/main.rs, Android in Fa.java). Still guesses: a saved copy of the real watch list page 1 and 2 (browser Ctrl+S) is needed to read the actual pager.
+
+## Follows cache and schedule (2.18.0)
+- Per-artist results already live in `subs` (thumbs, latest, newCount, checked). Pictures on FA follow cards now come from `thumbcache.js` (IndexedDB, up to ~1500 pictures, fetched two at a time 250 ms apart through `/img`), so opening Following asks the site for nothing it has.
+- Background checks of FA artists (only with Settings > "Check followed artists in the background"): every 6 minutes a batch of at most 10 of the longest-unchecked artists that are older than "Check each artist about every" (30 min / hour / 3 hours, `faFollowEvery`, default hour). Opening Follows uses the same batching; "Check for new" still checks everyone, one request a second.
+- Maven's view on the submissions inbox (`/msg/`): only if it all happens inside Board Roamer. Not built; a scheduled read of a robots-disallowed page is a crawler, not a click.
