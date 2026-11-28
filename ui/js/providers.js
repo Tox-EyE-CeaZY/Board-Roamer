@@ -833,7 +833,7 @@ export class Feed {
     try {
       const out = [];
       const ratings = this.filters.ratings;
-      for (let tries = 0; tries < 5 && !this.done && out.length < minWanted; tries++) {
+      for (let tries = 0; tries < 5 && !this.done && !(tries && this.hold) && out.length < minWanted; tries++) { // hold: Fur Affinity waits for "Load more"
         const batch = await this.prov.page(this);
         this.pagesFetched++;
         for (const p of batch) {

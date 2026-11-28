@@ -1474,3 +1474,45 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .vbtn.local, .ibtn.local { position: relative; }
 .ibtn.local::after, .vbtn.local::after { content: ''; position: absolute; right: 4px; bottom: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
 @media (max-width: 700px) { .fa-bar, .fa-seenbar, .fa-userwrap, .fa-folders, .fa-follow { padding-left: 14px; padding-right: 14px; } }
+
+.nav.none .nav-ind { opacity: 0; }
+.fa-rail { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 10px; color: var(--dim); border: 1px solid var(--line2); border-radius: 50%; transition: color .2s, background .2s, border-color .2s; }
+.fa-rail[hidden] { display: none; }
+@media (hover: hover) { .fa-rail:hover { color: var(--ink); border-color: var(--accent); } }
+.fa-rail.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+@media (max-height: 800px) { .fa-rail { width: 40px; height: 40px; margin-bottom: 6px; } }
+
+.tcard { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 14px; color: var(--ink); background: linear-gradient(160deg, var(--bg3), var(--bg2)); }
+.tcard i { color: var(--accent); margin-bottom: auto; }
+.tcard b { font: 700 15px/1.25 var(--f-display, inherit); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
+.tcard small { font: 500 11px var(--f-mono); color: var(--faint); }
+.media.doc { width: min(720px, 92%) !important; height: 86% !important; margin: 0 !important; left: 50%; top: 50%; transform: translate(-50%, -50%) !important; display: flex; flex-direction: column; gap: 10px; padding: 22px 26px; background: color-mix(in oklch, var(--bg) 92%, transparent); border: 1px solid var(--line2); color: var(--ink); overflow: hidden; text-align: left; }
+.media.doc h2 { margin: 0; font: 800 26px/1.15 var(--f-display, inherit); letter-spacing: -.02em; }
+.media.doc .doc-by, .media.doc .doc-meta { margin: 0; font: 500 12px var(--f-mono); color: var(--faint); letter-spacing: .04em; }
+.media.doc .doc-body { flex: 1 1 auto; overflow: auto; white-space: pre-wrap; font: 400 16px/1.7 var(--f-body, Georgia, serif); max-width: 62ch; user-select: text; }
+.media.doc .doc-note { color: var(--dim); font: 500 13px var(--f-mono); }
+.media.doc-music { height: auto !important; max-height: 86%; align-items: center; text-align: center; }
+.media.doc-music .doc-desc { text-align: left; max-height: 30vh; }
+.doc-cover { width: min(260px, 50vw); aspect-ratio: 1; object-fit: cover; background: var(--bg3); display: grid; place-items: center; color: var(--accent); }
+.doc-audio { width: min(420px, 100%); }
+
+.fa-imp { margin-top: 10px; max-height: 32vh; overflow: auto; }
+.fa-imp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; font: 500 12px var(--f-mono); }
+.fa-imp-i { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.fa-profile { padding: 4px 30px 40px; display: grid; gap: 18px; max-width: 980px; }
+.fa-pf-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.fa-pf-head h3 { margin: 0; font: 700 12px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.fa-pf-bio { white-space: pre-wrap; line-height: 1.6; color: var(--dim); max-width: 72ch; user-select: text; }
+.fa-pf-bio a, .fa-pf-info a, .fa-pf-shout a { color: var(--accent); }
+.fa-pf-info { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.fa-pf-info dt { font: 600 12px var(--f-mono); color: var(--faint); } .fa-pf-info dd { margin: 0; }
+.fa-pf-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.fa-pf-th { flex: 0 0 auto; height: 130px; min-width: 90px; border: 1px solid var(--line2); background: var(--bg3); padding: 0; cursor: pointer; }
+.fa-pf-th img { height: 100%; width: auto; display: block; }
+.fa-pf-th.big { height: auto; padding: 14px 18px; color: var(--ink); font: 600 13px var(--f-mono); }
+.fa-pf-shouts { display: grid; gap: 8px; }
+.fa-pf-shout { padding: 10px 12px; background: var(--bg2); border-left: 3px solid var(--line2); }
+.fa-pf-shout small { margin-left: 8px; color: var(--faint); font: 500 11px var(--f-mono); }
+.fa-pf-shout p { margin: 6px 0 0; white-space: pre-wrap; }
+@media (max-width: 700px) { .fa-profile { padding-left: 14px; padding-right: 14px; } }

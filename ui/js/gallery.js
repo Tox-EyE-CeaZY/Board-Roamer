@@ -268,7 +268,10 @@ export class Gallery {
       el.classList.add('veiled');
       clip.append(h('div', { class: 'veil' }, h('i', { html: icon('cloak', 22) }), h('b', {}, 'Veiled'), h('small', {}, pretty(it.hit).slice(0, 40))));
     } else {
-      const img = h('img', { alt: '', decoding: 'async', draggable: 'false' });
+      const img = p.card
+        ? h('div', { class: 'tcard ' + p.kind }, h('i', { html: icon(p.kind === 'music' ? 'play' : 'book', 26) }), h('b', {}, p.title || 'Untitled'), h('small', {}, p.artists?.[0] ? 'by ' + p.artists[0] : ''))
+        : h('img', { alt: '', decoding: 'async', draggable: 'false' });
+      if (p.card) el.classList.add('ready');
       img.onload = () => el.classList.add('ready');
       let tries = 0;
       const px = (u) => (p.viaProxy ? '/img?u=' + encodeURIComponent(u) : u); // viaProxy: the site's picture host wants its own Referer and is slow for the browser directly
@@ -278,7 +281,7 @@ export class Gallery {
         else if (tries < 2 && !p.viaProxy) (tries = 2), (img.src = '/img?u=' + encodeURIComponent(p.thumb));
         else el.classList.add('broken');
       };
-      img.src = px(this._src(p, r));
+      if (!p.card) img.src = px(this._src(p, r));
       clip.append(img);
       if (isBlurred(p)) el.classList.add('blurred');
       el.append(
@@ -288,6 +291,7 @@ export class Gallery {
       if (el.classList.contains('blurred')) badges.push(h('span', { class: 'badge blurtag', title: 'Blurred by a #blur rule', html: icon('cloak', 11) + 'BLUR' }));
       if (p.kind === 'video') badges.push(h('span', { class: 'badge', html: icon('play', 11) + (p.duration ? fmtDur(p.duration) : p.ext.toUpperCase()) }));
       else if (p.kind === 'anim') badges.push(h('span', { class: 'badge' }, 'GIF'));
+      else if (p.kind === 'story' || p.kind === 'music') badges.push(h('span', { class: 'badge', html: icon(p.kind === 'music' ? 'play' : 'book', 11) + (p.kind === 'music' ? 'MUSIC' : 'STORY') }));
       else if (p.kind === 'flash') badges.push(h('span', { class: 'badge' }, 'SWF'));
       if (p.pools?.length) badges.push(h('span', { class: 'badge pool' + (p.isComic ? ' comic' : ''), title: p.isComic ? 'Comic page' : 'In a pool', html: icon(p.isComic ? 'book' : 'pool', 11) + (p.isComic ? 'COMIC' : 'POOL') }));
       else if (p.isComic) badges.push(h('span', { class: 'badge pool comic', title: 'Comic page', html: icon('book', 11) + 'COMIC' }));

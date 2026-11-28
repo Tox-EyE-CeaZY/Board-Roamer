@@ -9,6 +9,7 @@ import { bindContext, showMenu, menuOpen, lastLongPress } from './ctxmenu.js';
 import { isPhone, isTouch, isAndroid, haptic, native } from './platform.js';
 import { toggleFullscreen, isFullscreen, setFullscreen } from './titlebar.js';
 import { renderDText } from './dtext.js';
+import { makeDoc } from './fadoc.js';
 
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 
@@ -292,6 +293,7 @@ export class Viewer {
         if (this.post !== post) return;
         this.title.querySelector('span').textContent = post.title ? `${post.title} · #${post.id}` : `#${post.id} · ${post.provider}`;
         this._renderPanel();
+        this.media?._refresh?.();
         this._relayoutMedia();
         this._paintToggles();
       }).catch((e) => this.post === post && toast(e.message, { kind: 'err' }));
@@ -381,6 +383,7 @@ export class Viewer {
       if (S('autoplay')) v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
       return v;
     }
+    if (post.kind === 'story' || post.kind === 'music') return makeDoc(post, { via: (u) => '/img?u=' + encodeURIComponent(u), openSite: () => this.openSite() });
     if (post.kind === 'flash') {
       return h('div', { class: 'media flash' }, h('b', {}, 'Flash file'), h('p', {}, 'Browsers can’t play .swf any more.'), h('button', { class: 'btn primary', onclick: () => this.openSite() }, 'Open on site'));
     }
@@ -461,7 +464,7 @@ export class Viewer {
     const m = this.media;
     if (!m || !this.post) return;
     const p = this.post;
-    if (p.kind === 'flash') return;
+    if (p.kind === 'flash' || p.kind === 'story' || p.kind === 'music') return;
     const nw = p.w || m.naturalWidth || m.videoWidth || 800, nh = p.h || m.naturalHeight || m.videoHeight || 800;
     const sw = this.stage.clientWidth, sh = this.stage.clientHeight;
     // the picture is placed from the stage's centre: when the stage grows or shrinks under a zoomed picture
@@ -1203,8 +1206,8 @@ export class Viewer {
       pl && { label: 'Speed', icon: 'speed', sub: [0.25, 0.5, 1, 1.5, 2].map((x) => ({ label: x + '×', checked: pl.v.playbackRate === x, run: () => pl.setSpeed(x) })) },
       pl && { label: pl.v.muted ? 'Unmute' : 'Mute', icon: pl.v.muted ? 'sound' : 'mute', kbd: 'M', run: () => pl.toggleMute() },
       pl && { sep: true },
-      p.kind !== 'flash' && { label: this.mode === 'fit' ? 'Zoom to 100%' : 'Fit to window', icon: 'zoomIn', kbd: 'Z', run: () => this.cycleZoom() },
-      !pl && p.kind !== 'flash' && { label: 'Rotate', icon: 'rotate', kbd: 'R', run: () => this.rotate() },
+      p.kind !== 'flash' && p.kind !== 'story' && p.kind !== 'music' && { label: this.mode === 'fit' ? 'Zoom to 100%' : 'Fit to window', icon: 'zoomIn', kbd: 'Z', run: () => this.cycleZoom() },
+      !pl && p.kind !== 'flash' && p.kind !== 'story' && p.kind !== 'music' && { label: 'Rotate', icon: 'rotate', kbd: 'R', run: () => this.rotate() },
       { label: isFullscreen() ? 'Exit fullscreen' : 'Fullscreen', icon: 'fullscreen', kbd: 'F', run: () => this.fullscreen() },
       { label: this.playing ? 'Stop slideshow' : 'Start slideshow', icon: this.playing ? 'pause' : 'play', kbd: 'P', run: () => this.toggleSlideshow() },
       { label: 'Previous', icon: 'left', kbd: '←', disabled: this.i === 0, run: () => this.go(-1) },

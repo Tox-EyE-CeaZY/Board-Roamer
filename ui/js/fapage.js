@@ -57,6 +57,19 @@ function statusLine() {
   return bits.join(' · ');
 }
 
+/** The same layout and tile-size controls the boards use (the settings are shared, the gallery relayouts itself). */
+function sizeTools(getGal) {
+  const seg = h('div', { class: 'layout-seg' }, [['masonry', 'masonry'], ['rows', 'rows'], ['grid', 'grid']].map(([v, ic]) =>
+    h('button', { 'data-v': v, title: v[0].toUpperCase() + v.slice(1) + ' layout', html: icon(ic, 17), onclick: () => setS('layout', v) })));
+  const slider = h('input', { type: 'range', min: 130, max: 520, step: 10, title: 'Tile size', value: S('density'), oninput: debounce((e) => setS('density', +e.target.value), 60) });
+  const sel = h('button', { class: 'ibtn', title: 'Select pictures', 'aria-label': 'Select pictures', html: icon('select', 18), onclick: () => { const g = getGal(); if (g) { g.setSelectMode(!g.selectMode); sel.classList.toggle('on', !!g.selectMode); } } });
+  const wrap = h('div', { class: 'tools fa-tools' }, seg, slider, sel);
+  const paint = () => { seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === S('layout'))); slider.value = S('density'); };
+  paint();
+  const off = on('settings', () => (wrap.isConnected ? paint() : off()));
+  return wrap;
+}
+
 function ratingChips(onChange) {
   const wrap = h('div', { class: 'fa-ratings', title: 'Which ratings to show. This is the same setting as the boards use' });
   const paint = () => wrap.replaceChildren(...RATING_NAMES.map(([k, label]) => h('button', { class: 'fa-rt r-' + k + (S('filters').ratings[k] ? ' on' : ''), title: `${label}: ${S('filters').ratings[k] ? 'shown' : 'hidden'}`, onclick: () => {
@@ -120,8 +133,9 @@ function makeGrid(ctx, { top = [] } = {}) {
     gal.setFoot(h('div', { class: 'empty-state err' }, h('h2', {}, e.robots ? 'Opens in your browser' : 'That did not load'), h('p', {}, e.message),
       h('div', { class: 'row-btns' }, e.paused ? null : h('button', { class: 'btn', onclick: () => more() }, 'Try again'))));
   };
-  async function more() {
-    if (!feed || feed.done || busy) return;
+  async function more(force) {
+    if (!feed || feed.done || busy || (feed.hold && !force)) return;
+    feed.hold = false;
     busy = true;
     const mine = run;
     foot(faState.challenge ? 'Waiting for Fur Affinity’s quick check…' : 'Loading…');
@@ -130,6 +144,7 @@ function makeGrid(ctx, { top = [] } = {}) {
       if (mine !== run) return;
       gal.append(posts);
       if (feed.done) foot(gal.length ? 'That is everything' : feed.fa?.kind === 'liked' ? 'Nothing liked here yet' : 'Nothing to show');
+      else if (feed.hold) gal.setFoot(h('div', { class: 'foot-end' }, h('button', { class: 'btn primary', onclick: () => more(true) }, 'Load more')))
       else if (!posts.length) foot('');
       else gal.setFoot(h('div'));
       gal.hooks && feed.pageInfo && ctx.faPageInfo?.(feed.pageInfo);
@@ -213,7 +228,7 @@ function renderHome(root, ctx, p) {
   if (tab === 'front') bits.push(segmented(FRONT, section, (v) => ctx.go(hashOf('', { s: v === '0' ? '' : v }))));
   const grid = makeGrid(ctx);
   const reload = () => grid.reload();
-  bits.push(h('div', { class: 'fa-fill' }), ratingChips(reload));
+  bits.push(h('div', { class: 'fa-fill' }), sizeTools(() => grid.gal), ratingChips(reload));
   const bar = h('div', { class: 'fa-bar' }, ...bits);
   root.replaceChildren(head, bar);
 
@@ -261,6 +276,7 @@ function followingPane(ctx) {
       h('div', { class: 'fa-fl-head' },
         h('p', {}, fl.length ? `${fl.length} artist${fl.length === 1 ? '' : 's'} you follow here. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.` : 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow.'),
         h('div', { class: 'row-btns' },
+          h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Fur Affinity does not let apps read your watch list, so you copy it from your browser once', onclick: () => importWatchList(paint) }),
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
@@ -272,10 +288,49 @@ function followingPane(ctx) {
   return wrap;
 }
 const P_WATCH = 'https://www.furaffinity.net/msg/submissions/';
+const P_BUDDY = 'https://www.furaffinity.net/controls/buddylist/';
+
+/** Names in text copied from the watch list page (one per line, with whatever else the page has around them). */
+const NOT_NAMES = new Set(['watching', 'watched', 'by', 'remove', 'next', 'previous', 'prev', 'page', 'view', 'options', 'edit', 'watchlist', 'list', 'users', 'user', 'you', 'your', 'the', 'and', 'all', 'none', 'select', 'save', 'cancel', 'search', 'home', 'browse', 'settings', 'logout', 'notes', 'messages', 'submissions', 'favorites', 'journals', 'gallery', 'scraps', 'plus', 'watch', 'unwatch', 'block', 'online', 'offline', 'new', 'old', 'of', 'to', 'is', 'in', 'on']);
+export function namesFromWatchText(text) {
+  const seen = new Set();
+  for (const raw of String(text || '').split(/[\s,;|]+/)) {
+    const t = raw.replace(/^[@~]+/, '').replace(/[()\[\]{}"'.:]+$/g, '').toLowerCase();
+    if (/^[a-z0-9][a-z0-9_.~-]{1,29}$/.test(t) && !NOT_NAMES.has(t) && !/^\d+$/.test(t)) seen.add(t);
+  }
+  return [...seen];
+}
+
+/** One-time import: nothing is requested from the site. The person opens their own watch list in their browser and pastes it. */
+async function importWatchList(done) {
+  const have = new Set(subs.all().filter((f) => f.p === 'fa').map((f) => f.t));
+  const area = h('textarea', { class: 'input', rows: 8, placeholder: 'Paste here…', spellcheck: 'false', style: 'width:100%;font:12px var(--f-mono)' });
+  const list = h('div', { class: 'fa-imp', hidden: true });
+  let picks = [];
+  const preview = () => {
+    const names = namesFromWatchText(area.value).filter((n) => !have.has(n));
+    picks = names.map((n) => ({ n, on: true }));
+    list.hidden = !names.length;
+    list.replaceChildren(h('p', { class: 'st-note' }, `${names.length} name${names.length === 1 ? '' : 's'} found. Untick anything that is not an artist.`),
+      h('div', { class: 'fa-imp-grid' }, picks.map((p) => h('label', { class: 'fa-imp-i' }, h('input', { type: 'checkbox', checked: true, onchange: (e) => (p.on = e.target.checked) }), p.n))));
+  };
+  area.addEventListener('input', debounce(preview, 200));
+  const body = h('div', { class: 'dlg-text' },
+    h('p', {}, 'Fur Affinity does not let apps read your watch list, so Board Roamer never asks the site for it. Instead:'),
+    h('ol', {}, h('li', {}, 'Open your watch list in your browser: ', h('button', { class: 'btn', onclick: () => openExternal(P_BUDDY), html: icon('external', 14) + '<span>Open my watch list</span>' })),
+      h('li', {}, 'Select the whole page (Ctrl+A), copy it (Ctrl+C), and paste it below.')),
+    area, list);
+  const r = await dialog({ title: 'Import my watch list', body, wide: true, actions: [{ label: 'Cancel', value: false }, { label: 'Follow these artists', cls: 'primary', value: true }] });
+  if (!r) return;
+  const add = picks.filter((p) => p.on && !have.has(p.n));
+  for (const p of add) subs.add({ p: 'fa', t: p.n, cat: 'artist' }); // no check per artist: "Check for new" (or the background option) does that, one request a second
+  toast(add.length ? `Following ${add.length} artist${add.length === 1 ? '' : 's'} from your watch list. Press “Check for new” when you want to look for new art` : 'Nothing new to add', { ms: 3600 });
+  done?.();
+}
 
 /* ------------------------------------------------------------------ an artist */
 function renderUser(root, ctx, name, p) {
-  const tab = ['gallery', 'scraps', 'favs', 'folders', 'folder'].includes(p.get('t')) ? p.get('t') : 'gallery';
+  const tab = ['profile', 'gallery', 'scraps', 'favs', 'folders', 'folder'].includes(p.get('t')) ? p.get('t') : 'profile';
   const prov = getProvider('fa');
   const title = h('h1', {}, pretty(name));
   const sub = h('p', {}, '');
@@ -294,7 +349,7 @@ function renderUser(root, ctx, name, p) {
     const e6 = tagLinks.suggest('fa', n, 'e621');
     return h('button', { class: 'btn', title: e6 ? `Same artist on e621 as ${pretty(e6)}` : 'Look for this artist on e621', onclick: () => ctx.go(ctx.roamHash([{ t: e6 || n, op: '+' }], null, 'e621')), html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
   };
-  const tabs = segmented([['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'gallery' ? '' : v })));
+  const tabs = segmented([['profile', 'Profile'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
   const head = h('div', { class: 'vhead bd' },
     crumb('Fur Affinity', () => ctx.go('#/fa')),
     h('div', { class: 'bd-title' }, title, sub),
@@ -303,7 +358,7 @@ function renderUser(root, ctx, name, p) {
   const bar = h('div', { class: 'fa-bar' }, tabs, h('div', { class: 'fa-fill' }));
   let grid;
   const rate = ratingChips(() => grid?.reload());
-  bar.append(rate);
+  bar.append(sizeTools(() => grid?.gal), rate);
   paintFollow();
   root.replaceChildren(head);
 
@@ -315,6 +370,14 @@ function renderUser(root, ctx, name, p) {
     if (u.bio) (bio.hidden = false), (bio.textContent = u.bio);
     if (u.aliases?.length) sub.textContent += ' · was ' + u.aliases.slice(0, 3).join(', ');
   };
+
+  if (tab === 'profile') {
+    root.append(h('div', { class: 'fa-userwrap' }, info), bar);
+    const host = h('div', { class: 'fa-profile' }, h('p', { class: 'dim' }, 'Loading the profile…'));
+    root.append(host);
+    prov.user(name).then((u) => { paintInfo(u); profileBody(host, u, name, ctx); }).catch((e) => host.replaceChildren(h('div', { class: 'empty-state err' }, h('h2', {}, 'That did not load'), h('p', {}, e.message))));
+    return null;
+  }
 
   if (tab === 'folders') {
     root.append(h('div', { class: 'fa-userwrap' }, info), bar);
@@ -347,6 +410,44 @@ function renderUser(root, ctx, name, p) {
   ctx.faPageInfo = (pi) => { if (pi.user?.display && title.textContent === pretty(name)) paintInfo({ ...pi.user, stats: {} }); };
   prov.user(name).then(paintInfo).catch(() => {});
   return grid.gal;
+}
+
+/* ------------------------------------------------------------------ a profile page, read from the user's own page and laid out here */
+function linkify(text) {
+  const out = [];
+  let at = 0;
+  for (const m of String(text).matchAll(/https?:\/\/[^\s<>"')]+/g)) {
+    if (m.index > at) out.push(text.slice(at, m.index));
+    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExternal(m[0])) }, m[0]));
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
+function profileBody(host, u, name, ctx) {
+  const open = (id) => ctx.go(hashOf('/user/' + enc(name), { post: id }));
+  const strip = (title, figs, tab) => figs?.length ? h('section', { class: 'fa-pf-sec' },
+    h('div', { class: 'fa-pf-head' }, h('h3', {}, title), tab ? h('button', { class: 'btn', onclick: () => ctx.go(hashOf('/user/' + enc(name), { t: tab })) }, 'See all') : null),
+    h('div', { class: 'fa-pf-strip' }, figs.slice(0, 16).map((f) => h('button', { class: 'fa-pf-th r-' + (f.rating || 'general')[0], title: f.title || '', onclick: () => open(f.id) }, h('img', { src: '/img?u=' + encodeURIComponent(f.thumb), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))))) : null;
+  const st = u.stats || {};
+  const statChips = [['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Comments earned', st['comments earned']], ['Comments made', st['comments made']], ['Journals', st.journals], ['Watchers', u.watchers], ['Watching', u.watching_count]].filter(([, v]) => v);
+  host.replaceChildren(...[
+    u.featured ? h('section', { class: 'fa-pf-sec fa-pf-feat' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, 'Featured')), h('button', { class: 'fa-pf-th big', onclick: () => open(u.featured), html: '' }, h('span', {}, 'Open the featured submission'))) : null,
+    u.bio ? h('section', { class: 'fa-pf-sec' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, 'Profile')), h('div', { class: 'fa-pf-bio' }, ...linkify(u.bio))) : null,
+    u.fields?.length || u.contacts?.length ? h('section', { class: 'fa-pf-sec' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, 'Info and contact')),
+      h('dl', { class: 'fa-pf-info' }, u.fields.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, ...linkify(v))]),
+        u.contacts.flatMap((c) => [h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExternal(c.url)) }, c.text || c.url) : c.text)]))) : null,
+    statChips.length ? h('section', { class: 'fa-pf-sec' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, 'Numbers')), h('div', { class: 'fa-stats' }, statChips.map(([k, v]) => h('span', { class: 'fa-st' }, h('b', {}, fmtNum(v)), ' ' + k)))) : null,
+    strip('Latest submissions', u.latest, 'gallery'),
+    strip('Latest favorites', u.latestFavs, 'favs'),
+    u.shouts?.length ? h('section', { class: 'fa-pf-sec' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, `Shouts (${u.shouts.length})`)),
+      h('div', { class: 'fa-pf-shouts' }, u.shouts.map((s) => h('div', { class: 'fa-pf-shout' }, h('b', {}, h('a', { href: '#', onclick: (e) => (e.preventDefault(), ctx.go(hashOf('/user/' + enc(s.user)))) }, pretty(s.user))), s.at ? h('small', {}, s.at) : null, h('p', {}, ...linkify(s.text)))))) : null,
+    h('section', { class: 'fa-pf-sec' }, h('div', { class: 'fa-pf-head' }, h('h3', {}, 'On Fur Affinity')),
+      h('div', { class: 'row-btns' },
+        ...[['Journals', faUrl.journals(name)], [`Watchers${u.watchers ? ' (' + fmtNum(u.watchers) + ')' : ''}`, `https://www.furaffinity.net/watchlist/to/${enc(name)}/`], [`Watching${u.watching_count ? ' (' + fmtNum(u.watching_count) + ')' : ''}`, `https://www.furaffinity.net/watchlist/by/${enc(name)}/`], ['Shouts and comments', faUrl.user(name)]].map(([l, url]) => h('button', { class: 'btn', onclick: () => openExternal(url), html: icon('external', 14) + `<span>${l}</span>` }))),
+      h('p', { class: 'st-note' }, 'These open in your browser: Fur Affinity asks apps not to read them.')),
+  ].filter(Boolean));
 }
 
 /* ------------------------------------------------------------------ settings */
