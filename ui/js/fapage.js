@@ -16,7 +16,7 @@ import { S, setS, on, subs, kv, tagLinks } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented, dialog } from './ui.js';
-import { bindContext } from './ctxmenu.js';
+import { bindContext, showMenu } from './ctxmenu.js';
 import { postMenu, faUserMenu, linkMenu } from './menus.js';
 import { selBar, openExternal as openExt, downloadMany } from './actions.js';
 const openExternal = (u) => openExt(u, true); // this section's own buttons are the ones that leave the app
@@ -254,12 +254,13 @@ function renderHome(root, ctx, p) {
   if (tab === 'front') bits.push(segmented(FRONT, section, (v) => ctx.go(hashOf('', { s: v === '0' ? '' : v }))));
   const grid = makeGrid(ctx);
   const reload = () => grid.reload();
-  bits.push(h('div', { class: 'fa-fill' }), sizeTools(() => grid.gal), ratingChips(reload));
+  const pane = tab === 'following' ? followingPane(ctx) : null;
+  bits.push(h('div', { class: 'fa-fill' }), ...(pane ? [pane.tools] : []), sizeTools(() => grid.gal), ratingChips(reload));
   const bar = h('div', { class: 'fa-bar' }, ...bits);
   root.replaceChildren(head, bar);
 
-  if (tab === 'following') {
-    root.append(followingPane(ctx));
+  if (pane) {
+    root.append(pane.el);
     return null;
   }
   if (tab === 'seen') {
@@ -295,18 +296,26 @@ function renderHome(root, ctx, p) {
 
 function followingPane(ctx) {
   const wrap = h('div', { class: 'fa-follow' });
+  const tools = h('div', { class: 'fa-ftools' }); // lives in the toolbar row above
   const list = () => subs.all().filter((f) => f.p === 'fa');
   const paint = () => {
     const fl = list();
     const isPaused = (f) => /^Paused:/.test(f.err || '');
     const paused = fl.filter(isPaused);
+    const check = async (e) => { const b = e.currentTarget; b.disabled = true; await refreshAll({ force: true, only: fl }); paint(); };
+    const more = h('button', { class: 'ibtn', title: 'More', 'aria-label': 'More', html: icon('more', 18), onclick: (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      showMenu(r.right, r.bottom + 4, [
+        { label: 'Import my watch list', icon: 'download', run: () => importWatchList(paint) },
+        { label: 'My watch feed on Fur Affinity', icon: 'external', run: () => openExternal(P_WATCH) },
+      ]);
+    } });
+    tools.replaceChildren(...[
+      fl.length ? h('button', { class: 'btn primary', title: 'Look for new submissions from the artists you follow', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: check }) : h('button', { class: 'btn primary', title: 'Reads the watch list page you can see in the Fur Affinity window, once, when you tap', html: icon('download', 15) + '<span>Import my watch list</span>', onclick: () => importWatchList(paint) }),
+      more,
+    ]);
     wrap.replaceChildren(
-      h('div', { class: 'fa-fl-head' },
-        fl.length ? null : h('p', {}, 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.'),
-        h('div', { class: 'row-btns' },
-          h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Reads the watch list page you can see in the Fur Affinity window, once, when you tap', onclick: () => importWatchList(paint) }),
-          fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
-          h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
+      fl.length ? null : h('p', { class: 'fa-fl-intro' }, 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow, or import your watch list. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.'),
       paused.length ? h('p', { class: 'fa-fl-note', title: 'Fur Affinity asks apps to stay away while it is busy. Checks continue by themselves.' }, `Fur Affinity is busy, so checking is paused for ${paused.length === fl.length ? 'everyone' : paused.length + ' of ' + fl.length + ' artists'}. It continues by itself.`) : null,
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', 'data-fa-user': f.t, onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
         h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => cachedImg(u))),
@@ -314,7 +323,7 @@ function followingPane(ctx) {
   };
   paint();
   const off = on('subs-progress', () => (wrap.isConnected ? paint() : off()));
-  return wrap;
+  return { el: wrap, tools };
 }
 const P_WATCH = 'https://www.furaffinity.net/msg/submissions/';
 const P_BUDDY = 'https://www.furaffinity.net/controls/buddylist/';
