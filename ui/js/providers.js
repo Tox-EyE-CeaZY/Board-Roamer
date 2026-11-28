@@ -1,4 +1,5 @@
 import { S, tagc, poolUnblur } from './store.js';
+import { faEngine, faLink, faSupported } from './fa.js';
 
 /* Tag categories, in display order */
 export const CATS = ['artist', 'contributor', 'copyright', 'character', 'species', 'general', 'lore', 'meta', 'invalid'];
@@ -691,6 +692,8 @@ providers.e926.credKey = 'e621';
 // Local files (ui/js/local.js) are shown with the same gallery and viewer, so they need a provider of their own. It cannot be searched.
 providers.local = { id: 'local', engine: 'local', internal: true, credKey: 'local', name: 'Local', sub: 'files on your devices', adult: false, web: '', short: 'lo', color: 200, maxTags: 99, pageSize: 60,
   sorts: [], shapes: false, ages: false, media: false, fav: false, vote: false, dossier: false, wiki: false, pools: false, filterTags: () => [], async page() { return []; } };
+// Fur Affinity is not a board: it has its own section (ui/js/fapage.js), but its posts use the same gallery, viewer and blacklist, so it is a provider too.
+providers.fa = { id: 'fa', internal: true, name: 'Fur Affinity', sub: 'its own section', adult: true, ...faEngine({ CATS }) };
 export const providerList = Object.values(providers).filter((p) => !p.internal);
 export const getProvider = (id) => providers[id] || providers.e621;
 
@@ -704,6 +707,10 @@ export function linkToHash(text) {
   if (!m) return null;
   let u;
   try { u = new URL(m[0]); } catch { return null; }
+  if (faSupported()) {
+    const fl = faLink(m[0]);
+    if (fl) return fl.hash; // a Fur Affinity post or user opens in its own section
+  }
   const host = u.hostname.toLowerCase().replace(/^www\./, ''), path = u.pathname.replace(/\/+$/, ''), q = u.searchParams;
   const post = (p, id) => `#/roam?p=${p}&post=${id}`;
   const find = (p, tags) => {

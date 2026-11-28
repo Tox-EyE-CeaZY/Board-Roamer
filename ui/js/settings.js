@@ -3,6 +3,8 @@ import { RELEASES_URL } from './version.js';
 import { syncConfig, isPaired, unpair, pairWith, parseKey, parseLink, connectionAdvice, ping, syncNow, onSyncStatus, hostConfig, armCreds, claimCreds } from './sync.js';
 import { scanQr } from './qrscan.js';
 import { icon } from './icons.js';
+import { faSupported } from './fa.js';
+import { faSettingsBox } from './fapage.js';
 import { S, setS, exportAll, importAll, wipe, DEFAULTS, subs, saved } from './store.js';
 import { providerList, getProvider, call } from './providers.js';
 import { segmented, toast, confirmDlg, dialog } from './ui.js';
@@ -379,6 +381,10 @@ export function openSettings(section) {
     sec('local', 'Local',
       toggle('Local files', 'localOn', 'A gallery of the pictures and videos in folders you choose, on this device and on the other devices you sync with. Nothing is copied or changed, and tags stay in Board Roamer'),
       localBox),
+    faSupported() ? sec('fa', 'Fur Affinity',
+      toggle('Fur Affinity section', 'faOn', 'A separate place to browse furaffinity.net with the gallery, viewer, follows and filters you already know. It reads the site slowly, one request a second, and never uses its search, watch feed or notes'),
+      toggle('Check followed artists in the background', 'faFollowCheck', 'Off by default so nothing is requested from Fur Affinity unless you ask. Checks pause while the site is busy'),
+      faSettingsBox()) : null,
     sec('gallery', 'Gallery',
       seg('Layout', 'layout', [['masonry', 'Masonry'], ['rows', 'Rows'], ['grid', 'Grid']]),
       slider('Tile size', 'density', 130, 520, 10, (v) => v + 'px'), slider('Gap', 'gap', 0, 28, 1, (v) => v + 'px'),
@@ -430,7 +436,7 @@ export function openSettings(section) {
   paintCreds();
   panel = h('aside', { class: 'settings' },
     h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', ...(isAndroid() ? ['links'] : []), 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s))),
+    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', ...(isAndroid() ? ['links'] : []), ...(faSupported() ? ['fa'] : []), 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s === 'fa' ? 'Fur Affinity' : s))),
     body);
   document.body.append(panel);
   requestAnimationFrame(() => panel?.classList.add('in'));

@@ -302,7 +302,7 @@ export class Gallery {
         h('i', { class: 'selbox', html: icon('check', 14) }),
         h('div', { class: 'tile-meta' },
           h('span', { class: 'm-art' }, p.artists[0] ? pretty(p.artists[0]) : '#' + p.id),
-          h('span', { class: 'm-n' }, h('span', { html: icon('up', 10) }), fmtNum(p.score), p.favs ? h('span', { html: icon('heart', 10) }) : null, p.favs ? fmtNum(p.favs) : null),
+          h('span', { class: 'm-n' }, p.noScore ? null : h('span', { html: icon('up', 10) }), p.noScore ? null : fmtNum(p.score), p.favs ? h('span', { html: icon('heart', 10) }) : null, p.favs ? fmtNum(p.favs) : null),
         ),
         h('div', { class: 'tile-act' },
           h('button', { class: 'ta', 'data-a': 'pin', title: 'Pin — right-click for other boards', html: icon('pin', 15) }),

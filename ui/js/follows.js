@@ -12,11 +12,12 @@ const staleMs = () => (S('followsFresh') || 20) * 60 * 1000;
 let running = false;
 
 /* ================================================================== checking for new posts */
-export async function checkSub(f) {
+export async function checkSub(f, { background = false } = {}) {
   const had = f.newCount || 0; // subs.update changes f in place, so remember it now
   const prov = getProvider(f.p);
   const ratings = S('filters').ratings;
   const feed = new Feed(prov, [{ t: f.t, op: '+' }], { order: '', score: 0, ratings, media: '', shape: '', age: '' });
+  feed.background = background; // Fur Affinity holds unattended checks while the site is busy
   feed.limit = 8; // a handful is enough to know what's new — keeps the check cheap
   try {
     const posts = (await prov.page(feed)).filter((p) => ratings[p.rating]).sort((a, b) => b.id - a.id);
@@ -43,7 +44,7 @@ export async function checkSub(f) {
 /** Check followed artists one by one (the proxy paces the requests). Only stale ones unless forced. */
 export async function refreshAll({ force = false, only = null } = {}) {
   if (running) return;
-  const list = (only || subs.all()).filter((f) => force || !f.checked || Date.now() - f.checked > staleMs());
+  const list = (only || subs.all()).filter((f) => (force || f.p !== 'fa' || S('faFollowCheck')) && (force || !f.checked || Date.now() - f.checked > staleMs())); // Fur Affinity artists are only checked unattended when the person turned that on
   if (!list.length) return;
   running = true;
   let done = 0;
@@ -51,7 +52,7 @@ export async function refreshAll({ force = false, only = null } = {}) {
   emit('subs-progress', { running: true, done, total: list.length });
   for (const f of list) {
     if (!subs.get(f.id)) continue;
-    if (await checkSub(subs.get(f.id))) fresh.push(f.t);
+    if (await checkSub(subs.get(f.id), { background: !force })) fresh.push(f.t);
     emit('subs-progress', { running: true, done: ++done, total: list.length });
   }
   running = false;

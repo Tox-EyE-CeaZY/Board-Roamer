@@ -285,7 +285,17 @@ export class Viewer {
     const blurred = isBlurred(post) && !this._unblur.has(postKey(post));
     this._setBg(blurred ? '' : post.thumb);
     const artist = post.artists.length ? post.artists.slice(0, 3).map(pretty).join(', ') : 'unknown artist';
-    this.title.replaceChildren(h('b', {}, artist), h('span', {}, `#${post.id} · ${post.provider}`));
+    this.title.replaceChildren(h('b', {}, artist), h('span', {}, post.title ? `${post.title} · #${post.id}` : `#${post.id} · ${post.provider}`));
+    // a post that came from a thumbnail (Fur Affinity): fetch the rest while the preview is already showing
+    if (post._lazy) {
+      getProvider(post.provider).fill(post).then(() => {
+        if (this.post !== post) return;
+        this.title.querySelector('span').textContent = post.title ? `${post.title} · #${post.id}` : `#${post.id} · ${post.provider}`;
+        this._renderPanel();
+        this._relayoutMedia();
+        this._paintToggles();
+      }).catch((e) => this.post === post && toast(e.message, { kind: 'err' }));
+    }
     this._paintToggles();
 
     const old = this.media, oldPlayer = this.player;
@@ -386,17 +396,26 @@ export class Viewer {
     // multi-megapixel image decodes (the screen flashes), so it is decoded off to the side first and then swapped in one go.
     // On a touch screen it waits until you actually zoom in: at fit size it looks the same and costs a huge GPU layer.
     this._upgrade = null;
-    if (S('fullOriginal') && post.full !== first && post.kind !== 'anim') {
+    if ((S('fullOriginal') || post._lazy) && (post.full !== first || post._lazy) && post.kind !== 'anim') {
       let started = false;
       const upgrade = async () => {
         if (started || this.media !== img) return;
         started = true;
         this.ring.hidden = false;
         try {
-          const next = img.cloneNode(false); // same size, position and transform as the one on screen
+          if (post._lazy) await getProvider(post.provider).fill(post); // Fur Affinity: the full file's address is on the post's own page
+          if (post.full === first) throw new Error('nothing bigger');
+          let next = img.cloneNode(false); // same size, position and transform as the one on screen
           next.style.background = '';
           next.src = post.full;
-          await next.decode();
+          try {
+            await next.decode();
+          } catch {
+            next = img.cloneNode(false); // some picture hosts check where the request came from: the local proxy sends the site's own address
+            next.style.background = '';
+            next.src = '/img?u=' + encodeURIComponent(post.full);
+            await next.decode();
+          }
           if (this.media === img && img.isConnected) {
             img.replaceWith(next);
             this.media = next;
@@ -801,7 +820,7 @@ export class Viewer {
       return;
     }
     const c = (S('creds') || {})[prov.credKey];
-    if (!c?.user || !c?.key) {
+    if (!prov.localLikes && (!c?.user || !c?.key)) {
       if (!this._noKeyHint) { this._noKeyHint = true; toast('Add your username + API key in Settings to favorite and upvote from a double-tap.', { kind: 'err', ms: 4200 }); }
       return;
     }
@@ -812,7 +831,7 @@ export class Viewer {
     try {
       await Promise.all(jobs);
       emit('post-like', { post: p, on: true });
-      if (!this._likedHint) { this._likedHint = true; toast('Liked: added to your favorites and upvoted', { ms: 1800 }); }
+      if (!this._likedHint) { this._likedHint = true; toast(prov.localLikes ? 'Liked here: saved in Board Roamer only, not on ' + prov.name : 'Liked: added to your favorites and upvoted', { ms: prov.localLikes ? 3000 : 1800 }); }
     } catch (e) {
       toast(e.message, { kind: 'err' });
     }
@@ -961,6 +980,10 @@ export class Viewer {
     const prov = getProvider(p.provider);
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
+    this.bFav.title = prov.localLikes ? 'Favorite here (V): saved in Board Roamer only, not on ' + prov.name : 'Favorite (V)';
+    this.bUp.title = prov.localLikes ? 'Upvote here (U): saved in Board Roamer only, not on ' + prov.name : 'Upvote (U)';
+    this.bFav.classList.toggle('local', !!prov.localLikes);
+    this.bUp.classList.toggle('local', !!prov.localLikes);
     this.bFav.classList.toggle('on', !!p.faved);
     this.bUp.classList.toggle('on', voted.has(p) || p.myVote > 0);
     for (const b of [this.bSave, this.bSaveDesk]) { b.classList.toggle('on', saved.has(p)); b.title = saved.has(p) ? 'Already downloaded (S)' : 'Download to your Downloads folder (S)'; }
@@ -997,14 +1020,14 @@ export class Viewer {
   async toggleFav() {
     const p = this.post, prov = getProvider(p.provider);
     const c = (S('creds') || {})[prov.credKey];
-    if (!c?.user || !c?.key) return toast('Add your username + API key in Settings to favorite posts.', { kind: 'err' });
+    if (!prov.localLikes && (!c?.user || !c?.key)) return toast('Add your username + API key in Settings to favorite posts.', { kind: 'err' });
     const want = !p.faved;
     try {
       await prov.setFav(p, want);
       p.faved = want;
       p.favs += want ? 1 : -1;
       emit('post-like', { post: p, on: want });
-      toast(want ? 'Added to your favorites' : 'Removed from favorites', { ms: 1400 });
+      toast(prov.localLikes ? (want ? 'Saved in Board Roamer only, not on ' + prov.name : 'Removed from your favorites here') : want ? 'Added to your favorites' : 'Removed from favorites', { ms: prov.localLikes ? 2600 : 1400 });
       this._paintToggles();
       this._renderPanel();
     } catch (e) {
@@ -1015,14 +1038,14 @@ export class Viewer {
   async upvote() {
     const p = this.post, prov = getProvider(p.provider);
     const c = (S('creds') || {})[prov.credKey];
-    if (!c?.user || !c?.key) return toast('Add your username + API key in Settings to vote.', { kind: 'err' });
+    if (!prov.localLikes && (!c?.user || !c?.key)) return toast('Add your username + API key in Settings to vote.', { kind: 'err' });
     try {
       const r = await prov.setVote(p, 1);
       const on = r?.our_score != null ? r.our_score > 0 : !voted.has(p);
       voted.set(p, on);
       p.myVote = on ? 1 : 0;
       emit('post-like', { post: p, on, vote: true });
-      toast(on ? 'Upvoted' : 'Upvote removed', { ms: 1200 });
+      toast(prov.localLikes ? (on ? 'Upvoted in Board Roamer only, not on ' + prov.name : 'Upvote removed') : on ? 'Upvoted' : 'Upvote removed', { ms: prov.localLikes ? 2600 : 1200 });
       this._paintToggles();
     } catch (e) {
       toast(e.message, { kind: 'err' });
@@ -1200,7 +1223,7 @@ export class Viewer {
       h('button', { class: 'pn-tab' + (this.tab === id ? ' on' : ''), onclick: () => { this.tab = id; this._renderPanel(); } }, label, n ? h('sup', {}, n) : null)));
     const score = h('div', { class: 'pn-score' },
       stamp(p.rating),
-      h('span', { class: 'sc', title: `${p.up} up / ${p.down} down` }, h('i', { html: icon('up', 13) }), fmtNum(p.score)),
+      p.noScore ? null : h('span', { class: 'sc', title: `${p.up} up / ${p.down} down` }, h('i', { html: icon('up', 13) }), fmtNum(p.score)),
       h('span', { class: 'sc fv' + (p.faved ? ' on' : ''), title: 'Favorites' }, h('i', { html: icon('heart', 13) }), fmtNum(p.favs)),
       h('span', { class: 'sc dim' }, `${p.w}×${p.h}`),
       h('span', { class: 'sc dim' }, p.ext.toUpperCase()),
@@ -1267,7 +1290,8 @@ export class Viewer {
       row('Posted', p.created ? `${fmtDate(p.created)} · ${ago(p.created)}` : ''),
       row('Dimensions', `${p.w} × ${p.h}  (${(p.w / p.h).toFixed(2)})`),
       row('File', `${p.ext.toUpperCase()} · ${fmtBytes(p.size)}`),
-      row('Score', `${p.score}  (+${p.up} / ${p.down})`),
+      p.noScore ? null : row('Score', `${p.score}  (+${p.up} / ${p.down})`),
+      ...(p.facts || []).map(([k, v]) => row(k, v)),
       row('Favorites', fmtNum(p.favs)), row('Comments', p.comments || ''),
       p.duration ? row('Duration', Math.round(p.duration) + 's') : null,
       src ? h('div', { class: 'ir col' }, h('span', {}, 'Sources'), src) : null,
@@ -1275,7 +1299,7 @@ export class Viewer {
         p.parent ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.parent, 'only') }, '↰ parent #' + p.parent) : null,
         (p.children?.length || p.hasChildren) ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.id, 'only') }, `⧉ children${p.children?.length ? ' (' + p.children.length + ')' : ''}`) : null)) : null,
       p.pools?.length ? h('div', { class: 'ir col' }, h('span', {}, 'Pools'), poolBox) : null,
-      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov }))) : null,
+      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' || prov.plainDesc ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov }))) : null,
     );
   }
 

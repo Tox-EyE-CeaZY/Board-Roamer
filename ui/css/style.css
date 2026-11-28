@@ -1441,3 +1441,36 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .pair-qr b { font: 700 18px/1.3 var(--f-mono); letter-spacing: .06em; color: var(--hot); user-select: all; overflow-wrap: anywhere; }
 .pair-found { display: flex; flex-wrap: wrap; gap: 6px; }
 .pair-found .chip.on { border-color: var(--hot); color: var(--hot); }
+
+/* ---------- Fur Affinity section ---------- */
+.fa-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 4px 30px 12px; }
+.fa-bar .fa-fill { flex: 1 1 0; }
+.fa-ratings { display: inline-flex; gap: 6px; }
+.fa-rt { font: 600 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: 6px 10px; border: 1px solid var(--line2); background: transparent; color: var(--faint); cursor: pointer; }
+.fa-rt.on { color: var(--ink); border-color: currentColor; }
+.fa-rt.on.r-s { color: oklch(.8 .17 150); } .fa-rt.on.r-q { color: oklch(.82 .16 85); } .fa-rt.on.r-e { color: oklch(.7 .22 22); }
+.fa-rt.on { background: color-mix(in oklch, currentColor 12%, transparent); }
+.fa-seenbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 30px 12px; }
+.fa-userwrap { padding: 0 30px 8px; }
+.fa-user { display: flex; flex-direction: column; gap: 10px; }
+.fa-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.fa-st { font: 500 11.5px var(--f-mono); color: var(--faint); letter-spacing: .04em; }
+.fa-st b { color: var(--ink); font-weight: 700; margin-right: 5px; }
+.fa-act { display: flex; flex-wrap: wrap; gap: 8px; }
+.fa-bio { max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--dim); white-space: pre-wrap; max-height: 9em; overflow: auto; }
+.fa-folders, .fa-follow { padding: 4px 30px 30px; }
+.fa-fgroup h3 { font: 700 12px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 14px 0 8px; }
+.fa-fl-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.fa-fl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.fa-fl { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 10px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: 600 13px var(--f-body, inherit); }
+.fa-fl:hover { border-color: var(--accent); }
+.fa-fl-thumbs { display: flex; gap: 3px; height: 56px; overflow: hidden; }
+.fa-fl-thumbs img { flex: 1 1 0; min-width: 0; object-fit: cover; height: 100%; }
+.fa-banner { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg3); color: var(--ink); border: 1px solid var(--accent); border-left-width: 4px; font: 500 12.5px var(--f-mono); cursor: pointer; box-shadow: 0 6px 24px #0006; }
+.fa-banner[hidden] { display: none; }
+.fa-banner b { color: var(--accent); }
+.st-fa .st-paste { margin: 6px 0 10px; font-size: 12.5px; color: var(--dim); }
+.st-fa .st-paste summary { cursor: pointer; }
+.vbtn.local, .ibtn.local { position: relative; }
+.ibtn.local::after, .vbtn.local::after { content: ''; position: absolute; right: 4px; bottom: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+@media (max-width: 700px) { .fa-bar, .fa-seenbar, .fa-userwrap, .fa-folders, .fa-follow { padding-left: 14px; padding-right: 14px; } }

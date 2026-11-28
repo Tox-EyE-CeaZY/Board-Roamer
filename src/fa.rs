@@ -185,10 +185,10 @@ fn json(rq: Request, code: u16, v: serde_json::Value) {
 
 pub fn status() -> serde_json::Value {
     let c = creds().lock().unwrap();
-    serde_json::json!({ "connected": sane(&c.a) && sane(&c.b), "cleared": sane(&c.clearance), "ua": !c.ua.is_empty() })
+    serde_json::json!({ "connected": sane(&c.a) && sane(&c.b), "cleared": sane(&c.clearance), "ua": !c.ua.is_empty(), "gen": generation() })
 }
 
-/// GET /fa/status                 -> {connected, cleared, ua}   (no values, ever)
+/// GET /fa/status                 -> {connected, cleared, ua, gen}   (no values, ever; `gen` changes when the session does)
 /// POST /fa/login | /fa/verify    -> opens FA's own page in a window where the user signs in / passes the check
 /// POST /fa/paste {a, b}          -> the manual way: two cookie values copied from a browser
 /// POST /fa/disconnect            -> forget the session and close the window

@@ -1,10 +1,12 @@
 import { $, h, fmtNum, pretty, debounce, copyText } from './util.js';
 import { icon } from './icons.js';
-import { S, setS, on, emit, NEW_CAP, boards, subs, library, reading, history as trailStore, tagc } from './store.js';
+import { S, setS, on, emit, NEW_CAP, boards, subs, tagLinks, library, reading, history as trailStore, tagc } from './store.js';
 import { refreshLib, toggleLibrary } from './library.js';
 import { startWatch } from './watch.js';
 import { startWidgets } from './widgets.js';
 import { renderLocal } from './local.js';
+import { renderFa, initFaBanner } from './fapage.js';
+import { faSupported, faUserIn, faLink } from './fa.js';
 import { MultiFeed } from './multi.js';
 import { editSources } from './sources.js';
 import { getProvider, providerList, Feed, catName, linkToHash } from './providers.js';
@@ -52,7 +54,7 @@ const fSig = (f = {}) => JSON.stringify({ o: f.order || '', s: f.score || 0, r: 
 
 /* ================================================================== shell */
 const rail = $('#rail');
-const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
+const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder'], ['fa', 'Fur Affinity', 'paw']];
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolBadge = h('b', { class: 'nav-badge', hidden: true });
@@ -100,8 +102,10 @@ function paintPoolBadge() {
 /** The Local section only shows once it is turned on (Settings > Local). */
 function paintLocalNav() {
   const onn = !!S('localOn');
+  const fa = !!S('faOn') && faSupported();
   document.querySelectorAll('[data-view="local"]').forEach((a) => (a.hidden = !onn));
-  tabbar.style.setProperty('--tabs', onn ? NAV.length : NAV.length - 1);
+  document.querySelectorAll('[data-view="fa"]').forEach((a) => (a.hidden = !fa));
+  tabbar.style.setProperty('--tabs', NAV.length - (onn ? 0 : 1) - (fa ? 0 : 1));
   setActiveNav(parseHash().view);
 }
 
@@ -147,7 +151,7 @@ function setActiveNav(view) {
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
   tabbar.style.setProperty('--i', Math.max(0, i));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));
-  appbarTitle.textContent = { roam: 'Roam', feed: 'Feed', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local' }[view] || 'Roam';
+  appbarTitle.textContent = { roam: 'Roam', feed: 'Feed', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local', fa: 'Fur Affinity' }[view] || 'Roam';
 }
 
 /* ================================================================== roam view */
@@ -271,7 +275,7 @@ function navigateRoam({ terms = st.terms, filters = st.filters, provider = prov.
 /* The Main tab (Settings > Look > Pinned Main tab, computers only): the first tab is where you move between Roam, Boards,
    Follows, Pools and Trail. Anything you open from one of those pages (an artist, a board, a pool) gets a tab of its own. */
 const mainOn = () => !isPhone() && tabsEnabled() && S('mainTab') !== false;
-const PAGES = ['roam', 'feed', 'boards', 'follows', 'pools', 'trail', 'local'];
+const PAGES = ['roam', 'feed', 'boards', 'follows', 'pools', 'trail', 'local', 'fa'];
 
 function routeToTab(hash) {
   if (!mainOn()) return false;
@@ -329,6 +333,7 @@ function tabTitleFor(hash) {
   }
   if (view === 'board') return boards.get(id)?.name || 'Board';
   if (view === 'local') return (p.get('d') || '').split('/').pop() || 'Local';
+  if (view === 'fa') return hash.includes('/fa/user/') ? decodeURIComponent(hash.split('/fa/user/')[1].split(/[/?]/)[0]) : 'Fur Affinity';
   return { feed: 'Feed', boards: 'Boards', follows: 'Follows', pools: 'Pools', trail: 'Trail', pool: 'Pool' }[view] || 'Roam';
 }
 
@@ -483,7 +488,7 @@ function applyRouteCore() {
   closePopover();
   closeMenu();
   if (view !== 'pool') curPool = null;
-  if (view !== 'local') curLocal = null;
+  if (view !== 'local' && view !== 'fa') curLocal = null;
   if (view === 'roam') {
     boardGal = null;
     handleRead(null);
@@ -549,6 +554,12 @@ function applyRouteCore() {
     curLocal = key;
     boardGal = renderLocal(root, ctx, { devId: id ? decodeURIComponent(id) : '', rootId: p.get('r') || '', rel: p.get('d') || '' });
     return handlePost(p.get('post'), boardGal);
+  } else if (view === 'fa') {
+    const key = location.hash.split('?post=')[0].split('&post=')[0];
+    if (boardGal && curLocal === key) return handlePost(p.get('post'), boardGal); // only the viewer changed
+    curLocal = key;
+    boardGal = renderFa(root, ctx);
+    return handlePost(p.get('post'), boardGal);
   } else if (view === 'trail') (boardGal = null), renderTrail(root, ctx);
   else if (view === 'follows') (boardGal = null), renderFollows(root, ctx);
   else if (view === 'feed') (boardGal = null), renderFeed(root, ctx);
@@ -572,9 +583,9 @@ async function handlePost(postId, g) {
   const idx = list.findIndex((p) => String(p.id) === postId);
   viewerGal = g;
   if (idx >= 0) return viewer.open(list, idx, null), poolRoot(g);
-  if (g === gal) {
+  if (g === gal || g?.provId === 'fa' || (!g && parseHash().view === 'fa')) {
     try {
-      const post = await prov.post(postId);
+      const post = await (g === gal ? prov : getProvider('fa')).post(postId);
       if (post) viewer.open([post], 0);
       else toast('That post could not be found', { kind: 'err' });
     } catch (e) {
@@ -738,6 +749,11 @@ function tagAction(tag, mode, provId) {
   if (vp === 'local') { // a tag on a local file filters that folder; it is not a booru search
     if (viewer.isOpen) closeViewerQuiet();
     return emit('local-filter', { tag });
+  }
+  if (vp === 'fa') { // a Fur Affinity tag stays in the Fur Affinity section: the artist's page, or the local index
+    const artist = viewer.post?.artists?.includes(tag) || mode === 'artist';
+    if (viewer.isOpen) closeViewerQuiet();
+    return go(artist ? `#/fa/user/${encodeURIComponent(tag)}` : `#/fa?t=seen&q=${encodeURIComponent(tag)}`);
   }
   if (viewer.isOpen) closeViewerQuiet();
   if (reader.isOpen) closeReaderQuiet();
@@ -1057,6 +1073,7 @@ function feedOf(list) {
 let walk = null; // { ids: [follow id], i, seen: Map(id -> seenId when the walk began), pid }
 
 function openFollow(f, shown) {
+  if (f.p === 'fa') return go(`#/fa/user/${encodeURIComponent(f.t)}`); // Fur Affinity artists open in their own section
   const ids = (shown || [f.id]).filter((id) => id === f.id || subs.get(id)?.newCount);
   let at = ids.indexOf(f.id);
   if (at < 0) at = (ids.push(f.id), ids.length - 1);
@@ -1160,7 +1177,8 @@ async function renderDossier() {
         extra.aka?.length ? h('p', { class: 'ds-aka' }, 'aka ', extra.aka.map(pretty).join(' · ')) : null,
         extra.group ? h('p', { class: 'ds-aka' }, 'group ', extra.group) : null,
         extra.urls?.length ? h('div', { class: 'ds-links' }, extra.urls.slice(0, 8).map((u) => h('a', { href: '#', title: u, onclick: (e) => (e.preventDefault(), openExternal(u)), oncontextmenu: (e) => (e.preventDefault(), e.stopPropagation(), showMenu(e.clientX, e.clientY, [{ label: 'Open in browser', icon: 'external', run: () => openExternal(u) }, { label: 'Copy link', icon: 'copy', run: () => copyText(u) }])) }, new URL(u).hostname.replace(/^www\./, ''), h('i', { html: icon('external', 11) })))) : null,
-        extra.wiki ? h('p', { class: 'ds-wiki' }, extra.wiki) : null),
+        extra.wiki ? h('p', { class: 'ds-wiki' }, extra.wiki) : null,
+        extra.fa ? h('div', { class: 'ds-links' }, h('button', { class: 'btn', title: 'This artist links a Fur Affinity page', onclick: () => (tagLinks.link([{ key: prov.credKey, tag: name }, { key: getProvider('fa').credKey, tag: extra.fa }]), go(`#/fa/user/${encodeURIComponent(extra.fa)}`)), html: icon('paw', 15) + `<span>Open ${pretty(extra.fa)} on Fur Affinity</span>` })) : null),
       h('div', { class: 'ds-act' },
         artist
           ? h('button', { class: 'btn' + (on ? ' primary' : ''), onclick: () => (toggleFollow(name), paint(lastExtra)), html: icon(on ? 'bellOn' : 'bell', 15) + `<span>${on ? 'Following' : 'Follow'}</span>` })
@@ -1181,6 +1199,7 @@ async function renderDossier() {
     if (info?.cat === 'artist' && prov.artist) {
       const a = await prov.artist(name);
       if (a) Object.assign(extra, { aka: a.other, group: a.group, urls: a.urls.filter((u) => /^https?:/.test(u)) });
+      if (S('faOn') && faSupported()) extra.fa = faUserIn(a?.urls) || tagLinks.suggest(prov.credKey, name, getProvider('fa').credKey) || ''; // the artist's own wiki names their Fur Affinity page
     } else if (prov.wiki && info) {
       const w = await prov.wiki(name);
       if (w) {
@@ -1576,7 +1595,8 @@ function boot() {
   initTopo();
   buildRail();
   paintLocalNav();
-  on('settings', (e) => e.detail.key === 'localOn' && paintLocalNav());
+  initFaBanner();
+  on('settings', (e) => (e.detail.key === 'localOn' || e.detail.key === 'faOn') && paintLocalNav());
   paintDial();
   paintFollowBadge();
   paintPoolBadge();

@@ -75,6 +75,8 @@ export const DEFAULTS = {
   openLinks: true, // Android: links to the supported sites offer Board Roamer
   localOn: false, // the Local section: browse pictures and videos in folders you choose, on this and your other devices
   localSort: 'new',
+  faOn: false, // the Fur Affinity section (computers): its own place to browse furaffinity.net, apart from the boards
+  faFollowCheck: false, // check followed Fur Affinity artists in the background (off: only when you press Check)
   notify: false, // system notifications when something new turns up (text only, never pictures)
   notifyFollows: true,
   notifyBoards: true,
