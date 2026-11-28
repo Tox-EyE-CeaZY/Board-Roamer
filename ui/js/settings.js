@@ -479,7 +479,13 @@ export function openSettings(section) {
     show(null);
   };
   window.addEventListener('keydown', onKey, true);
-  offKey = () => window.removeEventListener('keydown', onKey, true);
+  // a press on the app behind the panel closes it (dialogs, menus, toasts and the Settings buttons themselves don't count)
+  const onOutside = (e) => {
+    if (!panel || panel.contains(e.target) || e.target.closest?.('.dlg-back, .help-back, .sheet-back, .pop, #toasts, .ctx, [aria-label="Settings"], [title^="Settings"]')) return;
+    closeSettings();
+  };
+  const armOutside = setTimeout(() => document.addEventListener('pointerdown', onOutside, true), 50);
+  offKey = () => { window.removeEventListener('keydown', onKey, true); clearTimeout(armOutside); document.removeEventListener('pointerdown', onOutside, true); };
 
   panel = h('aside', { class: 'settings' + (phone ? ' phone-nav' : ' wide') },
     h('div', { class: 'st-head' }, back, title, h('button', { class: 'ibtn st-x', 'aria-label': 'Close settings', html: icon('close', 18), onclick: closeSettings })),

@@ -706,6 +706,30 @@ span.dt-spoiler { color: inherit; } div.dt-spoiler { margin: 0 0 .7em; padding: 
 }
 .st-main { flex: 1; min-height: 0; display: flex; }
 .st-head { gap: 4px; } .st-head h2 { flex: 1; }
+/* desktop: a wide panel; every row = label and hint on the left, its control on the right, in one column */
+.settings.wide { width: min(1040px, 100vw); }
+.settings.wide .st-body { padding: 6px 34px 60px; overflow-x: hidden; }
+.settings.wide .st-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 340px); align-items: center; gap: 8px 32px; padding: 14px 0; border-top: 1px solid var(--line); }
+.settings.wide .st-sec h3 + .st-row, .settings.wide .st-body.single .st-sec > .st-row:first-child { border-top: 0; }
+.settings.wide .st-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.settings.wide .st-row small { margin-top: 3px; line-height: 1.5; }
+.settings.wide .st-row > .tgl, .settings.wide .st-row > .btn { justify-self: end; }
+.settings.wide .st-row > .input, .settings.wide .st-row > input[type=range] { width: 100%; min-width: 0; }
+.settings.wide .st-row > .seg { justify-self: end; }
+.settings.wide .st-row.col { flex-direction: unset; }
+.settings.wide .st-row.col > :nth-child(2) { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+.settings.wide .st-row.col > .seg, .settings.wide .st-row.col > div.seg { display: flex; }
+.settings.wide .st-row.col .seg-b { flex: 1 1 auto; text-align: center; }
+.settings.wide .st-line { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: baseline; gap: 2px 12px; min-width: 0; }
+.settings.wide .st-line small { flex-basis: 100%; }
+.settings.wide .st-row.col > .st-line { grid-column: 1; grid-row: 1; }
+@media (max-width: 760px) {
+  .settings.wide .st-menu { flex-basis: 150px; }
+  .settings.wide .st-body { padding: 6px 16px 60px; }
+  .settings.wide .st-row { grid-template-columns: minmax(0, 1fr); }
+  .settings.wide .st-row > .tgl, .settings.wide .st-row > .btn, .settings.wide .st-row > .seg { justify-self: start; }
+  .settings.wide .st-row.col > :nth-child(2) { grid-column: 1; grid-row: auto; }
+}
 .settings.wide .st-menu { flex: 0 0 230px; border-right: 1px solid var(--line); overflow-y: auto; }
 .settings.wide .st-item small { display: none; }
 .settings.wide .st-item { padding: 12px 18px; }
