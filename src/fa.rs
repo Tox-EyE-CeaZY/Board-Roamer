@@ -84,6 +84,13 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// The names the person's own watch list page showed in the app's Fur Affinity window (read once by the page).
 static WATCH: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
+/// The outcome of the last Watch / Unwatch the background page did: {user, watching, ok, error}.
+static ACT: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+
+pub fn set_act(user: &str, watching: bool, error: &str) {
+    *ACT.lock().unwrap() = Some(serde_json::json!({ "user": user, "watching": watching, "ok": error.is_empty(), "error": error }));
+}
+
 pub fn set_watch(names: Vec<String>) {
     let mut seen = std::collections::HashSet::new();
     let ok: Vec<String> = names
@@ -205,6 +212,7 @@ pub fn status() -> serde_json::Value {
 /// POST /fa/login | /fa/verify    -> opens FA's own page in a window where the user signs in / passes the check
 /// POST /fa/paste {a, b}          -> the manual way: two cookie values copied from a browser
 /// POST /fa/watch                -> opens the person's own watch list page in the sign-in window; GET /fa/watch -> {names|null} once read
+/// POST /fa/act {user, watch}     -> hidden page watches / unwatches that artist (the person tapped it); GET /fa/act -> {result|null}
 /// POST /fa/disconnect            -> forget the session and close the window
 pub fn request(mut rq: Request, path: &str) {
     match (path, rq.method().clone()) {
@@ -236,6 +244,23 @@ pub fn request(mut rq: Request, path: &str) {
         ("/fa/watch", _) => {
             let got = WATCH.lock().unwrap().take();
             json(rq, 200, serde_json::json!({ "names": got }))
+        }
+        // Watch / Unwatch on a person's tap: a hidden page on the artist's own page presses the site's own link (src/main.rs)
+        ("/fa/act", Method::Post) => {
+            let mut body = String::new();
+            let _ = rq.as_reader().take(1024).read_to_string(&mut body);
+            let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+            let user = v["user"].as_str().unwrap_or("").to_ascii_lowercase();
+            if user.is_empty() || user.len() > 40 || !user.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.~-".contains(&b)) {
+                return json(rq, 400, serde_json::json!({ "error": "bad user" }));
+            }
+            *ACT.lock().unwrap() = None;
+            crate::appcfg::send_event(format!("fa:act:{}:{}", if v["watch"].as_bool().unwrap_or(true) { 1 } else { 0 }, user));
+            json(rq, 200, serde_json::json!({ "ok": true }))
+        }
+        ("/fa/act", _) => {
+            let got = ACT.lock().unwrap().take();
+            json(rq, 200, serde_json::json!({ "result": got }))
         }
         ("/fa/disconnect", Method::Post) => {
             clear();

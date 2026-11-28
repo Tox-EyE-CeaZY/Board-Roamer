@@ -79,6 +79,17 @@ export const faVerify = () => faPost('verify');
 /** Opens the person's own watch list in the Fur Affinity window (they sign in there if asked); the names come back through `faWatchNames`. */
 export const faWatchStart = () => faPost('watch');
 export const faWatchNames = () => fetch('/fa/watch').then((r) => r.json()).then((j) => j.names || null).catch(() => null);
+/** Watch (true) or unwatch (false) an artist on Fur Affinity, on the person's tap: a hidden page presses the site's own link. Resolves {ok, watching, error}. */
+export async function faWatchAct(user, watch) {
+  const r = await faPost('act', { user, watch });
+  if (r.error) return { ok: false, error: r.error };
+  for (let i = 0; i < 80; i++) {
+    await new Promise((res) => setTimeout(res, 1000));
+    const j = await fetch('/fa/act').then((x) => x.json()).catch(() => ({}));
+    if (j.result) return j.result;
+  }
+  return { ok: false, error: 'Fur Affinity did not answer' };
+}
 export const faDisconnect = async () => (await faPost('disconnect'), (faState.loggedIn = null), (faState.me = ''), faStatus());
 export const faPaste = (a, b) => faPost('paste', { a, b }).then(async (j) => { if (j.error) throw new Error(j.error); await faStatus(); return j; });
 

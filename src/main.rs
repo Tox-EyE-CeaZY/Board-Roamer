@@ -195,19 +195,23 @@ struct FaWin {
     /// names collected so far across the watch list's pages, and the pages already read
     acc: Vec<String>,
     seen: std::collections::HashSet<String>,
+    /// a Watch / Unwatch the person tapped: (artist, wanted state), and whether the site's own link was already followed
+    act: Option<(String, bool)>,
+    stepped: bool,
 }
 
-fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, icon: Option<Icon>) -> Option<FaWin> {
+fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, act: Option<(String, bool)>, icon: Option<Icon>) -> Option<FaWin> {
     let window = WindowBuilder::new()
         .with_title(if watch { "Fur Affinity: your watch list" } else if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
         .with_window_icon(icon)
         .with_inner_size(LogicalSize::new(1000.0, 780.0))
+        .with_visible(act.is_none()) // a Watch / Unwatch runs unseen; the window only shows if the site needs the person (sign-in, its quick check)
         .build(target)
         .ok()?;
     // its own profile, so signing out here cannot touch the app's settings
     let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
-        .with_url(if watch { "https://www.furaffinity.net/controls/buddylist/" } else if login { "https://www.furaffinity.net/login/" } else { "https://www.furaffinity.net/" })
+        .with_url(&if let Some((u, _)) = &act { format!("https://www.furaffinity.net/user/{u}/") } else if watch { "https://www.furaffinity.net/controls/buddylist/".to_string() } else if login { "https://www.furaffinity.net/login/".to_string() } else { "https://www.furaffinity.net/".to_string() })
         .with_on_page_load_handler(move |ev, _url| {
             if matches!(ev, PageLoadEvent::Finished) {
                 let _ = events.send_event("fa:loaded".to_string());
@@ -220,14 +224,14 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
         let vbox = window.default_vbox()?;
         builder.build_gtk(vbox).ok()?
     };
-    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false, acc: Vec::new(), seen: Default::default() })
+    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false, acc: Vec::new(), seen: Default::default(), act, stepped: false })
 }
 
 /// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
 fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
     // on the watch list page it also reads the users listed there: links to user pages whose text is that user's own name
     // (the list itself; navigation, news and the footer never match). Same rule as parseWatchNames in ui/js/fa-parse.js.
-    let js = r#"JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,next:(()=>{if(!/^\/controls\/buddylist/.test(location.pathname))return '';const ok=a=>{const u=new URL(a.href,location.href);return u.hostname==='www.furaffinity.net'&&/^\/(controls\/buddylist|watchlist)/.test(u.pathname)&&!/remove|add/.test(u.search)&&u.href!==location.href};const as=[...document.querySelectorAll('#site-content a[href]')].filter(a=>{try{return ok(a)}catch(e){return false}});const a=as.find(a=>a.rel==='next'||/^\s*(next|older|>|>>|›|»)|next/i.test(a.textContent)&&!/prev|back/i.test(a.textContent))||as.find(a=>/[?&]page=/.test(a.href)&&!/prev/i.test(a.textContent)&&Number((/[?&]page=(\d+)/.exec(a.href)||[])[1])>Number((/[?&]page=(\d+)/.exec(location.search)||[,1])[1]));return a?a.href:''})(),names:/^\/controls\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*="/user/"]')].map(a=>{const m=/\/user\/([^/?#]+)/.exec(a.getAttribute('href')||'');if(!m)return '';let n=m[1];try{n=decodeURIComponent(n)}catch(e){}const f=s=>String(s||'').toLowerCase().replace(/[\s_~@.\-]+/g,'');return f(a.textContent)===f(n)?n:''}).filter(Boolean))]:[]})"#;
+    let js = r#"JSON.stringify({w:(()=>{const a=[...document.querySelectorAll('#site-content a[href]')].map(a=>a.href);const u=a.find(h=>/\/unwatch\//.test(h));const wt=a.find(h=>/\/watch\//.test(h)&&!/unwatch/.test(h));return u?{s:1,l:u}:wt?{s:0,l:wt}:{s:-1,l:''}})(),ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,next:(()=>{if(!/^\/controls\/buddylist/.test(location.pathname))return '';const ok=a=>{const u=new URL(a.href,location.href);return u.hostname==='www.furaffinity.net'&&/^\/(controls\/buddylist|watchlist)/.test(u.pathname)&&!/remove|add/.test(u.search)&&u.href!==location.href};const as=[...document.querySelectorAll('#site-content a[href]')].filter(a=>{try{return ok(a)}catch(e){return false}});const a=as.find(a=>a.rel==='next'||/^\s*(next|older|>|>>|›|»)|next/i.test(a.textContent)&&!/prev|back/i.test(a.textContent))||as.find(a=>/[?&]page=/.test(a.href)&&!/prev/i.test(a.textContent)&&Number((/[?&]page=(\d+)/.exec(a.href)||[])[1])>Number((/[?&]page=(\d+)/.exec(location.search)||[,1])[1]));return a?a.href:''})(),names:/^\/controls\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*="/user/"]')].map(a=>{const m=/\/user\/([^/?#]+)/.exec(a.getAttribute('href')||'');if(!m)return '';let n=m[1];try{n=decodeURIComponent(n)}catch(e){}const f=s=>String(s||'').toLowerCase().replace(/[\s_~@.\-]+/g,'');return f(a.textContent)===f(n)?n:''}).filter(Boolean))]:[]})"#;
     let _ = w.webview.evaluate_script_with_callback(js, move |raw| {
         // the callback gets the JSON text of a string; unwrap that once
         let inner: String = serde_json::from_str(&raw).unwrap_or_default();
@@ -248,6 +252,36 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
     let title = v["title"].as_str().unwrap_or("").to_lowercase();
     let checking = title.starts_with("just a moment") || title.contains("attention required");
     let path = v["path"].as_str().unwrap_or("");
+    if let Some((user, want)) = w.act.clone() {
+        let user_page = path.trim_end_matches('/').eq_ignore_ascii_case(&format!("/user/{user}"));
+        if checking || path.starts_with("/login") {
+            let _ = w.window.set_visible(true); // the person has to deal with this one
+            let _ = w.window.set_focus();
+        } else if user_page {
+            let state = v["w"]["s"].as_i64().unwrap_or(-1);
+            let link = v["w"]["l"].as_str().unwrap_or("").to_string();
+            if state < 0 {
+                fa::set_act(&user, !want, "Sign in to Fur Affinity first");
+                *fa_win = None;
+            } else if (state == 1) == want {
+                fa::set_act(&user, want, "");
+                *fa_win = None;
+            } else if !w.stepped && (link.contains("/watch/") || link.contains("/unwatch/")) {
+                // the site's own link, a second after the page loaded
+                if let Some(w) = fa_win.as_mut() {
+                    w.stepped = true;
+                }
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1100));
+                    let _ = events.send_event(format!("fa:next:{link}"));
+                });
+            } else {
+                fa::set_act(&user, state == 1, "Fur Affinity did not change the watch");
+                *fa_win = None;
+            }
+        }
+        return;
+    }
     if w.watch {
         let names: Vec<String> = v["names"].as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default();
         if path.starts_with("/controls/buddylist") && !names.is_empty() {
@@ -497,7 +531,26 @@ fn main() {
                             }
                         } else {
                             fa_win = None; // one window at a time
-                            fa_win = open_fa_window(target, fa_events.clone(), login, watch, fa_icon.clone());
+                            fa_win = open_fa_window(target, fa_events.clone(), login, watch, None, fa_icon.clone());
+                        }
+                    }
+                    c if c.starts_with("fa:act:") => {
+                        // "fa:act:<1|0>:<artist>": watch (1) or unwatch (0) on a person's tap
+                        let (flag, user) = c[7..].split_once(':').unwrap_or(("1", ""));
+                        fa_win = None;
+                        fa_win = open_fa_window(target, fa_events.clone(), false, false, Some((user.to_string(), flag == "1")), fa_icon.clone());
+                        let ev = fa_events.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(60));
+                            let _ = ev.send_event("fa:actend".into());
+                        });
+                    }
+                    "fa:actend" => {
+                        if fa_win.as_ref().map_or(false, |w| w.act.is_some()) {
+                            if let Some((u, want)) = fa_win.as_ref().and_then(|w| w.act.clone()) {
+                                fa::set_act(&u, !want, "Fur Affinity did not answer in time");
+                            }
+                            fa_win = None;
                         }
                     }
                     "fa:loaded" => {

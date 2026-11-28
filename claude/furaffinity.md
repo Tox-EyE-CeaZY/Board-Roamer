@@ -16,6 +16,9 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - `ui/js/fapage.js` the section UI (Latest/Browse/Following/Seen/Liked here; artist page with Gallery/Scraps/Favorites/Folders), banner, settings box.
 - Reused as is: Gallery, Viewer, Feed, rating filter (same setting as boards), blacklist, Follows (`subs` with `p:'fa'`), pins/boards, downloads, `tagLinks`.
 
+## Watch button (2.16.1)
+Maven chose (2026-11-28) a hidden background page for Watch/Unwatch even though robots.txt disallows /watch/ for automated clients. Rules kept: only on the person's tap, one artist at a time, 1.1 s before the site's own link is followed (the page's own link with its key, never a built URL), window shown only for sign-in/Cloudflare, 60 s limit. `POST /fa/act {user, watch}` + `GET /fa/act`; src/main.rs `FaWin.act`; JS `faWatchAct`. Unverified against the live site (link markup `#site-content a[href*=/watch/]`).
+
 ## Behaviour worth knowing
 - Favorites and upvotes are local ("Saved in Board Roamer only, not on Fur Affinity"). Real fav/watch buttons open FA in the browser.
 - Search is only over what this device has seen (`Seen` tab, tag/artist/rating/title). FA's own search opens in the browser.
