@@ -156,6 +156,30 @@ final class FaNet {
 
     private static Page json(int code, String s) { return new Page(code, "application/json", s.getBytes(StandardCharsets.UTF_8)); }
 
+    /**
+     * Where pages are read from. Cloudflare ties its clearance to the browser that passed the check (its network stack as well as
+     * its User-Agent), so on a phone the pages are read by the same web view that passed it. When that is not available this
+     * returns null and the plain request below is used.
+     */
+    interface Fetcher { Page fetch(String target); }
+    static volatile Fetcher fetcher;
+
+    private static Page challengePage() {
+        Page p = json(503, "{\"error\":\"Fur Affinity needs a quick check in a browser window\",\"challenge\":true}");
+        p.headers.put("X-BR-FA", "challenge");
+        return p;
+    }
+
+    /** What the web view read, as the page the app's own request would have answered. */
+    static Page fromBrowser(int status, String finalUrl, boolean mitigated, String text) {
+        byte[] data = (text == null ? "" : text).getBytes(StandardCharsets.UTF_8);
+        if (isChallenge(status, mitigated, data)) return challengePage();
+        Page p = new Page(status, "text/html; charset=utf-8", data);
+        p.headers.put("X-BR-FA", "ok");
+        p.headers.put("X-BR-Final", finalUrl == null || finalUrl.isEmpty() ? "" : finalUrl);
+        return p;
+    }
+
     /** One page from furaffinity.net, GET only. Never throws. */
     static Page page(String method, String target) {
         String host = Net.hostOf(target);
@@ -164,6 +188,11 @@ final class FaNet {
         if (!pathAllowed(path)) return json(403, "{\"error\":\"Fur Affinity asks automated apps not to open that page, so it opens in your browser instead.\",\"robots\":true}");
         if (!"GET".equals(method)) return json(405, "{\"error\":\"Board Roamer only reads from Fur Affinity\"}");
         throttle();
+        Fetcher f = fetcher;
+        if (f != null) {
+            Page viaBrowser = f.fetch(target);
+            if (viaBrowser != null) return viaBrowser;
+        }
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(target).openConnection();
@@ -179,9 +208,7 @@ final class FaNet {
             String ct = c.getContentType();
             boolean mitigated = "challenge".equalsIgnoreCase(c.getHeaderField("cf-mitigated"));
             if (isChallenge(code, mitigated, data)) {
-                Page p = json(503, "{\"error\":\"Fur Affinity needs a quick check in a browser window\",\"challenge\":true}");
-                p.headers.put("X-BR-FA", "challenge");
-                return p;
+                return challengePage();
             }
             Page p = new Page(code, ct == null ? "text/html" : ct, data);
             p.headers.put("X-BR-FA", "ok");
