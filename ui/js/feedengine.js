@@ -178,7 +178,9 @@ const paceOf = (src) => src.pace || src;
 /** The pool a view picks from, and the mode it picks in (the Feed follows the setting; Roam's For you has its own of both). */
 const poolFor = (view, prov) => (view?.src && view.src.prov.id === prov.id ? view.src : srcOf(prov));
 const modeFor = (view) => view?.mode || mode();
-export const enabled = () => (S('feedSources') || []).map((id) => getProvider(id)).filter((p, i, a) => p && a.indexOf(p) === i);
+/** The Fur Affinity Feed is a source of its own: while it is chosen, it is the only site, and the boorus are left alone. */
+export const inFa = () => S('feedScope') === 'fa' && !!S('faOn');
+export const enabled = () => (inFa() ? [getProvider('fa')] : (S('feedSources') || []).map((id) => getProvider(id)).filter((p, i, a) => p && a.indexOf(p) === i));
 export const needsKeyMissing = (prov) => prov.needsKey && !(((S('creds') || {})[prov.credKey] || {}).key);
 
 /** Wait for this site's turn. Each kind of request queues on its own, so a chore never sits in front of the next batch of posts. */
@@ -206,6 +208,7 @@ const filtersFor = (o = {}) => ({ order: o.order || '', score: o.score || 0, rat
 async function fetchPage(src, terms, { order = '', score = 0, age = '', page = null, limit = pageFor(src.prov), ratings, lane } = {}) {
   const feed = new Feed(src.prov, terms, filtersFor({ order, score, age, ratings }));
   feed.limit = limit;
+  if (lane === 'follow') feed.background = true; // nobody is waiting for it: held while Fur Affinity is busy
   if (page != null) feed.pageNo = page;
   return pageOf(src, feed, lane);
 }
@@ -489,6 +492,62 @@ function streamFeed(src, m) {
   return f;
 }
 
+/**
+ * Fur Affinity has no search the app may use, so its candidates come from places the site lists openly: Browse (its newest-first
+ * list), the galleries of artists you follow or keep liking, and what those artists favorited. Each place remembers its own page,
+ * so every top-up reads the next one. The taste model then picks from the pool exactly as it does for the boorus.
+ */
+async function refillFa(src, view, m, model) {
+  const prov = src.prov;
+  const have = new Set(src.pool.map((p) => p.id));
+  const q = queued(view);
+  const stream = (key, fa) => {
+    src.streams ||= {};
+    let f = src.streams[key];
+    if (f && !f.done) return f;
+    f = new Feed(prov, fa.user ? [{ t: fa.user, op: '+' }] : [], filtersFor({}));
+    f.fa = fa;
+    f.limit = 48;
+    return (src.streams[key] = f);
+  };
+  const add = (posts, kind, who, max = 48) => {
+    posts = posts.filter((p) => !have.has(p.id) && acceptable(p, model, q, m === 'foryou' ? 'foryou' : m)).slice(0, max);
+    for (const p of posts) (tag(p, '_kind', kind), tag(p, '_q', who || ''), have.add(p.id));
+    src.pool.push(...posts);
+    if (src.pool.length > POOL_MAX) src.pool.splice(0, src.pool.length - POOL_MAX);
+    if (!src.pace) savePool(src);
+    return posts.length;
+  };
+  const browse = async () => add(await pageOf(src, stream('browse', { kind: 'browse' })), 'explore');
+  if (m !== 'foryou') return void (await browse()); // New: the site's own newest-first order
+  const follows = subs.all().filter((f) => f.p === prov.credKey && f.cat === 'artist').map((f) => f.t);
+  const liked = model.taste.ready ? model.taste.topArtists(2).map((a) => a.name).filter((a) => !follows.includes(a)) : [];
+  const used = (src.used ||= []); // the last few artists read are left alone for a while
+  const one = (list) => {
+    const open = list.filter((a) => !used.includes(a));
+    const from = open.length ? open : list;
+    const a = from[Math.floor(Math.random() * from.length)];
+    used.push(a);
+    if (used.length > 12) used.shift();
+    return a;
+  };
+  const roll = Math.random();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let n = 0;
+    if (roll < 0.3 + attempt && liked.length) {
+      const a = one(liked);
+      n = add(await pageOf(src, stream('g:' + a, { kind: 'gallery', user: a })), 'interest', a, 30);
+    } else if (roll < 0.55 + attempt && follows.length) {
+      const a = one(follows);
+      n = add(await pageOf(src, stream('g:' + a, { kind: 'gallery', user: a })), 'interest', a, 24);
+    } else if (roll < 0.68 + attempt && (liked.length || follows.length)) {
+      const a = one([...liked, ...follows]); // what an artist you like favorited: a way to find artists you do not know yet
+      n = add(await pageOf(src, stream('f:' + a, { kind: 'favs', user: a })), 'explore', a, 24);
+    } else n = await browse();
+    if (n >= 6) break;
+  }
+}
+
 /** Top the pool of a site up. */
 export function refill(src, view) {
   if (src.filling) return src.filling;
@@ -496,6 +555,11 @@ export function refill(src, view) {
   src.filling = (async () => {
     try {
       const m = modeFor(view);
+      if (prov.id === 'fa') {
+        await refillFa(src, view, m, model);
+        src.told = false;
+        return;
+      }
       if (m === 'new' || m === 'hot') {
         let posts = await pageOf(src, streamFeed(src, m));
         learnCats(posts);
@@ -558,14 +622,22 @@ export async function followTick(src, view) {
     const lim = Date.now() - (mode() === 'follows' ? 30 : FRESH_DAYS) * 86400000;
     const names = new Set(batch.map((f) => f.t));
     const have = new Set(src.fresh.map((p) => p.id));
+    const maxIds = prov.id === 'fa' ? kv.get('feed:fa:maxid', {}) : null; // FA lists carry no dates: newer means a higher submission id
     for (const p of posts) {
       if (have.has(p.id) || !acceptable(p, model, q)) continue;
-      if (new Date(p.created).getTime() < lim) continue;
+      if (maxIds) {
+        const a = batch[0].t, top = maxIds[a];
+        if (top ? +p.id <= top : posts.indexOf(p) >= 3) continue; // the first look at an artist takes only their newest few
+      } else if (new Date(p.created).getTime() < lim) continue;
       tag(p, '_kind', 'follow');
       tag(p, '_who', [...p.artists, ...Object.values(p.tags).flat()].find((a) => names.has(a)) || batch[0].t);
       src.fresh.push(p);
     }
-    src.fresh.sort((a, b) => new Date(b.created) - new Date(a.created));
+    if (maxIds) {
+      maxIds[batch[0].t] = Math.max(maxIds[batch[0].t] || 0, ...posts.map((p) => +p.id || 0));
+      kv.set('feed:fa:maxid', maxIds);
+      src.fresh.sort((a, b) => +b.id - +a.id);
+    } else src.fresh.sort((a, b) => new Date(b.created) - new Date(a.created));
     model.save();
   } catch {
     /* the cool-down in pageOf already handled it */

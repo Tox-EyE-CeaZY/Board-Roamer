@@ -12,7 +12,7 @@ import { haptic, isAndroid, isTouch, native } from './platform.js';
 import {
   SUGGEST_AT, POOL_LOW, modelOf, srcOf, srcs, enabled, needsKeyMissing, markShown, refill, followTick, nextPost, whyOf, learnAccount, canLearn, learning,
   isLiked, isUp, isDown, notInterested, suggestions, dismissSuggestion, heaviestTags, ensureCats, mediaSrc, smallVideo, dropPools, feel, likely, putBack,
-  styleOn, styleLike, seedStyle, scout, comicState,
+  styleOn, styleLike, seedStyle, scout, comicState, inFa,
 } from './feedengine.js';
 import { toggleLibrary } from './library.js';
 
@@ -48,12 +48,19 @@ export function renderFeed(root, ctx, list = null) {
 
   /* ---------------------------------------------------------------- top bar */
   const tabs = h('div', { class: 'fd-tabs' }, MODES.map(([k, label]) => h('button', { 'data-m': k, onclick: () => setMode(k) }, label)));
-  const paintTabs = () => tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === mode()));
+  const paintTabs = () => {
+    tabs.querySelectorAll('button').forEach((b) => (b.classList.toggle('on', b.dataset.m === (inFa() && mode() === 'hot' ? 'new' : mode())), (b.hidden = inFa() && b.dataset.m === 'hot'))); // FA has no Hot list
+    scopeBtn.classList.toggle('on', inFa());
+    scopeBtn.title = inFa() ? 'Fur Affinity Feed. Tap for the booru Feed' : 'Booru Feed. Tap for the Fur Affinity Feed';
+  };
+  // Fur Affinity is a source of its own: its Feed never mixes with the boorus
+  const scopeBtn = h('button', { class: 'fd-ib fd-scope', 'aria-label': 'Switch between the booru Feed and the Fur Affinity Feed', hidden: !S('faOn'), html: icon('paw', 20),
+    onclick: () => { setS('feedScope', inFa() ? 'boorus' : 'fa'); paintTabs(); lastRefresh = 0; refreshFeed({ fromScratch: true }); toast(inFa() ? 'Fur Affinity Feed' : 'Booru Feed', { ms: 1400 }); } });
   const menuBtn = h('button', { class: 'fd-ib fd-menu', title: 'Feed settings', 'aria-label': 'Feed settings', html: icon('sliders', 20), onclick: (e) => feedSettings(e.currentTarget) });
   const cloakBtn = h('button', { class: 'fd-ib', title: 'Cloak the screen', 'aria-label': 'Cloak the screen', html: icon('cloak', 20), onclick: () => ctx.cloak?.() });
   const top = solo
     ? h('div', { class: 'fd-top' }, h('button', { class: 'fd-ib', title: 'Back', 'aria-label': 'Back', html: icon('left', 20), onclick: () => list.onClose() }), h('div', { class: 'fd-solo-title' }, list.title), cloakBtn)
-    : h('div', { class: 'fd-top' }, cloakBtn, tabs, menuBtn);
+    : h('div', { class: 'fd-top' }, h('div', { class: 'fd-lt' }, cloakBtn, scopeBtn), tabs, menuBtn);
   const el = h('div', { class: 'fd' }, scroller, top, pullEl, empty);
   root.replaceChildren(el);
   el.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && el.classList.contains('idle') && wake());
@@ -1064,7 +1071,8 @@ export function renderFeed(root, ctx, list = null) {
     body.append(
       h('h4', {}, 'Your Feed'),
       h('small', { class: 'fd-hint' }, MENU_HINT),
-      h('div', { class: 'fd-sub' }, 'Sites'), sites,
+      inFa() ? h('small', { class: 'fd-hint' }, 'Fur Affinity Feed: its own source. It draws from Browse, artists you follow, artists you keep liking and what they favorited. It never mixes with the boorus.') : h('div', { class: 'fd-sub' }, 'Sites'),
+      inFa() ? null : sites,
       h('div', { class: 'fd-col' }, h('div', {}, h('b', {}, 'Double-tap does'), h('small', {}, 'Only in the Feed. The viewer keeps its own setting')),
         segmented([['fav', 'Favorite'], ['up', 'Upvote'], ['both', 'Both'], ['down', 'Downvote']], S('feedDtap') || 'both', (v) => setS('feedDtap', v))),
       row('Exploring', 'How much is deliberately outside your taste', h('div', { class: 'fd-slide' }, sl, out)),
