@@ -198,6 +198,9 @@ struct FaWin {
     /// a Watch / Unwatch the person tapped: (artist, wanted state), and whether the site's own link was already followed
     act: Option<(String, bool)>,
     stepped: bool,
+    /// when the page shows no next link: which guessed address form is being tried (0 none, 1 `?page=N`, 2 `/N/`) and its page
+    variant: u8,
+    page: u32,
 }
 
 fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, act: Option<(String, bool)>, icon: Option<Icon>) -> Option<FaWin> {
@@ -224,7 +227,7 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
         let vbox = window.default_vbox()?;
         builder.build_gtk(vbox).ok()?
     };
-    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false, acc: Vec::new(), seen: Default::default(), act, stepped: false })
+    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false, acc: Vec::new(), seen: Default::default(), act, stepped: false, variant: 0, page: 1 })
 }
 
 /// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
@@ -284,22 +287,46 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
     }
     if w.watch {
         let names: Vec<String> = v["names"].as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default();
-        if path.starts_with("/controls/buddylist") && !names.is_empty() {
+        let on_list = path.starts_with("/controls/buddylist");
+        let have = fa_win.as_ref().map_or(false, |w| !w.acc.is_empty());
+        if on_list && (!names.is_empty() || have) {
             let next = v["next"].as_str().unwrap_or("").to_string();
-            let before = w.acc.len();
             let Some(w) = fa_win.as_mut() else { return };
+            let before = w.acc.len();
             for n in names {
                 if !w.acc.contains(&n) {
                     w.acc.push(n);
                 }
             }
             let grew = w.acc.len() > before;
-            // more pages: one request a second, stop on a repeat, on a page with nothing new, or after 100 pages
-            if !next.is_empty() && grew && w.seen.len() < 100 && w.seen.insert(next.clone()) {
+            // more pages, one request a second: the page's own next link when it has one; otherwise the usual address forms
+            // (?page=2, then /2/) tried in turn. Stops on a repeat, a page with nothing new, or after 100 pages.
+            let guess = |variant: u8, page: u32| match variant {
+                1 => format!("https://www.furaffinity.net/controls/buddylist/?page={page}"),
+                _ => format!("https://www.furaffinity.net/controls/buddylist/{page}/"),
+            };
+            let mut go: Option<String> = None;
+            if w.seen.len() < 100 {
+                if grew && !next.is_empty() && w.seen.insert(next.clone()) {
+                    w.variant = 0;
+                    go = Some(next);
+                } else if grew && next.is_empty() && w.variant == 0 && w.acc.len() >= 20 {
+                    (w.variant, w.page) = (1, 2);
+                    go = Some(guess(1, 2));
+                } else if grew && w.variant > 0 {
+                    w.page += 1;
+                    go = Some(guess(w.variant, w.page));
+                } else if !grew && w.variant == 1 && w.page == 2 {
+                    (w.variant, w.page) = (2, 2); // ?page=2 showed nothing new: try /2/
+                    go = Some(guess(2, 2));
+                }
+            }
+            if let Some(url) = go {
+                w.seen.insert(url.clone());
                 let _ = w.window.set_title(&format!("Fur Affinity: your watch list ({} so far)", w.acc.len()));
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(1100));
-                    let _ = events.send_event(format!("fa:next:{next}"));
+                    let _ = events.send_event(format!("fa:next:{url}"));
                 });
             } else {
                 fa::set_watch(std::mem::take(&mut w.acc));

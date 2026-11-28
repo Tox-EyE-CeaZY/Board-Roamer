@@ -56,3 +56,5 @@ Maven chose (2026-11-28) a hidden background page for Watch/Unwatch even though 
 - The webview gives request handlers no body, so `faPost` also puts its JSON in `?q=` (the desktop server ignores it).
 - UI is the same as desktop; hover preview is mouse-only; the tab bar label is "FA".
 - Unverified: never built or run on a device (no Android SDK here); only compiled against API stubs for the new files. CookieManager reading of HttpOnly cookies `a`/`b` assumed to work.
+
+- Watch list pages (2.17.1): when the list page shows no recognisable next link, the import tries `/controls/buddylist/?page=N`, then `/controls/buddylist/N/`, one request a second, until a page adds nothing new (desktop in src/main.rs, Android in Fa.java). Still guesses: a saved copy of the real watch list page 1 and 2 (browser Ctrl+S) is needed to read the actual pager.
