@@ -416,23 +416,41 @@ export class Viewer {
         try {
           if (post._lazy) await getProvider(post.provider).fill(post); // Fur Affinity: the full file's address is on the post's own page
           if (post.full === first) throw new Error('nothing bigger');
-          let next = img.cloneNode(false); // same size, position and transform as the one on screen
-          next.style.background = '';
-          next.src = via(post.full);
+          // Loaded off to the side, then swapped in in one go. `load` events instead of decode(): on a phone's web view decode() can
+          // reject for a big picture that would show fine. Asked once, again after a pause, and the reason is shown if it still fails.
+          const fetchIt = (src) => new Promise((res, rej) => {
+            const n = img.cloneNode(false); // same size, position and transform as the one on screen
+            n.style.background = '';
+            n.onload = () => res(n);
+            n.onerror = () => rej(new Error('did not load'));
+            n.src = src;
+          });
+          let next;
           try {
-            await next.decode();
+            next = await fetchIt(via(post.full));
           } catch {
-            next = img.cloneNode(false); // some picture hosts check where the request came from: the local proxy sends the site's own address
-            next.style.background = '';
-            next.src = '/img?u=' + encodeURIComponent(post.full);
-            await next.decode();
+            await new Promise((r) => setTimeout(r, 1200));
+            try {
+              next = await fetchIt('/img?u=' + encodeURIComponent(post.full) + '&r=1');
+            } catch {
+              let why = 'the picture host did not answer';
+              try {
+                const r = await fetch('/img?u=' + encodeURIComponent(post.full) + '&r=2');
+                if (!r.ok) why = `${(await r.json().catch(() => ({}))).error || 'refused'} (${r.status})`;
+                else why = 'the picture could not be shown (too large for this device?)';
+              } catch (e) { why = e.message || why; }
+              throw new Error(why);
+            }
           }
           if (this.media === img && img.isConnected) {
             img.replaceWith(next);
             this.media = next;
             this._paint();
           }
-        } catch { /* keep the sample: the original would not load */ }
+        } catch (e) {
+          started = false; // a zoom or a tap on the button may try again
+          if (this.media === img && e.message !== 'nothing bigger') toast('Original quality did not load: ' + e.message, { kind: 'err', ms: 5000, action: { label: 'Retry', run: () => this._upgrade?.() } });
+        }
         this.ring.hidden = true;
       };
       this._upgrade = upgrade;

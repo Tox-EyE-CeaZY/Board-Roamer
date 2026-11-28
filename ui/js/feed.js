@@ -20,6 +20,8 @@ const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], 
 const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Hold two fingers on it to hide the buttons.';
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
 const mode = () => S('feedMode') || 'foryou';
+/** Fur Affinity pictures go through the local proxy (the site's own Referer), as in the other viewers. */
+const viaOf = (p, u) => (p.viaProxy && u && !String(u).startsWith('/img?') ? '/img?u=' + encodeURIComponent(u) : u);
 const cleanDesc = (s) => String(s || '').replace(/"([^"]+)":\S+/g, '$1').replace(/\[\/?[a-z0-9]+([=,][^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim();
 const signedIn = (prov) => { const c = (S('creds') || {})[prov.credKey]; return !!(c?.user && c?.key); };
 
@@ -112,17 +114,17 @@ export function renderFeed(root, ctx, list = null) {
     const blurred = isBlurred(p);
     let media;
     if (p.kind === 'video') {
-      media = h('video', { class: 'fd-media', loop: true, playsinline: true, muted: true, preload: 'metadata', poster: p.thumb });
+      media = h('video', { class: 'fd-media', loop: true, playsinline: true, muted: true, preload: 'metadata', poster: viaOf(p, p.thumb) });
       media.muted = S('muted') !== false;
       // start the fade timer when it first plays, not again each time it loops
       media.addEventListener('playing', () => { if (!media.dataset.woke && cardAt(view.idx)?.contains(media)) (media.dataset.woke = '1'), wake(); });
     } else media = h('img', { class: 'fd-media', alt: '', draggable: 'false', decoding: 'async' });
-    media.dataset.src = mediaSrc(p);
+    media.dataset.src = viaOf(p, mediaSrc(p));
     const stage = h('div', { class: 'fd-stage' + (blurred ? ' blur' : '') }, media);
     const like = railButton('like', 'Like (L)', 'heart', () => toggleLike(p));
     like.append(h('small', {}, fmtNum(p.favs)));
     const card = h('section', { class: 'fd-card', style: `--ph:${prov.color}` },
-      h('img', { class: 'fd-bg', src: p.thumb, alt: '', draggable: 'false' }),
+      h('img', { class: 'fd-bg', src: viaOf(p, p.thumb), alt: '', draggable: 'false' }),
       stage,
       h('div', { class: 'fd-shade' }),
       buildInfo(it),
@@ -155,6 +157,8 @@ export function renderFeed(root, ctx, list = null) {
         h('div', { class: 'fd-saved', hidden: !saved.has(p), html: icon('check', 12) + '<span>Downloaded</span>' })),
       art.length ? h('div', { class: 'fd-art' }, art.map((a) => h('span', { class: 'fd-who' }, h('button', { onclick: (e) => (e.stopPropagation(), openArtist(p, a)) }, pretty(a)), followButton(p, a)))) : h('div', { class: 'fd-art' }, h('span', {}, 'unknown artist')),
       it.comic ? comicBox(it) : descBox(p),
+      p.comicNav ? h('div', { class: 'fd-comicnav' }, ...[['first', 'First'], ['prev', '‹ Previous'], ['next', 'Next ›']].filter(([k]) => p.comicNav[k] && p.comicNav[k] !== String(p.id))
+        .map(([k, label]) => h('button', { class: 'fd-chip', onclick: (e) => (e.stopPropagation(), ctx.go(`#/fa?post=${p.comicNav[k]}`)) }, label))) : null,
       tagBox(p, heaviestTags(p)));
   };
 
@@ -585,7 +589,7 @@ export function renderFeed(root, ctx, list = null) {
     const want = S('feedPreload') || 20;
     const lined = view.items.slice(view.idx + 1, view.idx + 1 + want).map((x) => x.post);
     if (!solo && mode() === 'foryou' && lined.length < want) lined.push(...likely(view, want - lined.length));
-    wanted = lined.map((p) => (p.kind === 'video' ? p.thumb : mediaSrc(p)));
+    wanted = lined.map((p) => viaOf(p, p.kind === 'video' ? p.thumb : mediaSrc(p)));
     pump();
   }
   function pump() {
@@ -624,6 +628,28 @@ export function renderFeed(root, ctx, list = null) {
       catBusy = false;
     }
   }
+  /** A Fur Affinity post listed from a thumbnail has no description, tags or original yet: read its page, then redraw. */
+  async function faFill(it) {
+    const p = it.post, prov = getProvider(p.provider);
+    if (!p._lazy || !prov.fill) return;
+    try {
+      await prov.fill(p);
+    } catch { return; }
+    refreshInfo(it);
+    const card = cardAt(view.items.indexOf(it));
+    const m = card?.querySelector('img.fd-media');
+    if (card && p.kind !== 'image' && p.kind !== 'anim' && p.kind !== 'video') {
+      // a story or a song: the feed shows pictures, so offer the viewer
+      card.querySelector('.fd-stage')?.replaceChildren(h('button', { class: 'btn primary fd-open', onclick: (e) => (e.stopPropagation(), openIt(view.items.indexOf(it), true)) }, p.kind === 'music' ? 'Listen' : 'Read'));
+      return;
+    }
+    const full = mediaSrc(p);
+    if (m && full && viaOf(p, full) !== m.getAttribute('src')) {
+      const next = new Image();
+      next.onload = () => { if (m.isConnected) m.src = next.src; }; // swapped in once decoded: no blank flash
+      next.src = viaOf(p, full);
+    }
+  }
   function activate(i) {
     leave();
     if (i !== view.idx) cardAt(view.idx)?._zoom?.reset();
@@ -639,6 +665,7 @@ export function renderFeed(root, ctx, list = null) {
       if (b) b.innerHTML = icon(v.muted ? 'mute' : 'sound', 24);
     }
     if (it) paintState(cardAt(i), it.post);
+    if (it) faFill(it);
     wake();
     activePostSet = true;
     fill();
