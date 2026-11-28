@@ -189,11 +189,14 @@ struct FaWin {
     window: tao::window::Window,
     _ctx: WebContext,
     login: bool,
+    /// reading the person's own watch list: opens it once signed in, takes the names off the page, closes
+    watch: bool,
+    went: bool,
 }
 
-fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, icon: Option<Icon>) -> Option<FaWin> {
+fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, icon: Option<Icon>) -> Option<FaWin> {
     let window = WindowBuilder::new()
-        .with_title(if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
+        .with_title(if watch { "Fur Affinity: your watch list" } else if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
         .with_window_icon(icon)
         .with_inner_size(LogicalSize::new(1000.0, 780.0))
         .build(target)
@@ -201,7 +204,7 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
     // its own profile, so signing out here cannot touch the app's settings
     let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
-        .with_url(if login { "https://www.furaffinity.net/login/" } else { "https://www.furaffinity.net/" })
+        .with_url(if watch { "https://www.furaffinity.net/controls/buddylist/" } else if login { "https://www.furaffinity.net/login/" } else { "https://www.furaffinity.net/" })
         .with_on_page_load_handler(move |ev, _url| {
             if matches!(ev, PageLoadEvent::Finished) {
                 let _ = events.send_event("fa:loaded".to_string());
@@ -214,12 +217,13 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
         let vbox = window.default_vbox()?;
         builder.build_gtk(vbox).ok()?
     };
-    Some(FaWin { webview, window, _ctx: ctx, login })
+    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false })
 }
 
 /// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
 fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
-    let js = "JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname})";
+    // on the watch list page it also reads the names the person can see there (links to user pages in the page's content)
+    let js = "JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,names:/^\\/controls\\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*=\\\"/user/\\\"]')].map(a=>(/\\/user\\/([^/?#]+)/.exec(a.getAttribute('href'))||[])[1]).filter(Boolean))]:[]})";
     let _ = w.webview.evaluate_script_with_callback(js, move |raw| {
         // the callback gets the JSON text of a string; unwrap that once
         let inner: String = serde_json::from_str(&raw).unwrap_or_default();
@@ -240,6 +244,22 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str) {
     let title = v["title"].as_str().unwrap_or("").to_lowercase();
     let checking = title.starts_with("just a moment") || title.contains("attention required");
     let path = v["path"].as_str().unwrap_or("");
+    if w.watch {
+        let names: Vec<String> = v["names"].as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default();
+        if path.starts_with("/controls/buddylist") && !names.is_empty() {
+            fa::set_watch(names);
+            *fa_win = None;
+        } else if !checking && !path.starts_with("/login") && !path.starts_with("/controls/buddylist") && fa::connected() {
+            // signed in but on some other page (just after signing in): go to the watch list once
+            if let Some(w) = fa_win.as_mut() {
+                if !w.went {
+                    w.went = true;
+                    let _ = w.webview.load_url("https://www.furaffinity.net/controls/buddylist/");
+                }
+            }
+        }
+        return;
+    }
     let done = if w.login { fa::connected() && !path.starts_with("/login") } else { !checking && get("cf_clearance").is_some() };
     if done {
         *fa_win = None;
@@ -446,15 +466,16 @@ fn main() {
                             let _ = window.drag_window();
                         }
                     }
-                    "fa:login" | "fa:verify" => {
-                        let login = cmd == "fa:login";
-                        if fa_win.as_ref().map_or(false, |w| w.login == login) {
+                    "fa:login" | "fa:verify" | "fa:watch" => {
+                        let login = cmd == "fa:login" || cmd == "fa:watch";
+                        let watch = cmd == "fa:watch";
+                        if fa_win.as_ref().map_or(false, |w| w.login == login && w.watch == watch) {
                             if let Some(w) = &fa_win {
                                 w.window.set_focus();
                             }
                         } else {
                             fa_win = None; // one window at a time
-                            fa_win = open_fa_window(target, fa_events.clone(), login, fa_icon.clone());
+                            fa_win = open_fa_window(target, fa_events.clone(), login, watch, fa_icon.clone());
                         }
                     }
                     "fa:loaded" => {

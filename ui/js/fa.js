@@ -67,6 +67,9 @@ export async function faStatus() {
 export const faPost = (path, body) => fetch('/fa/' + path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }).then((r) => r.json().catch(() => ({})));
 export const faLogin = () => faPost('login');
 export const faVerify = () => faPost('verify');
+/** Opens the person's own watch list in the Fur Affinity window (they sign in there if asked); the names come back through `faWatchNames`. */
+export const faWatchStart = () => faPost('watch');
+export const faWatchNames = () => fetch('/fa/watch').then((r) => r.json()).then((j) => j.names || null).catch(() => null);
 export const faDisconnect = async () => (await faPost('disconnect'), (faState.loggedIn = null), (faState.me = ''), faStatus());
 export const faPaste = (a, b) => faPost('paste', { a, b }).then(async (j) => { if (j.error) throw new Error(j.error); await faStatus(); return j; });
 

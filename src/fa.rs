@@ -81,6 +81,19 @@ struct Creds {
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 static CREDS: OnceLock<Mutex<Creds>> = OnceLock::new();
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The names the person's own watch list page showed in the app's Fur Affinity window (read once by the page).
+static WATCH: Mutex<Option<Vec<String>>> = Mutex::new(None);
+
+pub fn set_watch(names: Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    let ok: Vec<String> = names
+        .into_iter()
+        .map(|n| percent_decode_str(&n).decode_utf8_lossy().to_ascii_lowercase())
+        .filter(|n| !n.is_empty() && n.len() <= 40 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.~-".contains(&b)) && seen.insert(n.clone()))
+        .take(5000)
+        .collect();
+    *WATCH.lock().unwrap() = Some(ok);
+}
 
 fn creds() -> &'static Mutex<Creds> {
     CREDS.get_or_init(Default::default)
@@ -191,6 +204,7 @@ pub fn status() -> serde_json::Value {
 /// GET /fa/status                 -> {connected, cleared, ua, gen}   (no values, ever; `gen` changes when the session does)
 /// POST /fa/login | /fa/verify    -> opens FA's own page in a window where the user signs in / passes the check
 /// POST /fa/paste {a, b}          -> the manual way: two cookie values copied from a browser
+/// POST /fa/watch                -> opens the person's own watch list page in the sign-in window; GET /fa/watch -> {names|null} once read
 /// POST /fa/disconnect            -> forget the session and close the window
 pub fn request(mut rq: Request, path: &str) {
     match (path, rq.method().clone()) {
@@ -213,6 +227,15 @@ pub fn request(mut rq: Request, path: &str) {
             }
             set_from_window(Some(a), Some(b), None, None);
             json(rq, 200, status())
+        }
+        ("/fa/watch", Method::Post) => {
+            *WATCH.lock().unwrap() = None;
+            crate::appcfg::send_event("fa:watch".into());
+            json(rq, 200, serde_json::json!({ "ok": true }))
+        }
+        ("/fa/watch", _) => {
+            let got = WATCH.lock().unwrap().take();
+            json(rq, 200, serde_json::json!({ "names": got }))
         }
         ("/fa/disconnect", Method::Post) => {
             clear();
