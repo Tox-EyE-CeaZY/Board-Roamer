@@ -43,8 +43,12 @@ export function makeDoc(post, ctx) {
         fetch(ctx.via(post.full)).then((r) => (r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))).then((t) => { loaded = post.ext === 'rtf' ? rtfToText(t) : t; }).catch(() => { loaded = ''; }).finally(() => (loading = false, paint()));
       }
     } else {
-      if (post.desc) kids.push(h('div', { class: 'doc-body' }, post.desc));
-      kids.push(h('p', { class: 'doc-note' }, readable ? 'The story could not be loaded here.' : `This story is a .${post.ext || 'file'} document, which can not be shown here.`),
+      if (post.desc && post.ext !== 'pdf') kids.push(h('div', { class: 'doc-body' }, post.desc));
+      if (post.ext === 'pdf' && post.full) {
+        // the webview's own PDF viewer, fed through the local proxy (own Referer); the button stays for when it cannot show it
+        kids.push(h('iframe', { class: 'doc-pdf', src: ctx.via(post.full), title: post.title || 'PDF' }));
+      } else kids.push(h('p', { class: 'doc-note' }, readable ? 'The story could not be loaded here.' : `This story is a .${post.ext || 'file'} document, which can not be shown here.`));
+      kids.push(
         h('button', { class: 'btn primary', onclick: () => ctx.openSite(), html: icon('external', 15) + '<span>Read it on Fur Affinity</span>' }));
     }
     return kids;

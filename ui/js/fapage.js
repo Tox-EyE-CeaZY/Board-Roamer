@@ -281,8 +281,8 @@ function followingPane(ctx) {
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
-        h('span', { class: 'fa-fl-thumbs' }, (f.thumbs || []).slice(0, 3).map((u) => h('img', { src: u, alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))),
-        h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new` : f.checked ? 'checked ' + ago(f.checked) : 'not checked yet')))));
+        h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => h('img', { src: '/img?u=' + encodeURIComponent(u), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))),
+        h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
   };
   paint();
   const off = on('subs-progress', () => (wrap.isConnected ? paint() : off()));
@@ -331,7 +331,7 @@ async function importWatchList(done) {
     }, 1500);
   } });
   const body = h('div', { class: 'dlg-text' },
-    h('p', {}, 'Board Roamer opens your own watch list page in its Fur Affinity window, the same page you would open yourself, and reads the names you see there. It makes that one visit only when you tap, and follows nothing until you confirm the list.'),
+    h('p', {}, 'Board Roamer opens your own watch list page in its Fur Affinity window, the same page you would open yourself, and reads the names you see there. It visits the list (one page at a time, a second apart, if it has several pages) only when you tap, and follows nothing until you confirm the list.'),
     h('div', { class: 'row-btns' }, auto, h('button', { class: 'btn', onclick: () => openExternal(P_BUDDY), html: icon('external', 14) + '<span>Open it in my browser</span>' })),
     status,
     h('details', {}, h('summary', {}, 'Or paste the page by hand'), h('p', { class: 'st-note' }, 'Select the whole watch list page in your browser (Ctrl+A), copy it (Ctrl+C), and paste it here. The artists are read from the page’s links.'), area),

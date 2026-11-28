@@ -583,7 +583,7 @@ export class Viewer {
   }
 
   _wheel(e) {
-    if (e.target.closest('.vw-panel,.pc')) return;
+    if (e.target.closest('.vw-panel,.pc,.media.doc')) return; // a reading page scrolls itself (_holdScroll keeps the page behind still)
     e.preventDefault();
     if (S('wheel') === 'nav' && !e.ctrlKey) {
       const now = performance.now();
@@ -635,7 +635,7 @@ export class Viewer {
   }
 
   _pdown(e) {
-    if (e.target.closest('button,.pc,.vw-panel')) return;
+    if (e.target.closest('button,.pc,.vw-panel,.media.doc')) return; // reading pages: let the browser scroll and select
     this.stage.setPointerCapture?.(e.pointerId);
     if (!this.pointers.size) this._settle();
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1180,6 +1180,13 @@ export class Viewer {
     }
     if (document.querySelector('.dlg-back,.help-back') || menuOpen()) return;
     const pl = this.isVideo ? this.player : null;
+    const doc = this.stage.querySelector('.doc-body');
+    if (doc && !e.shiftKey && doc.scrollHeight > doc.clientHeight + 1) {
+      // reading a story: up/down, page keys, space, home/end scroll the text; left/right still move between posts
+      const page = doc.clientHeight * 0.9;
+      const by = { arrowup: -60, arrowdown: 60, pageup: -page, pagedown: page, ' ': page, home: -1e9, end: 1e9 }[e.key === ' ' ? ' ' : k];
+      if (by) return stop(), doc.scrollBy({ top: by }), this._wake();
+    }
     const nav = (d) => () => this.go(d);
     const map = {
       arrowright: () => (e.shiftKey && pl ? pl.seekBy(5) : this.go(1)), d: nav(1), j: nav(1),
