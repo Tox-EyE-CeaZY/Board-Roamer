@@ -1492,6 +1492,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .media.doc h2 { margin: 0; font: 800 26px/1.15 var(--f-display, inherit); letter-spacing: -.02em; }
 .media.doc .doc-by, .media.doc .doc-meta { margin: 0; font: 500 12px var(--f-mono); color: var(--faint); letter-spacing: .04em; }
 .media.doc .doc-body { flex: 1 1 auto; overflow: auto; white-space: pre-wrap; font: 400 16px/1.7 var(--f-body, Georgia, serif); max-width: 62ch; user-select: text; }
+.media.doc .doc-body { touch-action: pan-y; overscroll-behavior: contain; }
+.media.doc .doc-pdf { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: #fff; }
 .media.doc .doc-note { color: var(--dim); font: 500 13px var(--f-mono); }
 .media.doc-music { height: auto !important; max-height: 86%; align-items: center; text-align: center; }
 .media.doc-music .doc-desc { text-align: left; max-height: 30vh; }
