@@ -197,7 +197,6 @@ html.phone .tr-day { margin: 20px 0 10px; }
 /* settings = a full screen page */
 html.phone .settings { width: 100vw; border-left: 0; top: 0; padding-top: var(--safe-t); z-index: 1100; }
 html.phone .st-head { padding: 12px 8px 4px 18px; } html.phone .st-head h2 { font-size: 26px; }
-html.phone .st-nav { padding: 0 12px 10px; } html.phone .st-nav button { padding: 10px 12px; }
 html.phone .st-body { padding: 4px 18px calc(var(--safe-b) + 40px); }
 html.phone .two { grid-template-columns: 1fr; }
 html.phone .theme-row { grid-template-columns: repeat(3, 1fr); gap: 6px; } html.phone .theme-card span { font-size: 9.5px; }

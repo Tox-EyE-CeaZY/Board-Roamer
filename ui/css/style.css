@@ -695,12 +695,32 @@ span.dt-spoiler { color: inherit; } div.dt-spoiler { margin: 0 0 .7em; padding: 
 .settings.in { translate: 0 0; }
 .st-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 8px; }
 .st-head h2 { margin: 0; font: 800 28px var(--f-display); letter-spacing: -.03em; }
-.st-nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px 10px; border-bottom: 1px solid var(--line); }
-.st-nav button { padding: 6px 10px; font: 700 10px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.st-menu { display: grid; align-content: start; gap: 2px; padding: 4px 0; }
+.st-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px; text-align: left; width: 100%; border-left: 3px solid transparent; }
+.st-item b { display: block; font: 700 12px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; }
+.st-item small { display: block; margin-top: 3px; font: 500 11px/1.4 var(--f-mono); color: var(--faint); }
+.st-item .st-chev { display: none; color: var(--faint); }
+.st-item.on { border-left-color: var(--accent); background: var(--bg3); color: var(--accent); }
 @media (hover: hover) {
-  .st-nav button:hover { color: var(--accent); }
+  .st-item:hover { background: var(--bg3); }
 }
-.st-body { flex: 1; overflow-y: auto; padding: 4px 22px 60px; }
+.st-main { flex: 1; min-height: 0; display: flex; }
+.st-head { gap: 4px; } .st-head h2 { flex: 1; }
+.settings.wide .st-menu { flex: 0 0 230px; border-right: 1px solid var(--line); overflow-y: auto; }
+.settings.wide .st-item small { display: none; }
+.settings.wide .st-item { padding: 12px 18px; }
+/* phone: a list of areas, then one page with Back */
+.settings.phone-nav .st-menu { flex: 1; overflow-y: auto; padding-bottom: calc(var(--safe-b) + 24px); }
+.settings.phone-nav .st-item { padding: 16px 18px; border-left: 0; border-bottom: 1px solid var(--line); }
+.settings.phone-nav .st-item .st-chev { display: block; }
+.settings.phone-nav .st-item.on { background: none; color: inherit; }
+.settings.phone-nav .st-body { display: none; }
+.settings.phone-nav.page .st-body { display: block; }
+.settings.phone-nav.page .st-menu { display: none; }
+.st-sec[hidden] { display: none; }
+.st-body.single .st-sec h3 { display: none; }
+.st-body.single .st-sec { padding-top: 8px; }
+.st-body { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 22px 60px; }
 .st-sec { padding: 20px 0 6px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
 .st-sec h3 { margin: 0 0 6px; font: 800 11px var(--f-mono); letter-spacing: .24em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 10px; }
 .st-sec h3::after { content: ''; flex: 1; height: 1px; background: var(--line2); }
