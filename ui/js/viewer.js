@@ -1250,6 +1250,10 @@ export class Viewer {
   /* ============================================================ context menu */
   _menuFor(e) {
     const t = e.target;
+    const link = t.closest('a[data-url]');
+    if (link) return this.hooks.linkMenu?.(link.dataset.url);
+    const fu = t.closest('[data-fa-user]');
+    if (fu) return this.hooks.faUserMenu?.(fu.dataset.faUser);
     const row = t.closest('.trow');
     if (row) return this.hooks.tagMenu?.(row.dataset.tag, row.dataset.cat, this.post.provider);
     const fs = t.closest('.fs');
