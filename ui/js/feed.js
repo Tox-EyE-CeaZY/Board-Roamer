@@ -5,6 +5,8 @@ import { S, setS, on, subs, tagc, voted, saved, boards, postKey, kv } from './st
 import { getProvider, providerList, isBlurred, CATS, CAT_LABEL } from './providers.js';
 import { toast, popover, closePopover, confirmDlg, segmented } from './ui.js';
 import { quickPin } from './pins.js';
+import { showMenu } from './ctxmenu.js';
+import { boardSub } from './menus.js';
 import { follow } from './follows.js';
 import { renderDText } from './dtext.js';
 import { openArtistPage } from './artistpage.js';
@@ -17,7 +19,7 @@ import {
 import { toggleLibrary } from './library.js';
 
 const MODES = [['follows', 'Following'], ['foryou', 'For you'], ['new', 'New'], ['hot', 'Hot']];
-const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Hold two fingers on it to hide the buttons.';
+const MENU_HINT = 'Swipe a post to the left for its artist. Press and hold it for more. Press and hold a button for its options (Pin lets you pick the board). Hold two fingers on it to hide the buttons.';
 const viewerOpen = () => { const v = document.getElementById('viewer'); return !!v && !v.hidden && v.classList.contains('in'); };
 const mode = () => S('feedMode') || 'foryou';
 /** Fur Affinity pictures go through the local proxy (the site's own Referer), as in the other viewers. */
@@ -113,7 +115,49 @@ export function renderFeed(root, ctx, list = null) {
   };
   const paintAll = () => view.items.forEach((it, i) => paintState(cardAt(i), it.post));
 
-  const railButton = (cls, label, ic, run) => h('button', { class: 'fd-btn ' + cls, title: label, 'aria-label': label, html: icon(ic, 24), onclick: (e) => (e.stopPropagation(), wake(), run(e.currentTarget)) });
+  /** `more` (optional) builds the menu for right-click or press-and-hold on the button: the long-press on a touch screen arrives as a right-click. */
+  const railButton = (cls, label, ic, run, more) => {
+    const b = h('button', { class: 'fd-btn ' + cls, title: more && !isTouch() ? `${label} · right-click for more` : label, 'aria-label': label, html: icon(ic, 24), onclick: (e) => (e.stopPropagation(), wake(), run(e.currentTarget)) });
+    if (more) b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      wake();
+      const items = more();
+      if (items?.length) showMenu(e.clientX, e.clientY, items);
+    });
+    return b;
+  };
+
+  /* ---------------------------------------------------------------- hold a button for more */
+  /** Hold Pin: choose the board right away instead of pinning and then moving. */
+  const pinMore = (p) => (react(p, 0.3), [{ header: 'Pin to board' }, ...boardSub([p])]);
+  const likeMore = (p) => {
+    const prov = getProvider(p.provider);
+    return [
+      { label: isLiked(p) ? 'Remove like' : 'Like', icon: 'heart', run: () => toggleLike(p) },
+      prov.vote && { label: 'Like and upvote', icon: 'up', disabled: isLiked(p) && isUp(p), run: () => (isLiked(p) || toggleLike(p, { vote: false }), isUp(p) || upvote(p, { keep: true })) },
+    ];
+  };
+  const upMore = (p) => [
+    { label: isUp(p) ? 'Remove upvote' : 'Upvote', icon: 'up', run: () => upvote(p) },
+    { label: isLiked(p) ? 'Upvote (already liked)' : 'Upvote and like', icon: 'heart', disabled: isLiked(p) && isUp(p), run: () => (isUp(p) || upvote(p, { keep: true }), isLiked(p) || toggleLike(p)) },
+  ];
+  /** Hold Down: the gentle way, which only teaches the Feed, or the real downvote. */
+  const downMore = (i) => [
+    { label: 'Not interested', icon: 'close', run: () => skip(i) },
+    { label: 'Downvote on the site', icon: 'down', run: () => downvote(i) },
+  ];
+  const dlMore = (p) => [
+    { label: saved.has(p) ? 'Download again' : 'Download', icon: 'download', run: () => download(p, true) },
+    isAndroid() && { label: p.kind === 'video' ? 'Share video' : 'Share picture', icon: 'share', run: () => native.shareFile(p.kind === 'video' ? mediaSrc(p) : p.sample || p.full, `${p.provider}_${p.id}.${p.ext}`) },
+    { label: 'Copy file address', icon: 'copy', run: () => (copyText(p.full || mediaSrc(p)), toast('File address copied', { ms: 1400 })) },
+  ];
+  const shareMore = (p) => [
+    { label: 'Share link…', icon: 'share', run: () => (react(p, 0.5), ctx.share?.(p)) },
+    isAndroid() && { label: p.kind === 'video' ? 'Share video…' : 'Share picture…', icon: 'share', run: () => native.shareFile(p.kind === 'video' ? mediaSrc(p) : p.sample || p.full, `${p.provider}_${p.id}.${p.ext}`) },
+    { label: 'Copy link', icon: 'link', run: () => (copyText(p.url), toast('Post link copied', { ms: 1400 })) },
+    { label: 'Copy file address', icon: 'copy', run: () => (copyText(p.full || mediaSrc(p)), toast('File address copied', { ms: 1400 })) },
+  ];
 
   const buildCard = (i) => {
     const it = view.items[i];
@@ -128,7 +172,7 @@ export function renderFeed(root, ctx, list = null) {
     } else media = h('img', { class: 'fd-media', alt: '', draggable: 'false', decoding: 'async' });
     media.dataset.src = viaOf(p, mediaSrc(p));
     const stage = h('div', { class: 'fd-stage' + (blurred ? ' blur' : '') }, media);
-    const like = railButton('like', 'Like (L)', 'heart', () => toggleLike(p));
+    const like = railButton('like', 'Like (L)', 'heart', () => toggleLike(p), () => likeMore(p));
     like.append(h('small', {}, fmtNum(p.favs)));
     const card = h('section', { class: 'fd-card', style: `--ph:${prov.color}` },
       h('img', { class: 'fd-bg', src: viaOf(p, p.thumb), alt: '', draggable: 'false' }),
@@ -137,11 +181,11 @@ export function renderFeed(root, ctx, list = null) {
       buildInfo(it),
       h('div', { class: 'fd-rail' },
         like,
-        railButton('up', 'Upvote (U)', 'up', () => upvote(p)),
-        railButton('down', 'Downvote (X)', 'down', () => downvote(indexOf(card))),
-        railButton('dl', 'Download (D)', 'download', () => download(p)),
-        railButton('share', 'Share', 'share', () => (react(p, 0.5), ctx.share?.(p))),
-        railButton('pin', 'Pin', 'pin', () => (quickPin([p]), setTimeout(() => paintState(card, p), 60))),
+        railButton('up', 'Upvote (U)', 'up', () => upvote(p), () => upMore(p)),
+        railButton('down', 'Downvote (X)', 'down', () => downvote(indexOf(card)), () => downMore(indexOf(card))),
+        railButton('dl', 'Download (D)', 'download', () => download(p), () => dlMore(p)),
+        railButton('share', 'Share', 'share', () => (react(p, 0.5), ctx.share?.(p)), () => shareMore(p)),
+        railButton('pin', 'Pin', 'pin', () => (quickPin([p]), setTimeout(() => paintState(card, p), 60)), () => pinMore(p)),
         p.kind === 'video' ? railButton('sound', 'Sound', media.muted ? 'mute' : 'sound', (b) => { media.muted = !media.muted; setS('muted', media.muted); b.innerHTML = icon(media.muted ? 'mute' : 'sound', 24); }) : null,
         p.kind === 'video' && isAndroid() && p.w > p.h ? railButton('rotate', 'Turn sideways', 'rotate', () => turn()) : null),
       h('button', { class: 'fd-zoomreset', hidden: true, onclick: (e) => (e.stopPropagation(), card._zoom?.reset()) }, 'Reset zoom'),

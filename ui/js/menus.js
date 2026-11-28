@@ -28,7 +28,7 @@ export const M = {
   share: () => {},
 };
 
-function boardSub(posts) {
+export function boardSub(posts) {
   const list = boards.pins();
   return [
     ...list.map((b) => {
