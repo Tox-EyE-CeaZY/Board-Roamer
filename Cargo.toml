@@ -1,6 +1,6 @@
 [package]
 name = "board-roamer"
-version = "3.1.4"
+version = "3.1.5"
 edition = "2021"
 description = "A stylish multi-booru board viewer (e621 first)"
 

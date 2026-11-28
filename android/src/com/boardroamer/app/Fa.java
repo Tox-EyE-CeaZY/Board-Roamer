@@ -11,6 +11,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -27,6 +28,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Fur Affinity on Android: the /fa/* API the page uses (same as src/fa.rs on desktop), the saved session, and a WebView
@@ -51,6 +54,7 @@ final class Fa {
     static void init(Activity activity) {
         act = activity;
         prefs = activity.getSharedPreferences("fa", Context.MODE_PRIVATE);
+        FaNet.fetcher = Fa::browserFetch;
         FaNet.load(prefs.getString("a", ""), prefs.getString("b", ""), prefs.getString("clearance", ""), prefs.getString("ua", ""));
     }
 
@@ -111,6 +115,94 @@ final class Fa {
             if (!(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') && "_.~-".indexOf(c) < 0) return false;
         }
         return true;
+    }
+
+
+    /* ------------------------------------------------------------------ pages, read by a web view */
+    private static WebView fw; // the page reader: a web view nobody sees, on the site's own address so its requests are the site's own (UI thread only)
+    private static volatile boolean fwReady = false;
+    private static volatile String fwResult = null;
+    private static volatile CountDownLatch fwLatch = null;
+    private static final Object FETCH = new Object();
+    private static volatile boolean readerBroken = false; // it did not answer once: the plain request is used from then on
+
+    static final class Bridge {
+        @JavascriptInterface public void done(String json) {
+            fwResult = json;
+            CountDownLatch l = fwLatch;
+            if (l != null) l.countDown();
+        }
+    }
+
+    private static void startReader() {
+        if (fw != null) return;
+        fw = new WebView(act);
+        WebSettings s = fw.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        CookieManager.getInstance().setAcceptCookie(true);
+        fw.addJavascriptInterface(new Bridge(), "BRF");
+        fw.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView v, String url) { fwReady = true; }
+        });
+        try { // one invisible pixel on screen: an engine that is not on screen may not run its page at all
+            fw.setAlpha(0f);
+            ViewGroup root = act.findViewById(android.R.id.content);
+            if (root != null) root.addView(fw, new ViewGroup.LayoutParams(1, 1));
+        } catch (RuntimeException ignored) { }
+        fw.loadDataWithBaseURL(WWW, "<!doctype html><title>.</title>", "text/html", "utf-8", null);
+    }
+
+    /** The session cookies are in the web view's own store after signing in there; a pasted pair is put there too. */
+    private static void syncCookies() {
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            String have = cm.getCookie(WWW);
+            String[] s = FaNet.snapshot();
+            if (FaNet.sane(s[0]) && FaNet.sane(s[1]) && (have == null || !have.contains("a="))) {
+                cm.setCookie(WWW, "a=" + s[0] + "; Domain=.furaffinity.net; Path=/; Secure; HttpOnly");
+                cm.setCookie(WWW, "b=" + s[1] + "; Domain=.furaffinity.net; Path=/; Secure; HttpOnly");
+            }
+        } catch (RuntimeException ignored) { }
+    }
+
+    private static void runInReader(String js, int tries) {
+        if (fw != null && fwReady) fw.evaluateJavascript(js, null);
+        else if (tries < 60) UI.postDelayed(() -> runInReader(js, tries + 1), 100);
+    }
+
+    /** One page, read by the web view that passes Cloudflare's check. Null when that cannot be done (the plain request is used then). */
+    static FaNet.Page browserFetch(String target) {
+        if (act == null || act.isFinishing() || readerBroken) return null;
+        synchronized (FETCH) {
+            fwResult = null;
+            CountDownLatch latch = new CountDownLatch(1);
+            fwLatch = latch;
+            final String js = "(function(){var u=" + JSONObject.quote(target) + ";fetch(u,{credentials:'include',headers:{'Accept':'text/html,application/xhtml+xml'}})"
+                + ".then(function(r){return r.text().then(function(t){BRF.done(JSON.stringify({s:r.status,u:r.url,m:r.headers.get('cf-mitigated')||'',t:t}))})})"
+                + ".catch(function(e){BRF.done(JSON.stringify({s:0,e:String(e)}))})})()";
+            try {
+                UI.post(() -> {
+                    try { startReader(); syncCookies(); runInReader(js, 0); } catch (RuntimeException e) { readerBroken = true; latch.countDown(); }
+                });
+                if (!latch.await(25, TimeUnit.SECONDS)) { readerBroken = true; return null; }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            } finally {
+                fwLatch = null;
+            }
+            String raw = fwResult;
+            if (raw == null) return null;
+            try {
+                JSONObject o = new JSONObject(raw);
+                int status = o.optInt("s", 0);
+                if (status == 0) return null;
+                return FaNet.fromBrowser(status, o.optString("u", ""), "challenge".equalsIgnoreCase(o.optString("m", "")), o.optString("t", ""));
+            } catch (Exception e) {
+                return null;
+            }
+        }
     }
 
     /* ------------------------------------------------------------------ the window */

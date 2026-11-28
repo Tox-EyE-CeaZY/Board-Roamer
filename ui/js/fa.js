@@ -129,17 +129,17 @@ async function pump() {
 let waiters = [];
 let pollTimer = 0;
 let starting = false;
-/** One polite look at the front page, to find out whether the check has been passed (the banner must not outlive it). */
-async function checkPassed() {
+/** One polite look at the page that was asked for (a check can be set on one page and not another), to find out whether the check has been passed (the banner must not outlive it). */
+async function checkPassed(url) {
   try {
-    const r = await serial(() => once(P.FA_WEB + '/'), 1);
+    const r = await serial(() => once(url || P.FA_WEB + '/'), 1);
     if (r.via === 'challenge' || r.res.status === 503) return false;
     return !P.inspect(P.parseHtml(r.text)).challenge;
   } catch {
     return false;
   }
 }
-async function startChallenge() {
+async function startChallenge(url) {
   if (faState.challenge || starting) return;
   starting = true; // several requests can meet the same check at once: only the first one starts the watch
   try {
@@ -159,7 +159,7 @@ async function startChallenge() {
     // the session can already have changed before this started watching, so the generation alone is not proof: look every few seconds
     if (++ticks % 4 || probing) return;
     probing = true;
-    const ok = await checkPassed();
+    const ok = await checkPassed(url);
     probing = false;
     if (ok) endChallenge();
   }, 1500);
@@ -198,7 +198,7 @@ export async function faHtml(url, { background = false, prio = background ? 2 : 
     await untilClear();
     const r = await serial(() => once(url), prio);
     if (r.via === 'challenge') {
-      await startChallenge();
+      await startChallenge(url);
       continue;
     }
     if (r.res.status === 403 && /robots/.test(r.text)) throw new FaError('Fur Affinity asks apps not to open that page. It opens in your browser instead.', { robots: true });
@@ -216,7 +216,7 @@ export async function faHtml(url, { background = false, prio = background ? 2 : 
     const doc = P.parseHtml(r.text);
     const info = P.inspect(doc);
     if (info.challenge) {
-      await startChallenge();
+      await startChallenge(url);
       continue;
     }
     if (info.online) faState.online = info.online;
