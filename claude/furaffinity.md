@@ -36,4 +36,5 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - The front page has no next page: after the list, "Load more" continues through Browse, keeping the section's kind of work.
 - The Fur Affinity button sits above the source dial in the rail. Layout and tile-size controls are shared with the boards.
 - Following > "Import my watch list": on a tap, the Fur Affinity window opens the person's own watch list page (signing in there if asked), reads the names once, and closes; the person confirms the list before anything is followed. Pasting the page is the fallback. No background requests.
+- The watch-list import follows the list's own next-page link (1.1 s apart, up to 100 pages, stops on a repeat or a page with nothing new). The next-link detection is a guess (no real multi-page page saved yet): a saved page 2 or the list's pager markup would confirm it.
 - Profile tab (default on an artist): bio, info and contact, featured, latest submissions and favorites, shouts (markup unseen, best effort). Journals, watchers and watching lists open on the site.

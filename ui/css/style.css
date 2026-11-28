@@ -1465,6 +1465,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fa-fl { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 10px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: 600 13px var(--f-body, inherit); }
 .fa-fl:hover { border-color: var(--accent); }
 .fa-fl-thumbs { display: flex; gap: 3px; height: 56px; overflow: hidden; }
+.fa-fl-thumbs.empty { align-items: center; justify-content: center; background: var(--bg3, rgba(255,255,255,.04)); }
+.fa-fl-thumbs.empty::before { content: attr(data-i); font: 700 26px var(--f-head, inherit); color: var(--dim); opacity: .6; }
 .fa-fl-thumbs img { flex: 1 1 0; min-width: 0; object-fit: cover; height: 100%; }
 .fa-banner { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg3); color: var(--ink); border: 1px solid var(--accent); border-left-width: 4px; font: 500 12.5px var(--f-mono); cursor: pointer; box-shadow: 0 6px 24px #0006; }
 .fa-banner[hidden] { display: none; }
