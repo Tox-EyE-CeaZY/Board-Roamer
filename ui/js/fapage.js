@@ -385,7 +385,12 @@ async function pickE621Artist(name) {
 /* ------------------------------------------------------------------ an artist */
 /* Laid out like a Fur Affinity userpage (name block, tabs, art on the left, details on the right), drawn with Board Roamer's
    cut panels and mono labels. Home is that page; the other tabs keep a one-line name block so the pictures get the room. */
+let lastHash = ''; // the screen shown before this one, to make Back go where the person came from
+let origin = { name: '', hash: '' }; // the Fur Affinity list (Latest, Following, ...) this artist was opened from
 function renderUser(root, ctx, name, p) {
+  const came = lastHash;
+  lastHash = location.hash;
+  if (origin.name !== name && !came.startsWith('#/fa/user/' + enc(name))) origin = { name, hash: /^#\/fa(\?|$)/.test(came) ? came : '' };
   const tab = ['profile', 'gallery', 'scraps', 'favs', 'folders', 'folder'].includes(p.get('t')) ? p.get('t') : 'profile';
   const home = tab === 'profile';
   const prov = getProvider('fa');
@@ -424,7 +429,13 @@ function renderUser(root, ctx, name, p) {
   };
   const tabs = segmented([['profile', 'Home'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
   const hero = h('header', { class: 'fa-hero' + (home ? '' : ' slim') },
-    crumb('Fur Affinity', () => ctx.go('#/fa')),
+    home
+      ? crumb('Fur Affinity', () => ctx.go(origin.name === name && origin.hash ? origin.hash : '#/fa')) // back to the list it was opened from
+      : crumb(pretty(name), () => { // inside Gallery / Scraps / Favorites / Folders: back to the artist's page
+        const homeHash = hashOf('/user/' + enc(name));
+        if (came === homeHash) history.back();
+        else ctx.go(homeHash);
+      }),
     h('button', { class: 'btn fa-out', title: 'Open this page in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon('external', 15) + '<span>On Fur Affinity</span>' }),
     avatar,
     h('div', { class: 'fa-who' }, title, sub),
