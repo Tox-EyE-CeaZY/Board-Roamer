@@ -54,7 +54,7 @@ const fSig = (f = {}) => JSON.stringify({ o: f.order || '', s: f.score || 0, r: 
 
 /* ================================================================== shell */
 const rail = $('#rail');
-const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['fa', 'Fur Affinity', 'paw'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
+const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['fa', 'Fur Affinity', 'paw'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
 const NAV_KEY = { feed: 1, roam: 2, follows: 3, boards: 4, pools: 5, trail: 6 }; // the number keys (see the key handler)
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
