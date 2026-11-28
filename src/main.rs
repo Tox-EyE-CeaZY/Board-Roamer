@@ -204,13 +204,24 @@ struct FaWin {
 }
 
 fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, act: Option<(String, bool)>, icon: Option<Icon>) -> Option<FaWin> {
-    let window = WindowBuilder::new()
+    let mut wb = WindowBuilder::new()
         .with_title(if watch { "Fur Affinity: your watch list" } else if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
         .with_window_icon(icon)
-        .with_inner_size(LogicalSize::new(1000.0, 780.0))
-        .with_visible(act.is_none()) // a Watch / Unwatch runs unseen; the window only shows if the site needs the person (sign-in, its quick check)
-        .build(target)
-        .ok()?;
+        .with_inner_size(LogicalSize::new(1000.0, 780.0));
+    // A Watch / Unwatch runs unseen. A window that is hidden outright may never load its page (the browser engine pauses it),
+    // so on Windows it is "shown" far off screen with no taskbar button; it moves into view only if the site needs the person.
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        if act.is_some() {
+            wb = wb.with_skip_taskbar(true).with_position(tao::dpi::PhysicalPosition::new(-32000, -32000)).with_focused(false);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        wb = wb.with_visible(act.is_none());
+    }
+    let window = wb.build(target).ok()?;
     // its own profile, so signing out here cannot touch the app's settings
     let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
@@ -258,6 +269,7 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
     if let Some((user, want)) = w.act.clone() {
         let user_page = path.trim_end_matches('/').eq_ignore_ascii_case(&format!("/user/{user}"));
         if checking || path.starts_with("/login") {
+            let _ = w.window.set_outer_position(tao::dpi::LogicalPosition::new(120.0, 80.0)); // it may be parked off screen
             let _ = w.window.set_visible(true); // the person has to deal with this one
             let _ = w.window.set_focus();
         } else if user_page {

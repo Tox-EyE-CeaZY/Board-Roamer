@@ -407,13 +407,13 @@ function renderUser(root, ctx, name, p) {
       home ? h('button', { class: 'btn fa-watch' + (watching ? ' primary' : ''), title: watching ? 'You watch them on Fur Affinity. Tap to stop watching' : 'Watch them on Fur Affinity (needs your sign-in)', onclick: async (e) => {
         if (!faState.loggedIn) return toast('Sign in to Fur Affinity first (Settings > Fur Affinity)', { ms: 2600 }), faLogin();
         const b = e.currentTarget;
-        b.disabled = true;
+        if (b.classList.contains('busy')) return;
+        b.classList.add('busy');
         const want = !watching;
-        toast(want ? 'Watching on Fur Affinity…' : 'Stopping the watch…', { ms: 1800 });
-        const r = await faWatchAct(name, want);
-        b.disabled = false;
-        if (r.ok) (watching = r.watching), toast(watching ? 'Now watching ' + pretty(name) : 'No longer watching', { ms: 2000 });
-        else toast(r.error || 'That did not work', { ms: 3000 });
+        b.querySelector('span').textContent = want ? 'Watching…' : 'Unwatching…'; // stays until Fur Affinity has answered (up to a minute)
+        const r = await faWatchAct(name, want).catch((err) => ({ ok: false, error: err.message }));
+        if (r.ok) (watching = r.watching), toast(watching ? 'Now watching ' + pretty(name) : 'No longer watching ' + pretty(name), { ms: 2400 });
+        else toast((r.error || 'That did not work') + '. Nothing was changed on Fur Affinity.', { kind: 'err', ms: 6000 });
         paintFollow();
       }, html: icon(watching ? 'check' : 'eye', 15) + `<span>${watching ? 'Watched' : 'Watch'}</span>` }) : null,
       home ? h('button', { class: 'btn', onclick: () => openExternal(faUrl.journals(name)), html: icon('book', 15) + '<span>Journals</span>', title: 'Journals open on Fur Affinity' }) : null,
@@ -663,6 +663,18 @@ function profileBody(host, u, name, ctx) {
           full.onload = () => { if (mine === turn) img.src = large; };
           full.src = large; // if it cannot be had, the listed picture stays
         }
+        // Then the original, but only if the pointer stays on it for a moment: that costs one page request (asked for once per
+        // submission, however often it is hovered) and one picture, which the browser keeps for later hovers.
+        setTimeout(async () => {
+          if (mine !== turn || post.kind !== 'image') return;
+          try {
+            await prov.fill(post);
+            if (mine !== turn || !post.full || /@\d+-/.test(post.full)) return;
+            const orig = new Image();
+            orig.onload = () => { if (mine === turn) img.src = orig.src; };
+            orig.src = '/img?u=' + enc(post.full);
+          } catch { /* the 600px picture stays */ }
+        }, 900);
         pic.append(img, ...(item.id === u.featured?.id && !by ? [h('span', { class: 'fa-flag' }, 'Featured')] : []));
       }
       const line = veiled ? [] : [h('b', {}, item.title || 'Untitled'), by && item.user ? h('button', { class: 'fa-link', onclick: () => go(item.user) }, 'by ' + pretty(item.user)) : null,

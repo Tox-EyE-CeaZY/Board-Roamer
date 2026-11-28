@@ -1627,3 +1627,4 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
   .fa-rows { --th: 118px; }
   .fa-th.big { height: clamp(220px, 44vh, 420px); }
 }
+.fa-watch.busy { opacity: .65; cursor: progress; }
