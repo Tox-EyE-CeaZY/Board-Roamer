@@ -4,7 +4,7 @@
  * the Gallery and Viewer, the blacklist, rating switches and tile settings, Follows, Boards (pins) and downloads.
  *
  *   #/fa                      Latest (front page) · Browse · Following · Seen (search what you browsed) · Liked here
- *   #/fa/user/<name>          an artist: Gallery · Scraps · Favorites · Folders   (?t=gallery|scraps|favs|folders|folder&f=<id>/<slug>)
+ *   #/fa/user/<name>          an artist: Home · Gallery · Scraps · Favorites · Folders   (?t=gallery|scraps|favs|folders|folder&f=<id>/<slug>)
  *   #/fa/post/<id>            one submission, opened in the viewer
  *
  * What the app never does by itself (FA's robots.txt closes it to apps): search the site, read the watch feed, favorite or
@@ -13,7 +13,7 @@
 import { h, pretty, fmtNum, ago, debounce } from './util.js';
 import { icon } from './icons.js';
 import { S, setS, on, subs, kv, tagLinks } from './store.js';
-import { getProvider, Feed } from './providers.js';
+import { getProvider, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented, dialog } from './ui.js';
 import { selBar, openExternal as openExt, downloadMany } from './actions.js';
@@ -22,7 +22,7 @@ import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faName } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faName, faPosts } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -111,7 +111,7 @@ function nameBox(placeholder, pick, { artistsOnly = false } = {}) {
 }
 
 /* ------------------------------------------------------------------ the grid every page here shows */
-function makeGrid(ctx, { top = [] } = {}) {
+function makeGrid(ctx) {
   const scroller = h('div', { class: 'gal' + (S('blurThumbs') ? ' blur' : '') + (S('showMeta') ? ' meta-on' : '') });
   let feed = null, run = 0, busy = false;
   const gal = new Gallery(scroller, {
@@ -126,7 +126,6 @@ function makeGrid(ctx, { top = [] } = {}) {
     { label: 'Pin', icon: 'pin', run: (sel, el) => pinPopover(el, sel) },
     { label: 'Download', icon: 'download', run: (sel) => downloadMany(sel) },
   ]);
-  if (top.length) scroller.prepend(...top);
 
   const foot = (text, ...more) => gal.setFoot(h('div', { class: 'foot-end' }, h('i', { html: icon('paw', 16) }), text, ...more));
   const failed = (e) => {
@@ -346,9 +345,11 @@ async function importWatchList(done) {
 }
 
 
+const noSuchUser = (e) => e.status === 400 || e.status === 404;
+
 /** A user page that would not load: a friendly "no such user" for 400/404, otherwise the plain error. */
 function missingUser(e, name, ctx) {
-  const gone = /HTTP (400|404)|not found|no such/i.test(e.message || '');
+  const gone = noSuchUser(e);
   if (!gone) return h('div', { class: 'empty-state err' }, h('h2', {}, 'That did not load'), h('p', {}, e.message));
   const tried = faName(name);
   return h('div', { class: 'empty-state err' }, h('h2', {}, 'No artist called “' + name + '” on Fur Affinity'),
@@ -381,21 +382,26 @@ async function pickE621Artist(name) {
 }
 
 /* ------------------------------------------------------------------ an artist */
+/* Laid out like a Fur Affinity userpage (name block, tabs, art on the left, details on the right), drawn with Board Roamer's
+   cut panels and mono labels. Home is that page; the other tabs keep a one-line name block so the pictures get the room. */
 function renderUser(root, ctx, name, p) {
   const tab = ['profile', 'gallery', 'scraps', 'favs', 'folders', 'folder'].includes(p.get('t')) ? p.get('t') : 'profile';
+  const home = tab === 'profile';
   const prov = getProvider('fa');
   const title = h('h1', {}, pretty(name));
-  const sub = h('p', {}, '');
-  const stats = h('div', { class: 'fa-stats' });
-  const bio = h('div', { class: 'fa-bio', hidden: true });
+  const sub = h('p', { class: 'fa-sub' }, '@' + name);
+  const avatar = h('div', { class: 'fa-av' }, h('span', {}, name.slice(0, 1).toUpperCase()));
+  const stats = h('div', { class: 'fa-nums', hidden: true });
   const actions = h('div', { class: 'fa-act' });
+  let watching = false; // what their page says about your watch on Fur Affinity (known once it has loaded, when signed in)
   const paintFollow = () => {
     const on = !!subs.find('fa', name);
-    actions.replaceChildren(
+    actions.replaceChildren(...[
       h('button', { class: 'btn' + (on ? ' primary' : ''), title: 'Board Roamer’s own follow: new posts show up in Follows. It does not watch them on Fur Affinity', onclick: () => (follow(name, 'fa'), setTimeout(paintFollow, 50)), html: icon(on ? 'bellOn' : 'bell', 15) + `<span>${on ? 'Following' : 'Follow'}</span>` }),
-      h('button', { class: 'btn', title: 'Fur Affinity does not let apps watch for you: its page opens in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon('eye', 15) + '<span>Watch on Fur Affinity</span>' }),
-      h('button', { class: 'btn', onclick: () => openExternal(faUrl.journals(name)), html: icon('book', 15) + '<span>Journals</span>', title: 'Journals open on Fur Affinity' }),
-      linked(name));
+      home ? h('button', { class: 'btn fa-watch' + (watching ? ' primary' : ''), title: watching ? 'You watch them on Fur Affinity. Their page there opens in your browser' : 'Fur Affinity does not let apps watch for you: its page opens in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon(watching ? 'check' : 'eye', 15) + `<span>${watching ? 'Watched' : 'Watch on Fur Affinity'}</span>` }) : null,
+      home ? h('button', { class: 'btn', onclick: () => openExternal(faUrl.journals(name)), html: icon('book', 15) + '<span>Journals</span>', title: 'Journals open on Fur Affinity' }) : null,
+      linked(name),
+    ].filter(Boolean));
   };
   const linked = (n) => {
     const e6 = tagLinks.suggest('fa', n, 'e621');
@@ -404,40 +410,68 @@ function renderUser(root, ctx, name, p) {
       if (tag) ctx.go(ctx.roamHash([{ t: tag, op: '+' }], null, 'e621'));
     }, html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
   };
-  const tabs = segmented([['profile', 'Profile'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
-  const head = h('div', { class: 'vhead bd' },
+  const tabs = segmented([['profile', 'Home'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
+  const hero = h('header', { class: 'fa-hero' + (home ? '' : ' slim') },
     crumb('Fur Affinity', () => ctx.go('#/fa')),
-    h('div', { class: 'bd-title' }, title, sub),
-    h('div', { class: 'vhead-act' }, h('button', { class: 'btn', onclick: () => openExternal(faUrl.user(name)), html: icon('external', 15) + '<span>On Fur Affinity</span>' })));
-  const info = h('div', { class: 'fa-user' }, stats, actions, bio);
-  const bar = h('div', { class: 'fa-bar' }, tabs, h('div', { class: 'fa-fill' }));
-  let grid;
-  const rate = ratingChips(() => grid?.reload());
-  bar.append(sizeTools(() => grid?.gal), rate);
+    h('button', { class: 'btn fa-out', title: 'Open this page in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon('external', 15) + '<span>On Fur Affinity</span>' }),
+    avatar,
+    h('div', { class: 'fa-who' }, title, sub),
+    actions,
+    home ? stats : null);
+  const bar = h('div', { class: 'fa-bar fa-tabs' }, tabs, h('div', { class: 'fa-fill' }));
+  let grid, repaint;
+  const rate = ratingChips(() => (grid ? grid.reload() : repaint?.()));
+  if (!home) bar.append(sizeTools(() => grid?.gal));
+  bar.append(rate);
   paintFollow();
-  root.replaceChildren(head);
 
+  let pictured = false;
   const paintInfo = (u) => {
     title.textContent = u.display || pretty(name);
-    sub.textContent = [`@${u.lower || name}`, u.title, u.registered ? 'joined ' + new Date(u.registered).toLocaleDateString(undefined, { year: 'numeric', month: 'short' }) : '', u.watching ? 'you watch them on Fur Affinity' : ''].filter(Boolean).join(' · ');
+    const parts = [`@${u.lower || name}`, u.title, u.registered ? 'joined ' + new Date(u.registered).toLocaleDateString(undefined, { year: 'numeric', month: 'short' }) : '', u.aliases?.length ? 'was ' + u.aliases.slice(0, 3).join(', ') : ''].filter(Boolean);
+    sub.replaceChildren(...[parts.join(' · '), u.watching && !home ? h('em', { class: 'fa-watching' }, 'Watched') : null].filter(Boolean));
+    if (u.watching != null && watching !== u.watching) {
+      watching = u.watching;
+      paintFollow();
+    }
+    if (u.avatar && !pictured) {
+      pictured = true;
+      const img = h('img', { alt: '', draggable: 'false', onload: () => avatar.classList.add('has'), onerror: (e) => e.target.remove() });
+      img.src = '/img?u=' + enc(u.avatar);
+      avatar.append(img);
+    }
     const st = u.stats || {};
-    if (tab !== 'profile') stats.replaceChildren(...[['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Watchers', u.watchers]].filter(([, v]) => v).map(([k, v]) => h('span', { class: 'fa-st' }, h('b', {}, fmtNum(v)), ' ' + k)));
-    if (u.bio && tab !== 'profile') (bio.hidden = false), (bio.textContent = u.bio);
-    if (u.aliases?.length) sub.textContent += ' · was ' + u.aliases.slice(0, 3).join(', ');
+    const nums = [['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Watchers', u.watchers]].filter(([, v]) => v);
+    stats.hidden = !nums.length;
+    stats.replaceChildren(...nums.map(([k, v]) => h('div', { class: 'fa-num', title: `${v.toLocaleString()} ${k.toLowerCase()}` }, h('b', {}, fmtNum(v)), h('small', {}, k))));
   };
 
-  if (tab === 'profile') {
-    root.append(h('div', { class: 'fa-userwrap' }, info), bar);
-    const host = h('div', { class: 'fa-profile' }, h('p', { class: 'dim' }, 'Loading the profile…'));
-    root.append(host);
-    prov.user(name).then((u) => { paintInfo(u); profileBody(host, u, name, ctx); }).catch((e) => host.replaceChildren(missingUser(e, name, ctx)));
+  if (home) {
+    const host = h('div', { class: 'fa-profile' });
+    root.replaceChildren(h('div', { class: 'fa-home' }, hero, bar, host));
+    const load = () => {
+      host.replaceChildren(h('p', { class: 'fa-none' }, 'Loading the profile…'));
+      prov.user(name).then((u) => {
+        paintInfo(u);
+        repaint = () => {
+          host.classList.toggle('blur', !!S('blurThumbs'));
+          profileBody(host, u, name, ctx);
+        };
+        repaint();
+      }).catch((e) => {
+        if (noSuchUser(e)) return host.replaceChildren(missingUser(e, name, ctx));
+        host.replaceChildren(h('div', { class: 'empty-state err' }, h('h2', {}, e.needsLogin ? 'Sign in to Fur Affinity' : 'That did not load'), h('p', {}, e.message),
+          h('div', { class: 'row-btns' }, e.needsLogin ? h('button', { class: 'btn primary', onclick: () => faLogin() }, 'Sign in') : null, h('button', { class: 'btn', onclick: load }, 'Try again'))));
+      });
+    };
+    load();
+    const off = on('settings', (e) => (!host.isConnected ? off() : ['blacklist', 'blacklistMode', 'blurThumbs'].includes(e.detail.key) && repaint?.()));
     return null;
   }
 
   if (tab === 'folders') {
-    root.append(h('div', { class: 'fa-userwrap' }, info), bar);
     const host = h('div', { class: 'fa-folders' }, h('p', { class: 'dim' }, 'Loading folders…'));
-    root.append(host);
+    root.replaceChildren(hero, bar, host);
     prov.user(name).then(paintInfo).catch(() => {});
     import('./fa.js').then(async ({ faHtml }) => {
       try {
@@ -458,8 +492,8 @@ function renderUser(root, ctx, name, p) {
   }
 
   const folder = tab === 'folder' ? (() => { const [id, slug] = String(p.get('f') || '').split('/'); return id ? { id, slug: slug || '' } : null; })() : null;
-  grid = makeGrid(ctx, { top: [h('div', { class: 'fa-userwrap' }, info)] });
-  root.append(bar, grid.scroller, grid.bar);
+  grid = makeGrid(ctx);
+  root.replaceChildren(hero, bar, grid.scroller, grid.bar);
   const kind = tab === 'folder' ? 'folder' : tab;
   grid.load(feedFor({ kind, user: name, folder }, [{ t: name, op: '+' }]));
   ctx.faPageInfo = (pi) => { if (pi.user?.display && title.textContent === pretty(name)) paintInfo({ ...pi.user, stats: {} }); };
@@ -473,44 +507,195 @@ function linkify(text) {
   let at = 0;
   for (const m of String(text).matchAll(/https?:\/\/[^\s<>"')]+/g)) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExternal(m[0])) }, m[0]));
+    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExt(m[0])) }, m[0]));
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
   return out;
 }
 
+/** A bio with its formatting, built from `richText`'s data. `go` opens a user's page. Addresses typed as plain text become links. */
+function richNodes(nodes, go, inLink = false) {
+  return nodes.flatMap((n) => {
+    if (typeof n === 'string') return inLink ? n : linkify(n);
+    if (n.t === 'br' || n.t === 'hr') return h(n.t);
+    if (n.t === 'user') {
+      const label = n.name || n.user;
+      const text = h('span', { hidden: !!n.icon && !n.name }, label);
+      const img = n.icon ? h('img', { src: '/img?u=' + enc(n.icon), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => (e.target.remove(), (text.hidden = false)) }) : null;
+      return h('a', { href: '#', class: 'fa-uicon', title: label, onclick: (e) => (e.preventDefault(), go(n.user)) }, ...[img, text].filter(Boolean));
+    }
+    const kids = richNodes(n.kids || [], go, inLink || n.t === 'a');
+    if (n.t === 'a') return h('a', { href: '#', title: n.href, onclick: (e) => (e.preventDefault(), openExt(n.href)) }, ...kids);
+    if (n.t === 'h') return h('h' + Math.min(6, n.level + 2), {}, ...kids);
+    if (n.t === 'quote') return h('blockquote', {}, ...kids);
+    if (['center', 'right', 'left', 'block'].includes(n.t)) return h('div', { class: 'fa-al-' + n.t }, ...kids);
+    return h(['b', 'i', 'u', 's', 'sup', 'sub'].includes(n.t) ? n.t : 'span', {}, ...kids);
+  });
+}
+
+const panel = (title, extra, ...body) => h('section', { class: 'fa-panel' }, h('header', {}, h('h3', {}, title), extra), ...body);
+const outBtn = (label, url) => h('button', { class: 'fa-link', title: 'Opens in your browser', onclick: () => openExternal(url), html: `<span>${label}</span>` + icon('external', 12) });
+const dateOf = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
+
+/** A block of long text that starts folded, with a button only when there is more to show. */
+function folded(cls, ...kids) {
+  const body = h('div', { class: 'fa-fold ' + cls }, ...kids);
+  const more = h('button', { class: 'fa-link fa-more', hidden: true, onclick: () => { more.textContent = body.classList.toggle('open') ? 'Show less' : 'Read more'; } }, 'Read more');
+  const measure = () => {
+    if (body.classList.contains('open')) return;
+    const over = body.scrollHeight > body.clientHeight + 4;
+    more.hidden = !over;
+    body.classList.toggle('over', over);
+  };
+  requestAnimationFrame(measure);
+  body.addEventListener('load', measure, true); // user icons arriving can make it taller
+  return [body, more];
+}
+
+const PEEK_MS = 300; // the pause Fur Affinity waits before a hovered thumbnail takes over the preview
+
 function profileBody(host, u, name, ctx) {
+  const prov = getProvider('fa');
+  const go = (user) => ctx.go(hashOf('/user/' + enc(user)));
   const open = (id) => ctx.go(hashOf('/user/' + enc(name), { post: id }));
-  const card = (title, kids, cls = '', act = null) => h('section', { class: 'fa-card cut ' + cls }, h('header', {}, h('h3', {}, title), act), h('div', { class: 'fa-card-b' }, kids));
-  const strip = (title, figs, tab) => figs?.length ? card(title, h('div', { class: 'fa-pf-strip' }, figs.slice(0, 24).map((f) => h('button', { class: 'fa-pf-th r-' + (f.rating || 'general')[0], title: f.title || '', onclick: () => open(f.id) }, h('img', { src: '/img?u=' + encodeURIComponent(f.thumb), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() })))), 'wide',
-    tab ? h('button', { class: 'btn', onclick: () => ctx.go(hashOf('/user/' + enc(name), { t: tab })) }, 'See all') : null) : null;
+  const mode = S('blacklistMode');
+  const rules = mode === 'off' ? [] : compileBlacklist(S('blacklist'));
+  const ratings = S('filters').ratings;
+  /** The same rating switches and blacklist as every gallery. A picture whose rating the page does not say counts as Adult. */
+  const allowed = (items) => faPosts(items, prov)
+    .map((post, i) => ({ post, item: items[i], hit: blacklistHit(post, rules) }))
+    .filter((x) => (x.item.rating ? ratings[x.post.rating] : ratings.e) && !(x.hit && mode === 'hide'));
+
+  const revealed = new Set(); // veiled pictures the person tapped open, shared by a thumbnail and the large preview
+  const veilOf = (hit) => h('span', { class: 'fa-veil' }, h('i', { html: icon('cloak', 20) }), h('b', {}, 'Veiled'), h('small', {}, pretty(hit).slice(0, 40)));
+  const classes = ({ post, item }, cls) => `fa-th ${cls} r-${item.rating ? post.rating : 'none'}` + (isBlurred(post) ? ' blurred' : '');
+
+  /** One picture button. `peek` is told when a mouse rests on it (or the keyboard reaches it), as on a userpage. */
+  const thumb = (x, { cls = '', by = false, peek } = {}) => {
+    const { post, item, hit } = x;
+    const ratio = Math.min(2, Math.max(.62, post.w / post.h || 1));
+    const el = h('button', { class: classes(x, cls), style: `--ar:${ratio.toFixed(3)}`, 'data-id': post.id });
+    let timer = 0;
+    const paint = () => {
+      const veiled = !!hit && !revealed.has(post.id);
+      el.classList.toggle('veiled', veiled);
+      el.title = veiled ? 'Veiled by your blacklist: tap to reveal' : item.title || 'Open';
+      if (veiled) return el.replaceChildren(veilOf(hit));
+      const who = by && item.user ? 'by ' + pretty(item.user) : '';
+      el.replaceChildren(...[
+        h('img', { src: '/img?u=' + enc(item.thumb), alt: item.title || '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }),
+        item.title || who ? h('span', { class: 'fa-cap' }, item.title ? h('b', {}, item.title) : null, who ? h('small', {}, who) : null) : null,
+      ].filter(Boolean));
+    };
+    el.addEventListener('click', () => (hit && !revealed.has(post.id) ? (revealed.add(post.id), paint(), peek?.(x, true)) : open(post.id)));
+    if (peek) {
+      el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') timer = setTimeout(() => peek(x), PEEK_MS); });
+      el.addEventListener('pointerleave', () => clearTimeout(timer));
+      el.addEventListener('focus', () => peek(x));
+    }
+    paint();
+    return el;
+  };
+
+  /**
+   * The large preview over a row of pictures. As on Fur Affinity, it starts on the featured submission (or the newest
+   * favorite), asks for the 600px picture, and changes when a mouse rests on a thumbnail below. The small picture shows
+   * while the large one loads, and the box keeps its size, so nothing under the pointer moves.
+   */
+  const stage = (by) => {
+    const box = h('div', { class: 'fa-stage' });
+    let cur = null, turn = 0;
+    const show = (x, again) => {
+      if (!again && cur?.post.id === x.post.id) return;
+      cur = x;
+      const mine = ++turn;
+      const { post, item, hit } = x;
+      const veiled = !!hit && !revealed.has(post.id);
+      const pic = h('button', { class: classes(x, 'big') + (veiled ? ' veiled' : ''), 'data-id': post.id, title: veiled ? 'Veiled by your blacklist: tap to reveal' : 'Open',
+        onclick: () => (veiled ? (revealed.add(post.id), show(cur, true), box.dispatchEvent(new CustomEvent('revealed', { detail: post.id }))) : open(post.id)) });
+      if (veiled) pic.append(veilOf(hit));
+      else {
+        const small = '/img?u=' + enc(item.thumb);
+        const large = '/img?u=' + enc(item.thumb.replace(/@\d+-/, '@600-'));
+        const img = h('img', { alt: item.title || '', draggable: 'false' });
+        img.onload = () => pic.classList.remove('failed');
+        img.onerror = () => pic.classList.add('failed');
+        img.src = small;
+        if (large !== small) {
+          const full = new Image();
+          full.onload = () => { if (mine === turn) img.src = large; };
+          full.src = large; // if it cannot be had, the listed picture stays
+        }
+        pic.append(img, ...(item.id === u.featured?.id && !by ? [h('span', { class: 'fa-flag' }, 'Featured')] : []));
+      }
+      const line = veiled ? [] : [h('b', {}, item.title || 'Untitled'), by && item.user ? h('button', { class: 'fa-link', onclick: () => go(item.user) }, 'by ' + pretty(item.user)) : null,
+        item.created ? h('small', {}, dateOf(item.created)) : null];
+      box.replaceChildren(pic, h('p', { class: 'fa-stage-t' }, line.filter(Boolean)));
+    };
+    return { box, show };
+  };
+
+  const hidden = (text = 'Hidden by your rating switches or blacklist.') => h('p', { class: 'fa-none' }, text);
+  /** A userpage section: the large preview, then the newest pictures. */
+  const showcase = (title, first, figs, tab, by) => {
+    if (!first && !figs?.length) return null;
+    const list = allowed(figs || []);
+    const [lead] = first ? allowed([first]) : [];
+    const start = lead || list[0];
+    const big = start ? stage(by) : null;
+    big?.show(start);
+    const thumbs = list.map((x) => thumb(x, { by, peek: big?.show }));
+    // revealing a veiled picture in the preview reveals its thumbnail too
+    big?.box.addEventListener('revealed', (e) => thumbs.forEach((el, i) => el.dataset.id === String(e.detail) && el.replaceWith((thumbs[i] = thumb(list[i], { by, peek: big.show })))));
+    return panel(title, h('button', { class: 'fa-link', onclick: () => ctx.go(hashOf('/user/' + enc(name), { t: tab })) }, 'See all ›'),
+      big?.box || hidden(),
+      thumbs.length ? h('div', { class: 'fa-rows' }, thumbs) : null);
+  };
+
+  const shouts = () => u.shouts?.length ? panel(`Shouts (${u.shouts.length})`, outBtn('Leave one', faUrl.user(name)),
+    h('div', { class: 'fa-shouts' }, u.shouts.map((s) => h('article', { class: 'fa-shout' },
+      h('button', { class: 'fa-shout-av', title: pretty(s.user), onclick: () => go(s.user) }, h('span', {}, s.user.slice(0, 1).toUpperCase()),
+        s.avatar ? h('img', { src: '/img?u=' + enc(s.avatar), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }) : null),
+      h('div', {},
+        h('div', { class: 'fa-shout-h' }, h('button', { class: 'fa-link', onclick: () => go(s.user) }, s.display || pretty(s.user)), s.created || s.at ? h('small', { title: s.at }, s.created ? ago(s.created) : s.at) : null),
+        h('p', {}, ...linkify(s.text))))))) : null;
+
+  const journal = () => u.journal ? panel('Featured journal', outBtn('All journals', faUrl.journals(name)),
+    h('h4', {}, u.journal.title || 'Untitled'),
+    u.journal.created ? h('small', { class: 'fa-date' }, dateOf(u.journal.created)) : null,
+    u.journal.text ? h('p', { class: 'fa-excerpt' }, u.journal.text.slice(0, 600)) : null,
+    outBtn('Read it on Fur Affinity', faUrl.journal(u.journal.id))) : null;
+
+  const info = () => {
+    const pic = u.profileId && u.profileId.id !== u.featured?.id ? allowed([u.profileId])[0] : null;
+    if (!u.fields?.length && !pic) return null;
+    return panel('Profile info', null,
+      pic ? thumb(pic, { cls: 'idpic' }) : null,
+      u.fields?.length ? h('dl', { class: 'fa-info' }, u.fields.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, ...linkify(v))))) : null);
+  };
+  const contact = () => u.contacts?.length ? panel('Contact', null,
+    h('dl', { class: 'fa-info' }, u.contacts.map((c) => h('div', {}, h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', title: c.url, onclick: (e) => (e.preventDefault(), openExt(c.url)) }, c.text || c.url) : c.text))))) : null;
+
   const st = u.stats || {};
-  const tiles = [['Views', st.views], ['Submissions', st.submissions], ['Favorites', st.favs], ['Watchers', u.watchers], ['Watching', u.watching_count], ['Comments earned', st['comments earned']], ['Comments made', st['comments made']], ['Journals', st.journals]].filter(([, v]) => v);
-  const info = [...(u.fields || []).map(([k, v]) => [k, h('span', {}, ...linkify(v))]), ...(u.contacts || []).map((c) => [c.label, c.url ? h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExternal(c.url)) }, c.text || c.url) : c.text])];
-  const site = [['Journals', faUrl.journals(name)], ['Watchers', `https://www.furaffinity.net/watchlist/to/${enc(name)}/`], ['Watching', `https://www.furaffinity.net/watchlist/by/${enc(name)}/`], ['Shouts and comments', faUrl.user(name)]];
+  const table = [['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Comments earned', st['comments earned']], ['Comments made', st['comments made']], ['Journals', st.journals]].filter(([, v]) => v != null);
+  const numbers = () => table.length ? panel('Stats', null, h('dl', { class: 'fa-table' }, table.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v.toLocaleString()))))) : null;
+  const people = (title, list, count, url) => list?.length || count ? panel(title, outBtn(count ? `All ${count.toLocaleString()}` : 'All', url),
+    list?.length ? h('div', { class: 'fa-people' }, list.map((x) => h('button', { onclick: () => go(x.user) }, x.display || pretty(x.user)))) : null) : null;
+
   const main = [
-    u.featured ? card('Featured', h('button', { class: 'fa-feat', onclick: () => open(u.featured), title: u.featuredTitle || '' },
-      u.featuredImg ? (() => {
-        // like the site: the picture itself, large, with a quiet placeholder until it arrives (proxy first, then straight from the site)
-        const img = h('img', { alt: '', draggable: 'false', decoding: 'async', onload: () => img.classList.add('ready') });
-        let tried = 0;
-        img.onerror = () => { if (!tried++) img.src = u.featuredImg; else img.remove(); };
-        img.src = '/img?u=' + encodeURIComponent(u.featuredImg);
-        return img;
-      })() : null,
-      h('span', {}, u.featuredTitle || 'Open the featured submission')), 'feat') : null,
-    u.bio ? card('Profile', h('div', { class: 'fa-pf-bio' }, ...linkify(u.bio))) : null,
-    strip('Latest submissions', u.latest, 'gallery'),
-    strip('Latest favorites', u.latestFavs, 'favs'),
-    u.shouts?.length ? card(`Shouts (${u.shouts.length})`, h('div', { class: 'fa-pf-shouts' }, u.shouts.map((s) => h('div', { class: 'fa-pf-shout' }, h('b', {}, h('a', { href: '#', onclick: (e) => (e.preventDefault(), ctx.go(hashOf('/user/' + enc(s.user)))) }, pretty(s.user))), s.at ? h('small', {}, s.at) : null, h('p', {}, ...linkify(s.text)))))) : null,
+    u.bioRich?.length || u.bio ? panel('About', null, ...(u.bioRich?.length ? folded('fa-pf-bio rich', ...richNodes(u.bioRich, go)) : folded('fa-pf-bio', ...linkify(u.bio)))) : null,
+    showcase('Gallery', u.featured, u.latest, 'gallery'),
+    showcase('Favorites', u.favPreview, u.latestFavs, 'favs', true),
+    shouts(),
   ].filter(Boolean);
   const side = [
-    tiles.length ? card('Numbers', h('div', { class: 'fa-tiles' }, tiles.map(([k, v]) => h('div', { class: 'fa-tile' }, h('b', {}, fmtNum(v)), h('small', {}, k))))) : null,
-    info.length ? card('Info and contact', h('dl', { class: 'fa-pf-info' }, info.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))) : null,
-    card('On Fur Affinity', [h('div', { class: 'fa-site' }, site.map(([l, url]) => h('button', { class: 'btn', onclick: () => openExternal(url), html: icon('external', 14) + `<span>${l}</span>` }))), h('p', { class: 'st-note' }, 'These open in your browser: Fur Affinity asks apps not to read them.')]),
+    journal(), info(), contact(), numbers(),
+    people('Recent watchers', u.recentWatchers, u.watchers, faUrl.watchers(name)),
+    people('Watching', u.recentWatching, u.watching_count, faUrl.watchingList(name)),
+    h('p', { class: 'st-note' }, 'Links with an arrow open in your browser.'),
   ].filter(Boolean);
-  host.replaceChildren(h('div', { class: 'fa-pf-main' }, main), h('aside', { class: 'fa-pf-side' }, side));
+  host.replaceChildren(h('div', { class: 'fa-cols' }, h('div', { class: 'fa-main' }, main.length ? main : hidden('This profile page is empty.')), h('aside', { class: 'fa-side' }, side)));
 }
 
 /* ------------------------------------------------------------------ settings */

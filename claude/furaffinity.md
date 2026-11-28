@@ -38,4 +38,12 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - The Fur Affinity button sits above the source dial in the rail. Layout and tile-size controls are shared with the boards.
 - Following > "Import my watch list": on a tap, the Fur Affinity window opens the person's own watch list page (signing in there if asked), reads the names once, and closes; the person confirms the list before anything is followed. Pasting the page is the fallback. No background requests.
 - The watch-list import follows the list's own next-page link (1.1 s apart, up to 100 pages, stops on a repeat or a page with nothing new). The next-link detection is a guess (no real multi-page page saved yet): a saved page 2 or the list's pager markup would confirm it.
-- Profile tab (default on an artist): bio, info and contact, featured, latest submissions and favorites, shouts (markup unseen, best effort). Journals, watchers and watching lists open on the site.
+- An artist opens on their Home page (see "Artist page layout"). Journals, watchers and watching lists open on the site.
+
+## Artist page layout
+- Laid out like an FA userpage in Board Roamer's style: name block (avatar, stats, actions), tabs (Home, Gallery, Scraps, Favorites, Folders). Home has About, Gallery, Favorites and shouts on the left; journal, profile info, contact, stats and watch lists on the right (one column under 1040px). Other tabs keep a one-line name block.
+- Profile pictures follow the rating switches, blacklist (veil or hide), #blur rules and "blur thumbnails". A picture with no stated rating (the profile ID one) counts as Adult.
+- Gallery and Favorites each have a large preview over their thumbnails, as FA does: it starts on `#gallery-preview` / `#favorite-preview`, loads the 600px picture, and a mouse resting 300 ms on a thumbnail swaps it in.
+- `featured` comes from `#gallery-preview`; the `.section-submission` picture is `profileId`.
+- About keeps the bio's formatting (`richText`: bold, italic, headings, alignment, quotes, rules, links, user icons) as data, never as the page's markup. In both `richText` and `plainText`, source line breaks are spaces; only `<br>` and blocks start new lines.
+- The Watch button reads "Watched" when the page's watch button points at `/unwatch/`. It still opens the site.

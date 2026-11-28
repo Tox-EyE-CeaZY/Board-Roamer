@@ -46,13 +46,14 @@ export function plainText(el) {
   const out = [];
   const walk = (n) => {
     for (const c of n.childNodes) {
-      if (c.nodeType === 3) out.push(c.nodeValue);
+      // a line break in the page's source is only a space, as in a browser: <br> and blocks are what make new lines
+      if (c.nodeType === 3) out.push(c.nodeValue.replace(/\s+/g, ' '));
       else if (c.nodeType === 1) {
         const tag = c.tagName.toLowerCase();
         if (tag === 'br') out.push('\n');
         else if (tag === 'script' || tag === 'style') continue;
         else {
-          const block = /^(p|div|h[1-6]|li|tr|section)$/.test(tag);
+          const block = /^(p|div|h[1-6]|li|tr|section|blockquote|hr)$/.test(tag) || /\bbbcode_(center|right|left|quote|h[1-6]|hr)\b/.test(c.getAttribute('class') || '');
           if (block && out.length && !/\n$/.test(out[out.length - 1])) out.push('\n');
           walk(c);
           if (block) out.push('\n');
@@ -62,6 +63,67 @@ export function plainText(el) {
   };
   walk(el);
   return out.join('').replace(/[ \t ]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const STYLES = { b: 'b', strong: 'b', i: 'i', em: 'i', u: 'u', s: 's', strike: 's', del: 's', sup: 'sup', sub: 'sub', blockquote: 'quote', p: 'block', div: 'block', li: 'block' };
+
+/**
+ * Formatted text (a profile's bio) as plain data: strings and {t, kids} for bold, italic, headings, alignment, quotes, links,
+ * user icons, line breaks and rules. Only these kinds come out, so the screen never receives the page's own markup. No more
+ * than one empty line in a row is kept.
+ */
+export function richText(el) {
+  if (!el) return [];
+  const isBr = (n) => n?.t === 'br';
+  const walk = (node) => {
+    const out = [];
+    let breaks = 0;
+    const push = (n) => {
+      if (isBr(n)) {
+        if (++breaks > 2) return;
+      } else if (typeof n !== 'string' || n.trim()) breaks = 0;
+      out.push(n);
+    };
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) {
+        const t = c.nodeValue.replace(/\s+/g, ' ');
+        if (t) push(t);
+        continue;
+      }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName.toLowerCase();
+      const cls = c.getAttribute('class') || '';
+      if (/^(script|style|template|noscript|iframe)$/.test(tag) || /\bsmilie\b/.test(cls)) continue;
+      if (tag === 'br') push({ t: 'br' });
+      else if (tag === 'hr' || /\bbbcode_hr\b/.test(cls)) push({ t: 'hr' });
+      else if (tag === 'img') push(clean(c.getAttribute('alt')));
+      else if (tag === 'a') {
+        const href = (c.getAttribute('href') || '').trim();
+        const user = /\b(iconusername|linkusername)\b/.test(cls) ? nameFromHref(href) : '';
+        if (user) {
+          const img = c.querySelector('img');
+          push({ t: 'user', user, name: txt(c), icon: cdn(img?.getAttribute('src')) });
+          continue;
+        }
+        const url = href && !href.startsWith('#') ? abs(href) : '';
+        const kids = walk(c);
+        if (/^https?:\/\//i.test(url)) push({ t: 'a', href: url, kids: kids.length ? kids : [url] });
+        else kids.forEach(push);
+      } else {
+        const level = (/^h([1-6])$/.exec(tag) || /\bbbcode_h([1-6])\b/.exec(cls) || [])[1];
+        const kind = level ? 'h' : (/\bbbcode_(center|right|left|quote|b|i|u|s|sup|sub)\b/.exec(cls) || [])[1] || STYLES[tag];
+        const kids = walk(c);
+        if (!kind) kids.forEach(push);
+        else if (kids.length) push(level ? { t: kind, level: +level, kids } : { t: kind, kids });
+      }
+    }
+    return out;
+  };
+  const out = walk(el);
+  const empty = (n) => isBr(n) || (typeof n === 'string' && !n.trim());
+  while (out.length && empty(out[0])) out.shift();
+  while (out.length && empty(out[out.length - 1])) out.pop();
+  return out;
 }
 
 /* ------------------------------------------------------------------ page health */
@@ -312,22 +374,78 @@ export function parseUserpage(doc) {
     for (const m of clean(sec.querySelector('.section-body')?.textContent).matchAll(/([A-Za-z][A-Za-z ]*?):\s*(\d[\d,]*)/g)) stats[m[1].trim().toLowerCase()] = +m[2].replace(/,/g, '');
   }
   const count = (sel) => num(page.querySelector(`${sel} .section-header h3 a`)?.textContent);
-  const featured = /\/view\/(\d+)/.exec(page.querySelector('.section-submission a[href*="/view/"]')?.getAttribute('href') || '');
+  const people = (sel) => [...page.querySelectorAll(`${sel} .c-usernameBlockSimple a[href*="/user/"]`)]
+    .map((a) => ({ user: nameFromHref(a.getAttribute('href')), display: txt(a) })).filter((x) => x.user);
   return {
     ...head,
     bio: plainText(page.querySelector('.userpage-layout-profile .userpage-profile')),
+    bioRich: richText(page.querySelector('.userpage-layout-profile .userpage-profile')),
     stats,
     watchers: count('.watched-by-block'),
     watching_count: count('.is-watching-block'),
     fields: [...page.querySelectorAll('#userpage-contact-item .table-row')].map((r) => [txt(r.querySelector('.userpage-profile-question')), clean(r.textContent).replace(txt(r.querySelector('.userpage-profile-question')), '').trim()]).filter(([k]) => k),
     contacts: [...page.querySelectorAll('#userpage-contact .user-contact-item')].map((c) => ({ label: txt(c.querySelector('strong')), url: c.querySelector('a[href^="http"]')?.getAttribute('href') || '', text: txt(c.querySelector('a')) })),
-    featured: featured ? featured[1] : '',
-    featuredImg: (() => { const i = page.querySelector('.section-submission img'); return cdn(i?.getAttribute('src') || i?.getAttribute('data-src') || i?.getAttribute('data-preview-src')); })(),
-    featuredTitle: clean(page.querySelector('.section-submission img')?.getAttribute('alt') || ''),
+    recentWatchers: people('.watched-by-block'),
+    recentWatching: people('.is-watching-block'),
+    featured: parsePreview(page.querySelector('#gallery-preview')),
+    favPreview: parsePreview(page.querySelector('#favorite-preview')),
+    profileId: parsePreview(page.querySelector('.section-submission')),
+    journal: parseFeaturedJournal(page),
     latest: parseFigures(doc, { root: '#gallery-latest-submissions' }),
     latestFavs: parseFigures(doc, { root: '#gallery-latest-favorites' }),
     shouts: parseShouts(doc),
   };
+}
+
+/** One large picture on a profile (the featured submission, the latest favorite, or the "profile ID" picture): null when there is none. */
+export function parsePreview(box) {
+  const a = box?.querySelector('a[href*="/view/"] img')?.closest('a');
+  const id = (/\/view\/(\d+)/.exec(a?.getAttribute('href') || '') || [])[1];
+  if (!id) return null;
+  const img = a.querySelector('img');
+  const src = img.getAttribute('src') || '';
+  const parts = thumbParts(src);
+  const t = parseTagString(img.getAttribute('data-tags'));
+  const date = box.querySelector('.preview_date .popup_date, .popup_date');
+  return {
+    id,
+    title: txt(box.querySelector('.preview_title a')),
+    user: t.user,
+    // the profile ID picture carries no rating class: it stays empty rather than being guessed
+    rating: (/\br-(general|mature|adult)\b/.exec(a.className || '') || [])[1] || '',
+    type: 'image',
+    category: t.category,
+    theme: t.theme,
+    species: t.species,
+    keywords: t.keywords,
+    thumb: parts ? thumbUrl(id, parts.ts, parts.size, parts.ext) : cdn(src),
+    ts: parts?.ts || '',
+    created: unixIso(date?.getAttribute('data-time')),
+  };
+}
+
+/** The journal a profile puts forward: {id, title, created, text}, or null. */
+export function parseFeaturedJournal(page) {
+  for (const sec of page.querySelectorAll('.userpage-right-column')) {
+    if (!/^featured journal$/i.test(txt(sec.querySelector('.section-header h2')))) continue;
+    const id = (/\/journal\/(\d+)/.exec(sec.querySelector('a[href*="/journal/"]')?.getAttribute('href') || '') || [])[1];
+    if (!id) return null;
+    const body = sec.querySelector('.section-body');
+    const head = body?.querySelector('h2');
+    // the heading is the title followed by "(rating)": keep the words before the rating
+    const parts = [];
+    for (const n of head?.childNodes || []) {
+      if (n.nodeType === 1 && /contentRating/i.test((n.id || '') + ' ' + (n.className || ''))) break;
+      parts.push(n.textContent);
+    }
+    return {
+      id,
+      title: clean(parts.join('')).replace(/\s*\($/, ''),
+      created: unixIso(body?.querySelector('.popup_date')?.getAttribute('data-time')),
+      text: plainText(body?.querySelector('.user-submitted-links')),
+    };
+  }
+  return null;
 }
 
 /**
@@ -357,7 +475,14 @@ export function parseShouts(doc) {
     const text = plainText(c.querySelector('.comment_text, .comment-text, .user-submitted-links')).trim();
     const date = c.querySelector('.popup_date');
     if (!who || !text) continue;
-    out.push({ user: nameFromHref(who.getAttribute('href')), text, at: date?.getAttribute('title') || clean(date?.textContent) || '' });
+    out.push({
+      user: nameFromHref(who.getAttribute('href')),
+      display: txt(c.querySelector('.js-displayName')),
+      avatar: cdn(c.querySelector('img.comment_useravatar')?.getAttribute('src')),
+      text,
+      at: date?.getAttribute('title') || clean(date?.textContent) || '',
+      created: unixIso(date?.getAttribute('data-time')),
+    });
     if (out.length >= 40) break;
   }
   return out;

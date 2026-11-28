@@ -559,7 +559,7 @@ function applyRouteCore() {
     return handlePost(p.get('post'), boardGal);
   } else if (view === 'fa') {
     const key = location.hash.split('?post=')[0].split('&post=')[0];
-    if (boardGal && curLocal === key) return handlePost(p.get('post'), boardGal); // only the viewer changed
+    if ((boardGal || root.querySelector(':scope > .fa-home')) && curLocal === key) return handlePost(p.get('post'), boardGal); // only the viewer changed
     curLocal = key;
     boardGal = renderFa(root, ctx);
     return handlePost(p.get('post'), boardGal);
