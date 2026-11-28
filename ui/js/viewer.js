@@ -1102,6 +1102,21 @@ export class Viewer {
     const post = this.post, prov = getProvider(post.provider);
     const bar = this.poolBar;
     this._poolGo = null;
+    const cn = post.comicNav;
+    if (cn && !this.poolCtx) {
+      // a Fur Affinity comic names its neighbours in the description: offer them as the pool buttons
+      const go = (d) => { const t = d < 0 ? cn.prev : cn.next; if (t) this.hooks.faStep?.(t); else toast(d > 0 ? 'Last page' : 'First page', { ms: 1100 }); };
+      this._poolGo = go;
+      bar.replaceChildren(
+        h('i', { class: 'vp-ic', html: icon('book', 15) }),
+        h('span', { class: 'vp-name' }, h('em', {}, 'COMIC'), 'Pages from the description'),
+        cn.first && cn.first !== String(post.id) ? h('button', { class: 'vp-b', title: 'First page', onclick: () => this.hooks.faStep?.(cn.first), html: icon('left', 14) + icon('left', 14) }) : null,
+        h('button', { class: 'vp-b', title: 'Previous page (PgUp)', disabled: !cn.prev, onclick: () => go(-1), html: icon('left', 14) }),
+        h('button', { class: 'vp-b', title: 'Next page (PgDn)', disabled: !cn.next, onclick: () => go(1), html: icon('right', 14) }),
+      );
+      bar.hidden = false;
+      return;
+    }
     if (!prov.pools || !(post.pools?.length || this.poolCtx)) return void (bar.hidden = true);
     const id = this.poolCtx?.id ?? post.pools[0];
     let pool;
@@ -1332,7 +1347,7 @@ export class Viewer {
         p.parent ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.parent, 'only') }, '↰ parent #' + p.parent) : null,
         (p.children?.length || p.hasChildren) ? h('button', { class: 'chipbtn', onclick: () => this.hooks.onTag('parent:' + p.id, 'only') }, `⧉ children${p.children?.length ? ' (' + p.children.length + ')' : ''}`) : null)) : null,
       p.pools?.length ? h('div', { class: 'ir col' }, h('span', {}, 'Pools'), poolBox) : null,
-      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), prov.engine === 'pm' || prov.plainDesc ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov }))) : null,
+      p.desc ? h('div', { class: 'ir col' }, h('span', {}, 'Description'), p.descRich?.length && this.hooks.richDesc ? h('div', { class: 'desc fa-rich' }, ...this.hooks.richDesc(p.descRich)) : prov.engine === 'pm' || prov.plainDesc ? h('p', { class: 'desc' }, p.desc.trim()) : h('div', { class: 'desc' }, renderDText(p.desc, { prov }))) : null,
     );
   }
 

@@ -23,7 +23,7 @@ import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
 import { cachedImg } from './thumbcache.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faWatchAct, faName, faPosts, faLink } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -538,7 +538,7 @@ function linkify(text) {
 }
 
 /** A bio with its formatting, built from `richText`'s data. `go` opens a user's page. Addresses typed as plain text become links. */
-function richNodes(nodes, go, inLink = false) {
+export function richNodes(nodes, go, inLink = false, nav = null) {
   return nodes.flatMap((n) => {
     if (typeof n === 'string') return inLink ? n : linkify(n);
     if (n.t === 'br' || n.t === 'hr') return h(n.t);
@@ -548,9 +548,13 @@ function richNodes(nodes, go, inLink = false) {
       const img = n.icon ? h('img', { src: '/img?u=' + enc(n.icon), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => (e.target.remove(), (text.hidden = false)) }) : null;
       return h('a', { href: '#', class: 'fa-uicon', title: label, onclick: (e) => (e.preventDefault(), go(n.user)) }, ...[img, text].filter(Boolean));
     }
-    const kids = richNodes(n.kids || [], go, inLink || n.t === 'a');
-    if (n.t === 'a') return h('a', { href: '#', title: n.href, onclick: (e) => (e.preventDefault(), openExt(n.href)) }, ...kids);
+    const kids = richNodes(n.kids || [], go, inLink || n.t === 'a', nav);
+    if (n.t === 'a') {
+      const l = nav && faLink(n.href); // a Fur Affinity submission or artist opens inside the app
+      return h('a', { href: '#', title: n.href, onclick: (e) => (e.preventDefault(), l ? nav(l.hash) : openExt(n.href)) }, ...kids);
+    }
     if (n.t === 'h') return h('h' + Math.min(6, n.level + 2), {}, ...kids);
+    if (n.t === 'color') return h('span', { style: `color:${n.color}` }, ...kids);
     if (n.t === 'quote') return h('blockquote', {}, ...kids);
     if (['center', 'right', 'left', 'block'].includes(n.t)) return h('div', { class: 'fa-al-' + n.t }, ...kids);
     return h(['b', 'i', 'u', 's', 'sup', 'sub'].includes(n.t) ? n.t : 'span', {}, ...kids);
@@ -578,7 +582,12 @@ function folded(cls, ...kids) {
 
 const PEEK_MS = 300; // the pause Fur Affinity waits before a hovered thumbnail takes over the preview
 
+/** The pictures an artist's Home tab shows (Gallery, then Favorites), so an opened one can step through its neighbours. */
+let homePosts = [];
+export const faHomeView = () => homePosts;
+
 function profileBody(host, u, name, ctx) {
+  homePosts = [];
   const prov = getProvider('fa');
   const go = (user) => ctx.go(hashOf('/user/' + enc(user)));
   const open = (id) => ctx.go(hashOf('/user/' + enc(name), { post: id }));
@@ -670,6 +679,7 @@ function profileBody(host, u, name, ctx) {
     const list = allowed(figs || []);
     const [lead] = first ? allowed([first]) : [];
     const start = lead || list[0];
+    for (const x of [lead, ...list]) if (x && !homePosts.some((p) => p.id === x.post.id)) homePosts.push(x.post);
     const big = start ? stage(by) : null;
     big?.show(start);
     const thumbs = list.map((x) => thumb(x, { by, peek: big?.show }));

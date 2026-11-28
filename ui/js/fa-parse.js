@@ -110,6 +110,12 @@ export function richText(el) {
         if (/^https?:\/\//i.test(url)) push({ t: 'a', href: url, kids: kids.length ? kids : [url] });
         else kids.forEach(push);
       } else {
+        const colour = (/(?:^|;)\s*color\s*:\s*(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})\s*(?:;|$)/i.exec(c.getAttribute('style') || '') || [])[1];
+        if (colour) {
+          const kids = walk(c);
+          if (kids.length) push({ t: 'color', color: colour, kids });
+          continue;
+        }
         const level = (/^h([1-6])$/.exec(tag) || /\bbbcode_h([1-6])\b/.exec(cls) || [])[1];
         const kind = level ? 'h' : (/\bbbcode_(center|right|left|quote|b|i|u|s|sup|sub)\b/.exec(cls) || [])[1] || STYLES[tag];
         const kids = walk(c);
@@ -317,6 +323,7 @@ export function parseSubmission(doc) {
     avatar: cdn(page.querySelector('img.submission-user-icon')?.getAttribute('src')),
     created: unixIso(date?.getAttribute('data-time')),
     desc: plainText(page.querySelector('.submission-description-text')),
+    descRich: richText(page.querySelector('.submission-description-text')),
     views: stat('Views'),
     comments: stat('Comments'),
     favs: stat('Favorites'),

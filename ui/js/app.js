@@ -5,7 +5,7 @@ import { refreshLib, toggleLibrary } from './library.js';
 import { startWatch } from './watch.js';
 import { startWidgets } from './widgets.js';
 import { renderLocal } from './local.js';
-import { renderFa, initFaBanner } from './fapage.js';
+import { renderFa, initFaBanner, faHomeView, richNodes } from './fapage.js';
 import { faSupported, faUserIn, faLink, faIndex, faUrl } from './fa.js';
 import { MultiFeed } from './multi.js';
 import { editSources } from './sources.js';
@@ -584,7 +584,9 @@ async function handlePost(postId, g) {
     return;
   }
   if (viewer.isOpen && String(viewer.post?.id) === postId) return;
-  const list = g ? g.viewList() : [];
+  let list = g ? g.viewList() : [];
+  // an artist's Home tab has no gallery of its own: step through the pictures it shows
+  if (!list.some((p) => String(p.id) === postId) && parseHash().view === 'fa') list = faHomeView();
   const idx = list.findIndex((p) => String(p.id) === postId);
   viewerGal = g;
   if (idx >= 0) return viewer.open(list, idx, null), poolRoot(g);
@@ -609,6 +611,8 @@ function poolRoot(g, opts) {
 
 /* ================================================================== viewer wiring */
 const viewer = new Viewer($('#viewer'), {
+  richDesc: (nodes) => richNodes(nodes, (u) => (closeViewerQuiet(), setHash(`#/fa/user/${encodeURIComponent(u)}`)), false, (to) => { if (!to.includes('post=')) closeViewerQuiet(); setHash(to); }),
+  faStep: (id) => { setHash(`#/fa?post=${id}`); },
   onNeedMore: async () => {
     if (viewerGal === gal) {
       await loadMore();
