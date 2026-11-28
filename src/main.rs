@@ -1,6 +1,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod appcfg;
+mod fa;
 mod local;
 mod meta;
 mod os;
@@ -20,13 +21,13 @@ use tao::{
 use tao::platform::windows::WindowBuilderExtWindows;
 #[cfg(target_os = "linux")]
 use tao::platform::unix::WindowExtUnix;
-use tao::event_loop::EventLoopProxy;
+use tao::event_loop::{EventLoopProxy, EventLoopWindowTarget};
 use tiny_http::{Header, Response, Server};
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
-use wry::{WebContext, WebViewBuilder};
+use wry::{PageLoadEvent, WebContext, WebView, WebViewBuilder};
 #[cfg(target_os = "linux")]
 use wry::WebViewBuilderExtUnix;
 
@@ -80,6 +81,10 @@ fn handle(rq: tiny_http::Request) {
         "/open" => proxy::open_external(rq, query),
         "/img" => proxy::image(rq, query),
         "/notify" => proxy::notify(rq),
+        p if p.starts_with("/fa/") => {
+            let p = p.to_string();
+            fa::request(rq, &p)
+        }
         p if p.starts_with("/local/") => {
             let p = p.to_string();
             local::local_request(rq, &p, query)
@@ -177,6 +182,80 @@ fn enc(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
+/// The window where the user signs in to Fur Affinity, or passes its Cloudflare check, on the real site. Passwords and the
+/// check stay between the user and FA: the app only reads the cookies the site sets (see src/fa.rs) and closes the window.
+struct FaWin {
+    webview: WebView,
+    window: tao::window::Window,
+    _ctx: WebContext,
+    login: bool,
+}
+
+fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, icon: Option<Icon>) -> Option<FaWin> {
+    let window = WindowBuilder::new()
+        .with_title(if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
+        .with_window_icon(icon)
+        .with_inner_size(LogicalSize::new(1000.0, 780.0))
+        .build(target)
+        .ok()?;
+    // its own profile, so signing out here cannot touch the app's settings
+    let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
+    let builder = WebViewBuilder::new_with_web_context(&mut ctx)
+        .with_url(if login { "https://www.furaffinity.net/login/" } else { "https://www.furaffinity.net/" })
+        .with_on_page_load_handler(move |ev, _url| {
+            if matches!(ev, PageLoadEvent::Finished) {
+                let _ = events.send_event("fa:loaded".to_string());
+            }
+        });
+    #[cfg(not(target_os = "linux"))]
+    let webview = builder.build(&window).ok()?;
+    #[cfg(target_os = "linux")]
+    let webview = {
+        let vbox = window.default_vbox()?;
+        builder.build_gtk(vbox).ok()?
+    };
+    Some(FaWin { webview, window, _ctx: ctx, login })
+}
+
+/// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
+fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
+    let js = "JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname})";
+    let _ = w.webview.evaluate_script_with_callback(js, move |raw| {
+        // the callback gets the JSON text of a string; unwrap that once
+        let inner: String = serde_json::from_str(&raw).unwrap_or_default();
+        let _ = events.send_event(format!("fa:info:{inner}"));
+    });
+}
+
+/// Read what the site gave the window, keep it (src/fa.rs), and close the window once it has done its job.
+fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str) {
+    let Some(w) = fa_win.as_ref() else { return };
+    let v: serde_json::Value = serde_json::from_str(info).unwrap_or_default();
+    if !v["host"].as_str().unwrap_or("").ends_with("furaffinity.net") {
+        return; // some other page (a captcha or sign-in provider): leave it alone
+    }
+    let cookies = w.webview.cookies_for_url("https://www.furaffinity.net/").unwrap_or_default();
+    let get = |n: &str| cookies.iter().find(|c| c.name() == n).map(|c| c.value().to_string());
+    fa::set_from_window(get("a").as_deref(), get("b").as_deref(), get("cf_clearance").as_deref(), v["ua"].as_str());
+    let title = v["title"].as_str().unwrap_or("").to_lowercase();
+    let checking = title.starts_with("just a moment") || title.contains("attention required");
+    let path = v["path"].as_str().unwrap_or("");
+    let done = if w.login { fa::connected() && !path.starts_with("/login") } else { !checking && get("cf_clearance").is_some() };
+    if done {
+        *fa_win = None;
+    }
+}
+
+fn fa_forget_window(fa_win: &mut Option<FaWin>) {
+    if let Some(w) = fa_win.take() {
+        for c in w.webview.cookies().unwrap_or_default() {
+            let _ = w.webview.delete_cookie(&c);
+        }
+        let _ = &w.window;
+    }
+    let _ = std::fs::remove_dir_all(os::data_dir().join("fa-webview"));
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--version") {
@@ -227,6 +306,7 @@ fn main() {
         sync::init(os::data_dir());
         appcfg::init(os::data_dir());
         local::init(os::data_dir());
+        fa::init(os::data_dir());
         for _ in 0..8 {
             let s = server.clone();
             thread::spawn(move || {
@@ -269,6 +349,7 @@ fn main() {
     let event_loop = EventLoopBuilder::<String>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     appcfg::set_proxy(proxy.clone());
+    let fa_events = proxy.clone();
     let tray = build_tray(proxy.clone());
     appcfg::set_tray_ok(tray.is_some());
     // --background: start closed to the tray; --minimized: start minimized. Without a tray, closed becomes minimized.
@@ -334,7 +415,9 @@ fn main() {
         }
     };
 
-    event_loop.run(move |event, _, flow| {
+    let mut fa_win: Option<FaWin> = None;
+    let fa_icon = Icon::from_rgba(include_bytes!("../assets/icon-64.rgba").to_vec(), 64, 64).ok();
+    event_loop.run(move |event, target, flow| {
         let _keep_tray_alive = &tray;
         *flow = ControlFlow::Wait;
         match event {
@@ -363,6 +446,24 @@ fn main() {
                             let _ = window.drag_window();
                         }
                     }
+                    "fa:login" | "fa:verify" => {
+                        let login = cmd == "fa:login";
+                        if fa_win.as_ref().map_or(false, |w| w.login == login) {
+                            if let Some(w) = &fa_win {
+                                w.window.set_focus();
+                            }
+                        } else {
+                            fa_win = None; // one window at a time
+                            fa_win = open_fa_window(target, fa_events.clone(), login, fa_icon.clone());
+                        }
+                    }
+                    "fa:loaded" => {
+                        if let Some(w) = &fa_win {
+                            fa_probe(w, fa_events.clone());
+                        }
+                    }
+                    "fa:close" => fa_forget_window(&mut fa_win),
+                    c if c.starts_with("fa:info:") => fa_handle_info(&mut fa_win, &c[8..]),
                     "fs:1" => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
                     "fs:0" => window.set_fullscreen(None),
                     c if c.starts_with("title:") => window.set_title(&c[6..]),

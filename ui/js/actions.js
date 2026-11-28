@@ -24,6 +24,8 @@ export function metaOf(p) {
 }
 
 export async function savePost(p, { dir = '', name = '' } = {}) {
+  if (p._lazy) await getProvider(p.provider).fill(p); // Fur Affinity: the original file's address comes with the post's own page
+  if (p.external) throw new Error(`That is ${/^[aeiou]/.test(p.external) ? 'an' : 'a'} ${p.external} submission: open it on Fur Affinity to get the file`);
   if (isAndroid()) {
     // the Android shell downloads, embeds the metadata and files it under Downloads/Board Roamer
     const r = await native.save(p.full, name || fileName(p), dir, S('embedMeta') ? metaOf(p) : null, S('ua'));
