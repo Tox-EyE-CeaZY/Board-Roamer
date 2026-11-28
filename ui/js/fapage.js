@@ -607,7 +607,7 @@ function profileBody(host, u, name, ctx) {
       if (veiled) return el.replaceChildren(veilOf(hit));
       const who = by && item.user ? 'by ' + pretty(item.user) : '';
       el.replaceChildren(...[
-        h('img', { src: '/img?u=' + enc(item.thumb), alt: item.title || '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }),
+        h('img', { src: '/img?u=' + enc(item.thumb), alt: item.title || '', loading: 'lazy', draggable: 'false', onerror: (e) => { const i = e.target; if (i.dataset.again) return i.remove(); i.dataset.again = 1; setTimeout(() => (i.src = '/img?u=' + enc(item.thumb) + '&r=1'), 1500); } }),
         item.title || who ? h('span', { class: 'fa-cap' }, item.title ? h('b', {}, item.title) : null, who ? h('small', {}, who) : null) : null,
       ].filter(Boolean));
     };
@@ -643,7 +643,11 @@ function profileBody(host, u, name, ctx) {
         const large = '/img?u=' + enc(item.thumb.replace(/@\d+-/, '@600-'));
         const img = h('img', { alt: item.title || '', draggable: 'false' });
         img.onload = () => pic.classList.remove('failed');
-        img.onerror = () => pic.classList.add('failed');
+        img.onerror = () => {
+          if (img.dataset.again) return pic.classList.add('failed');
+          img.dataset.again = 1;
+          setTimeout(() => (img.src = small + '&r=1'), 1500);
+        };
         img.src = small;
         if (large !== small) {
           const full = new Image();
