@@ -89,6 +89,7 @@ export const DEFAULTS = {
   libSort: 'updates',
   subSort: 'latest',
   subGroup: true,
+  feedScope: 'boorus', // 'fa': the Feed is the Fur Affinity Feed (its own source, never mixed with the boorus)
   feedSources: ['e621'], // which sites the Feed draws from
   homeView: 'feed', // the screen Board Roamer opens on (per device)
   homeAsked: false, // the one-time "pick your home screen" question has been answered
@@ -110,7 +111,7 @@ settings.filters = { ...DEFAULTS.filters, ...settings.filters, ratings: { ...DEF
 
 /** Settings that follow you between devices. Layout/size/phone-only options stay per device, and credentials never leave it. */
 export const SYNC_KEYS = ['provider', 'theme', 'hue', 'topo', 'grain', 'blacklist', 'blacklistMode', 'poolMostly', 'poolWarn', 'starred', 'ua', 'embedMeta', 'autoplay', 'muted', 'videoLoop',
-  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters', 'feedSources', 'feedMode', 'feedDtap', 'feedExplore', 'feedFollows', 'feedSyncLikes', 'feedLearn', 'feedStyle'];
+  'fullOriginal', 'slideshowSec', 'readerMode', 'readerRtl', 'readerFit', 'readerCover', 'subSort', 'subGroup', 'filters', 'showMeta', 'blurThumbs', 'boardCounters', 'feedSources', 'feedScope', 'feedMode', 'feedDtap', 'feedExplore', 'feedFollows', 'feedSyncLikes', 'feedLearn', 'feedStyle'];
 let settingsT = load('settingsT', {}); // when each synced setting was last changed here
 
 export const S = (k) => settings[k];

@@ -1649,3 +1649,7 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 }
 .fa-watch.busy { opacity: .65; cursor: progress; }
 .fd-comicnav { display: flex; gap: 8px; margin: 6px 0; }
+.fd-top:has(.fd-lt) { grid-template-columns: 88px 1fr 88px; }
+.fd-lt { display: flex; }
+.fd-menu { justify-self: end; }
+.fd-scope.on { color: var(--accent); }

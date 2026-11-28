@@ -222,6 +222,7 @@ function renderHome(root, ctx, p) {
   const head = h('div', { class: 'vhead' },
     h('div', {}, h('h1', {}, 'Fur Affinity'), status),
     h('div', { class: 'vhead-act' }, open.el,
+      h('button', { class: 'btn', title: 'A scrolling Feed of Fur Affinity art that learns what you like', html: icon('feed', 16) + '<span>Feed</span>', onclick: () => (setS('feedScope', 'fa'), ctx.go('#/feed')) }),
       h('button', { class: 'btn', title: 'Open Fur Affinity in your browser', html: icon('external', 16) + '<span>Site</span>', onclick: () => openExternal(faUrl.front()) }),
       h('button', { class: 'ibtn', title: 'Fur Affinity settings', html: icon('settings', 18), onclick: () => ctx.openSettings?.('fa') })));
 
