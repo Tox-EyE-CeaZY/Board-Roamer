@@ -1,47 +1,258 @@
-# Board Roamer
+<div align="center">
 
-A board viewer written in Rust for **Windows, macOS, Linux and Android**. Pull artists, tags and tag combinations into a fast
-gallery with a proper viewer. Built for **e621**, with **e926, Danbooru, Gelbooru, Safebooru and Derpibooru** supported too.
+<img src="https://raw.githubusercontent.com/Tox-EyE-CeaZY/Board-Roamer/main/.github/assets/banner.svg" alt="Board Roamer" width="100%">
 
-Single small executable. The UI is embedded, and a small local server handles rate-limited, cached API
-access, so nothing needs installing besides the system web view (WebView2 on Windows, built into macOS, WebKitGTK on Linux).
+<br>
 
-## Download
+[![Latest release](https://img.shields.io/github/v/release/Tox-EyE-CeaZY/Board-Roamer?style=for-the-badge&color=b1ef4a&labelColor=040e10&label=latest)](../../releases/latest)
+![Windows](https://img.shields.io/badge/Windows-040e10?style=for-the-badge&logo=windows&logoColor=b1ef4a)
+![macOS](https://img.shields.io/badge/macOS-040e10?style=for-the-badge&logo=apple&logoColor=b1ef4a)
+![Linux](https://img.shields.io/badge/Linux-040e10?style=for-the-badge&logo=linux&logoColor=b1ef4a)
+![Android](https://img.shields.io/badge/Android-040e10?style=for-the-badge&logo=android&logoColor=b1ef4a)
 
-Grab the latest build from the [Releases page](../../releases/latest):
+**A fast, good-looking way to browse e621 and other boards, follow your favorite artists, read comics, and keep it all in sync between your computer and your phone.**
 
-| Platform | File |
-| --- | --- |
-| Windows 64-bit / 32-bit / ARM | `board-roamer-windows-x64.exe` / `-x86.exe` / `-arm64.exe` |
-| macOS Apple Silicon / Intel | `BoardRoamer-macos-arm64.zip` / `BoardRoamer-macos-x64.zip` (unzip, then right-click the app and choose Open the first time) |
-| Linux 64-bit / ARM | `board-roamer-linux-x64` / `board-roamer-linux-arm64` (`chmod +x`, needs `libwebkit2gtk-4.1`) |
-| Android 10+ | `BoardRoamer.apk` (allow "install unknown apps" for your browser) |
+[Download](#-download) · [What it does](#-what-it-does) · [Fur Affinity](#-fur-affinity) · [Sync](#-sync-your-phone-and-computer) · [Android notes](#-android-warnings-and-permissions) · [Settings](#-settings-at-a-glance)
 
-The Android APK is universal: one file for ARM and x86 phones, tablets and emulators.
-`SHA256SUMS.txt` lists the checksum of every file.
+</div>
 
-**Android's "unsafe" / "unknown app" warnings.** Board Roamer is installed from GitHub rather than Google Play, so Android
-(and Google Play Protect) may warn that the app is from an unknown source or "isn't commonly installed". That is expected for any
-sideloaded app and is not a sign of malware. It is also signed with the project's own key, not a Play key. The APK asks for two
-sensitive permissions, and both are used only for the features below:
+---
 
-- **All files access** (`MANAGE_EXTERNAL_STORAGE`): only for Settings → Local, so you can browse folders you pick and, if you
-  choose, share them with your other devices. It is off until you turn Local on, and the app never reads other folders.
-- **Install unknown apps** (`REQUEST_INSTALL_PACKAGES`): only for Settings → Updates, which downloads the new APK from this
-  project's releases, checks it against `SHA256SUMS.txt` and hands it to Android's installer.
+## 📦 Download
 
-It also uses the internet, notifications, start-at-boot (to keep follow checks and sharing running) and a foreground service
-("Sharing with your devices"). If Play Protect asks, choose **More details → Install anyway**. You can verify the download
-against `SHA256SUMS.txt` first.
+Grab the newest build from the **[Releases page](../../releases/latest)**.
 
-**Background.** On a computer, closing the window keeps Board Roamer running in the system tray (menu bar on macOS), so
-your phone can still sync with it. Settings → Background lets you turn that off, start the app when you sign in, and choose
-whether it starts closed (tray only), minimized or open. Quit from the tray icon. Opening the app again brings the window back.
+| Your device | Get this file | First-time notes |
+| :-- | :-- | :-- |
+| **Windows** 64-bit / 32-bit / ARM | `board-roamer-windows-x64.exe` / `-x86.exe` / `-arm64.exe` | Just run it. |
+| **macOS** Apple Silicon / Intel | `BoardRoamer-macos-arm64.zip` / `-x64.zip` | Unzip, then right-click the app and choose **Open** the first time. |
+| **Linux** 64-bit / ARM | `board-roamer-linux-x64` / `-arm64` | Make it executable (`chmod +x`). Needs `libwebkit2gtk-4.1` installed. |
+| **Android** 10 or newer | `BoardRoamer.apk` | Allow "install unknown apps" for your browser. See the [Android notes](#-android-warnings-and-permissions). |
 
-**Updates.** Settings → Updates checks this project's GitHub releases. On a computer it downloads the matching build,
-verifies it against `SHA256SUMS.txt`, swaps it in and restarts. On Android it downloads the APK and opens the system installer.
+There is nothing to set up. It's one small app, and the Android file works on every phone and tablet. `SHA256SUMS.txt` on the release page lists a checksum for every file if you'd like to verify a download.
 
-## Run from source
+> [!NOTE]
+> **Windows on ARM:** the ARM build is not published reliably right now. If it is missing from a release, the 64-bit build runs on ARM Windows through Windows' built-in emulation.
+
+### Staying up to date
+
+- **Computer:** Settings → Updates checks for new versions when the app opens. When you say yes, it downloads the right build, checks it, swaps it in and restarts.
+- **Android:** the same screen downloads the new APK and opens Android's installer. You confirm the install.
+- Nothing is ever installed without your say-so. Turn the automatic check off any time.
+
+### Closing the window on a computer
+
+Closing the window keeps Board Roamer running quietly in the system tray (the menu bar on macOS), so your phone can still sync with it. Settings → Background lets you turn that off, start the app when you sign in, and choose whether it starts hidden, minimized or open. Quit from the tray icon.
+
+---
+
+## 🧭 What it does
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🎞️ Feed
+Your home screen, if you like. One post at a time, swipe for the next, double-tap to like.
+
+- **For you** learns your taste on your own device from your favorites, upvotes and hearts, with a little wandering mixed in so it stays fresh. Nothing is uploaded.
+- **Following**, **New** and **Hot** are one tap away.
+- Comics show up as comics: pick up where you left off.
+- Swipe a post left for that artist's page. Rate tags (never → love), mark posts *not interested*, press and hold for more.
+- Gentle on the sites: slow, spaced-out requests.
+
+</td>
+<td width="50%" valign="top">
+
+### 🔍 Search & Roam
+- Tag chips with live suggestions, colours and post counts. Click a chip to cycle **require / exclude / any-of**.
+- Blend several artists or tags into one feed (**ALL ⇄ ANY**).
+- Filter by score, rating, type, shape and age. Quick routes like *Hot today*, *Shuffle* and **For you** as a grid.
+- Star your favorite artists and tags.
+- Artist and tag cards with post counts, aliases, links and wiki text.
+- Paste any post, search or pool link into the search box and it opens.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🖼️ Gallery & viewer
+- Smooth masonry, rows or grid, even with thousands of posts.
+- Zoom, pan, pinch, rotate, slideshow, fullscreen, filmstrip.
+- Tags grouped by category, with quick **+ − ★** buttons.
+- A proper video player with frame-step, speed and quality.
+- Favorite and upvote on e621, Danbooru and Derpibooru when signed in.
+
+</td>
+<td valign="top">
+
+### 📌 Boards & Trail
+- **Boards** hold pinned posts. **Live boards** are saved searches that keep themselves fresh and show how many posts are new.
+- A live board can search **several sites at once** and show each picture only once.
+- Organize everything into **folders**.
+- **Trail** remembers every search. Re-run it, or save it as a board.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔔 Follows
+- Follow artists. New posts are checked quietly in the background and marked **NEW**.
+- Open one artist and **walk through what's new** with Previous / Next.
+- Optional notifications, generic by default, text only, never a picture.
+
+</td>
+<td valign="top">
+
+### 📚 Pools & comics
+- Pools are sorted into **Comics**, Series and Collections automatically.
+- A real **comic reader**: single page, two-page spreads or continuous scroll, left-to-right or right-to-left, remembers your page.
+- **Library** for the comics you're reading, with new-page alerts.
+- Save a whole pool in one go, numbered, in its own folder.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 💾 Downloads that remember
+Saved files carry the artist, tags, source links, post link and the site's original MD5 inside the image or video, so you can always trace a file back. Formats that can't hold this get a small `.xmp` file beside them. Windows Explorer shows the title, authors and tags for JPG and PNG. Switch it off in Settings → Data.
+
+</td>
+<td valign="top">
+
+### 🗂️ Local files
+Turn on **Local** (Settings → Local) to browse the pictures and videos in folders you pick, on this device and on your other synced devices. It never changes your files; tags you add stay inside Board Roamer, and the tags Board Roamer embedded in its own downloads are read back.
+
+</td>
+</tr>
+</table>
+
+### Supported sites
+
+**e621** is where Board Roamer feels most at home. **e926, Danbooru, Gelbooru, Safebooru and Derpibooru** work too, and **Fur Affinity** has its own [section](#-fur-affinity).
+
+<details>
+<summary><b>Good to know about the sites</b></summary>
+
+- e621 asks apps to identify themselves. Put something like `BoardRoamer (by yourname on e621)` under Settings → Sources → User-Agent. Rate limiting is handled for you.
+- Gelbooru needs a free API key and user ID. Danbooru limits signed-out searches to 2 tags.
+- Derpibooru works without an account. A key is optional and brings your own filter.
+- Favoriting and upvoting need you to sign in with an API key (Settings → Sources).
+
+</details>
+
+### Everything else
+
+- **Blacklist** with a click-to-reveal veil, or add `#blur` to a rule to blur instead of hide. The **Cloak** key (`` ` ``) instantly swaps the screen for a plain document. A comic is only hidden when most of its pages match, never because of one page.
+- **Tabs** (optional): open anything in a new tab, and each tab keeps its own search, results and place. Ctrl+T, Ctrl+W, Ctrl+Tab and Ctrl+Shift+T work like a browser.
+- **Right-click or long-press** nearly anything for a menu that fits.
+- **Three themes:** night, paper and violet, with an accent colour slider and an optional topographic backdrop.
+- **Press `?`** in the app for every shortcut and gesture.
+- **Backup:** Settings → Data → Export backup saves your boards, follows, trail and settings as one file.
+
+---
+
+## 🐾 Fur Affinity
+
+Fur Affinity has its own section with the gallery, viewer, follows and filters you already know. Turn it on in **Settings → Sources → Fur Affinity** (computer and Android).
+
+- Browse the **Latest** and **Browse** pages, open any artist (Home, Gallery, Scraps, Favorites, Folders), and read stories and listen to music submissions.
+- **Sign in** in a small window when you want to see mature and adult content. Your sign-in stays on that device only and is never synced or shared.
+- **Follow** artists, and import your watch list in one tap. Watch and unwatch from inside the app.
+- **Fur Affinity Feed:** the paw button in the Feed switches to a feed made only of Fur Affinity posts, with its own For you taste learning.
+- **Seen** and **Liked** tabs search what you've already looked at on this device.
+
+<details>
+<summary><b>What to expect from Fur Affinity</b></summary>
+
+- Fur Affinity has no public API, so Board Roamer reads its pages **slowly, one request a second**, and respects the site's rules about what automated apps may open. Search, messages and the site's own favorite/watch pages open in your browser instead.
+- Favorites and upvotes there are **kept in Board Roamer only**, not on Fur Affinity.
+- Checking followed artists in the background is **off by default**. "Check for new" always works.
+- If Fur Affinity shows a Cloudflare check, Board Roamer shows a tappable prompt. Nothing is forced open.
+- This part is new, so expect some rough edges while it gets tested on more devices.
+
+</details>
+
+---
+
+## 🔄 Sync your phone and computer
+
+1. On the computer, open **Settings → Sync** and choose **Add a phone**. A QR code appears.
+2. On the phone, open **Settings → Sync → Scan the code**. (A typed code works too.)
+3. That's it. Your computer is found on your home Wi-Fi by itself.
+
+Boards, pins, follows, library, trail, reading progress, what the Feed has learned, and your look and search settings sync both ways. Logins and layout sizes stay on each device.
+
+- The computer is the hub, so keep Board Roamer running there (the tray does this). Phones sync through the computer.
+- The connection is encrypted and tied to that one computer, so a roommate's Board Roamer on the same Wi-Fi is ignored.
+- **Away from home?** Install [Tailscale](https://tailscale.com) on both devices and it works the same way. The app suggests it if it can't reach your computer.
+- Phones paired on a version older than 2.13 need to pair again once.
+- On Windows, the first time you turn on sharing, allow Board Roamer through the firewall.
+
+---
+
+## 📱 On your phone
+
+- Bottom tab bar, sheets instead of pop-ups, swipe, pinch and long-press gestures, pull to refresh and a touch-friendly comic reader.
+- **Home screen widgets (Android):** nine widgets in three families: *Following* (new-post counts), *Library* (covers and new pages) and *Local* (your folders). Pick a square or fully rounded look. Adult pictures stay hidden unless you allow them.
+- **Links:** links to posts, searches and pools on the supported sites can open in Board Roamer (Settings → This device → Links).
+- **Share:** use Android's Share menu to send a link to Board Roamer.
+- **Privacy:** optional privacy screen, cloak-on-switch and blurred thumbnails for use in public.
+- **Foldables and the Surface Duo** get a layout that keeps everything clear of the hinge.
+
+---
+
+## 🛡️ Android warnings and permissions
+
+> [!IMPORTANT]
+> **Android and Google Play Protect may say Board Roamer is "harmful", "unsafe" or "isn't commonly installed", or offer to scan it. This is expected, and it is not a sign of malware.**
+
+**Why it happens.** Board Roamer is installed from GitHub, not from Google Play, and Android is wary of any app that arrives that way. On top of that, the app asks for two permissions that Android treats as sensitive. Both power real features:
+
+| Permission | What it's used for | Feature behind the flag |
+| :-- | :-- | :-- |
+| **Install unknown apps** | Downloads the new APK from this project's releases, checks it against `SHA256SUMS.txt`, and hands it to Android's installer. | **Settings → Updates** (the in-app updater) |
+| **All files access** | Lets you browse folders *you* pick, and share them with your other devices if you choose. Off until you turn Local on. The app never reads other folders. | **Settings → Local** |
+
+The updater permission is the one that most commonly trips these scans, because apps that can install other apps are a classic malware trick. Board Roamer only uses it for its own updates.
+
+It also uses the internet, notifications, the camera (only to scan the pairing QR code, nothing is recorded), starting at boot and a quiet "Sharing with your devices" notification, so follow checks and sharing keep working with the app closed.
+
+**If you see the warning:** choose **More details → Install anyway** (or **Scan app → Install anyway**). You can compare the download with `SHA256SUMS.txt` first. The app is signed with this project's own key, and the code is open for anyone to read.
+
+---
+
+## 🍎 What about iPhone and iPad?
+
+We're looking at an iOS version, but it is **unlikely**. Apple only allows apps through its App Store, and an app like this one, which browses user-submitted adult art sites and installs outside the store, is very unlikely to be accepted. Until that changes, Windows, macOS, Linux and Android are the supported platforms. On an iPhone you can still use a booru site in the browser.
+
+---
+
+## ⚙️ Settings at a glance
+
+| Menu | What's inside |
+| :-- | :-- |
+| **Sources** | Booru site and logins, Fur Affinity, local folders |
+| **Look & layout** | Theme, accent colour, home screen, tabs, gallery layout |
+| **Viewer** | Video, zoom, scrolling, how a post opens (classic viewer or Feed style) |
+| **Blacklist & starred** | Hidden tags and rules, starred artists and tags |
+| **Notifications** | New posts from follows, live boards and pools |
+| **This device** | Touch, privacy, links, running in the background |
+| **Sync** | Pair your phone and computer |
+| **Updates** | Version and update checks |
+| **Data & backup** | Export and import, saved files, reset |
+
+---
+
+## 🛠️ For developers
+
+<details>
+<summary><b>Run from source, layout and releasing</b></summary>
+
+### Run from source
 
 ```
 cargo run --release            # native window
@@ -57,93 +268,14 @@ Your data (boards, trail, settings) lives in the WebView profile: `%LOCALAPPDATA
 
 On Linux, install the web view first: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libayatana-appindicator3-dev` (the last one is for the tray icon).
 
-## What it does
-
-**Feed** (the home screen)
-- A TikTok-style feed: one post at a time, swipe for the next, double-tap to like. Learns your taste on this device from your favorites / upvotes
-  on the sites (and the hearts you tap here, for sites without favorites or when signed out), mixes in some wandering, and puts new posts from followed artists first.
-- Pick which sites it draws from (remembered), and switch between Following, For you, New and Hot. Pull down, or tap Feed twice, to refresh.
-- It also reads today's mood (what you like, skip or linger on right now) on top of your long-term taste; that fades by the next day.
-- Comics come up as comics: one in your library opens where you are in it (new pages announce themselves, finished ones stay away); any other starts at page 1. Read in the full reader and come back to the Feed.
-- What it learns syncs between your devices (with the app's sync), added together without counting anything twice.
-- Match art style (on by default, switch in the Feed settings): a small image model on your device compares thumbnails with the look of what you favorite, like and linger on. Nothing is trained or uploaded.
-- Roam also has a For you button: the same suggestions as a grid.
-- Swipe a post to the left for the artist's page; their posts open there as a feed of their own, in order. Rate tags (never, less, neutral, more, love), mark posts not interested, press and hold for more, hold two fingers to hide the buttons.
-- Gentle on the sites: one request at a time, spaced out, 40 posts per request, cool-downs after errors.
-
-**Search**
-- Tag chips with live autocomplete (category colours, post counts, alias hints).
-  Click a chip's glyph to cycle **+ require → − exclude → ≈ any-of**. Double-click to edit.
-- One-click **ALL ⇄ ANY** blend for combining several artists/tags into one feed.
-- Sort, min score, rating (S/Q/E), media type, shape and age filters. Quick routes: Hot today/week/month, shuffle…
-- Focus the empty search box for your **★ starred** and **recent** tags. Star artists and the **Following** route
-  OR's them all into one feed.
-- Artist / tag **dossier** card: post count, aliases, links, wiki excerpt.
-
-**Gallery**
-- Virtualized masonry / justified rows / uniform grid. Thousands of posts stay smooth; infinite scroll.
-- Select mode (S, Shift-range), bulk pin and download. Arrow-key navigation + Enter.
-- Blacklist with click-to-reveal veils, blur-until-hover, **Cloak** panic key (`` ` ``).
-
-**Viewer**
-- Zoom / pan / pinch / rotate, fit ⇄ 100 %, preview-then-original loading, video and GIF support, preloading.
-- Tag panel grouped by category, with `+` `−` `★` actions. Info tab (sources, relations, pools). Filmstrip, slideshow, fullscreen.
-- Favorite and upvote on e621/Danbooru with an API key. Save to Downloads (native), copy link, open on site.
-
-**Boards & Trail**
-- **Boards** are pinned collections (polaroid-style) or **live boards** — saved searches that refresh their cover.
-- **Trail** remembers every search; click to re-run, or save it as a board.
-- Export/import everything as JSON.
-
-**Follows**
-- Follow artists (bell button in the viewer, on an artist's card, or the box on the Follows page). New posts are checked
-  quietly in the background and the page sorts by latest activity (or unseen, A–Z, most posts, recently followed), grouped
-  by Today / This week / This month…
-- Opening a followed artist marks their new posts with a **NEW** badge. Select several and open them as one blended feed.
-- Opening an artist from Follows starts a **walk through what's new**: the search bar and artist notes step aside and a bar gives you
-  **Previous** / **Next** (`[` and `]`), with a count of how many new artists are still ahead. It follows the order on the page and
-  heads towards whichever end has more left, so opening the oldest alert at the bottom climbs towards the newest. Artists are marked
-  seen as you go, **Finish** (or **Following**) returns to the page where you left it.
-
-**Pools & comics**
-- Pools are classified automatically: a pool whose pages carry the `comic` tag is a **Comic**, otherwise a Series or Collection.
-- Pool page: page-numbered gallery, jump to page, save all pages (numbered, in a folder), pin all, slideshow.
-- Viewer pool bar: where you are in the pool, previous/next page (PgUp/PgDn), step into any pool a post belongs to.
-- **Comic reader**: one page, two-page spreads (cover alone, wide pages alone), or continuous scroll; left-to-right or
-  right-to-left; fit modes; zoom/pan; thumbnails; remembers where you stopped and offers *Continue reading*.
-
-**Video**
-- Custom player with a scrubber (buffered ranges + hover time), volume, speed, quality, frame-step and a loop built to avoid
-  the blank flash at the wrap point.
-- After you stop moving the mouse the info panel and filmstrip fall away and the video grows to fill the window.
-- F (or the fullscreen buttons) is true fullscreen: the window itself covers the screen.
-
-**Saved files remember where they came from**
-- Downloads carry the post's artist, tags, source links, post URL and the site's original MD5 (as XMP, plus EXIF/PNG text
-  where useful) in JPG, PNG, GIF, MP4 and WebM, so a file can always be traced back or reverse-searched later.
-  The picture/video data is untouched, but the file hash changes, which is why the original MD5 is stored inside.
-  Windows Explorer shows the title, authors and tags for JPG/PNG. Formats that can't hold metadata get a `.xmp` beside them.
-  Turn it off under Settings → Data.
-
-**Everywhere**
-- Custom title bar with working window controls, drag and edge-resizing.
-- Right-click anything for a relevant menu: tiles, the viewer, tags, chips, boards, follows, pools, the trail, the rail.
-- Live boards show an **Update board** bar when you change the search you opened from them.
-
-Press `?` in the app for all shortcuts.
-
-**Handing links over from other apps (Web Roamer):** `board-roamer --open <link>` opens a post, search or pool link from any
-supported site, starting the app if needed. When Board Roamer is already running, the same thing works with
-`POST http://127.0.0.1:4621/app/open` (the link as the request body); the window comes forward and shows it.
-
-## Notes
+### Notes
 
 - e621 asks API clients to identify themselves: set a User-Agent like `BoardRoamer/0.1 (by yourname on e621)` in
   Settings → Source. Rate limiting (≈2 req/s) is handled for you.
 - Gelbooru requires a free API key/user ID; Danbooru limits signed-out searches to 2 tags.
 - Adding a site: write an adapter in `ui/js/providers.js` (normalise to the shared post shape) and allow its host in `src/proxy.rs`.
 
-## Layout
+### Layout
 
 ```
 src/main.rs     window, static server, routing
@@ -156,65 +288,7 @@ ui/             embedded frontend (vanilla ES modules, no build step)
   vendor/           the style model and its runtime (licenses in vendor/NOTICE.md)
 ```
 
-## Library, sync and phone
-
-- **Library**: save pools and comics (Add to library on a pool, or right-click one). The Pools tab flags new pages,
-  like Follows does for artists, and remembers where you stopped reading.
-- **Tabs** (optional): right-click or long-press anything and choose *Open in new tab*, middle-click or Ctrl+click a section or
-  card, or press Ctrl+T. The tab bar appears once there is a second tab (on a phone, a count button opens a card switcher).
-  Each tab keeps its own search, results and scroll position. Ctrl+W closes, Ctrl+Tab switches, Ctrl+Shift+T reopens.
-  Settings → Look → Tabs can turn the bar off or keep it always visible.
-  On a computer the first tab is a pinned **Main** tab where you move between Roam, Boards, Follows, Pools and Trail; artists,
-  boards and pools you open from it get their own tabs (Settings → Look → *Pinned Main tab*). *Follows freshness* sets how soon
-  Follows re-checks for new posts. Each tab keeps its own Back trail: pressing Back (or the mouse's back button) at the start
-  of a tab closes it and returns you to the tab you opened it from.
-- **Home screen widgets** (Android): nine widgets in three families. *Following* (strip, list, count) shows the artists you follow
-  with their new-post counts, *Library* (covers, list, next up) shows your saved pools and comics with new pages, and *Local*
-  (folders, list, row) opens your chosen folders on this phone or another synced device. Each tap opens that screen in the app. When you add one,
-  pick its look: the app's square outlined style, or fully rounded corners that follow One UI (the default on Samsung phones). Pictures from
-  adult sources stay hidden unless you allow them, and nothing shows pictures while Blur thumbnails is on. Widgets refresh when the app updates
-  your follows and library, so open the app now and then.
-- **Links from the sites**: on Android, links to posts, searches and pools on any supported site offer Board Roamer (Settings → Links
-  turns that off, and opens Android's "Open by default" screen where "Open supported links" makes it automatic). On any device,
-  pasting such a link into the search box opens it. Derpibooru works without an account; an API key is optional and brings your own filter.
-- **Boards across several sites**: right-click a live board → *Sites & tags…* to give it a search per site (spike on e621 *and* Derpibooru).
-  Each site has its own tags; suggestions come from each site's autocomplete, and pairs you confirm are remembered and synced. Results are merged
-  newest-first and the same picture is shown once (it is matched by the sources the posts list, by links between the posts, or by a picture
-  fingerprint), using the copy from the most generous site unless another is clearly bigger; the tile shows a link badge and the viewer lists
-  where else it is. Derpibooru comics (`comic:` tags) appear on the Pools page and can be read and saved to the library like e621 pools.
-- **Folders** for boards (pin boards and live boards) and for the library's pools and comics: *New folder*, drag a card onto a
-  folder or right-click → *Move to folder*. Deleting a folder only moves its contents back out. Folders sync between devices.
-- **Local** (Settings → Local, off by default): a gallery of the pictures and videos in folders you choose, on this device and on
-  the other devices you sync with. Subfolders show up like boards; files open in the normal viewer; you can tag them (tags stay
-  in Board Roamer, never in the file) and the tags Board Roamer embedded in its own downloads are read back. Read-only.
-  *Let my other devices browse these folders* shares them over your sync connection (paired phones only). On Android it needs
-  "All files access" and keeps sharing alive with the app closed (a quiet "Sharing with your devices" notification). Mac:
-  normal folders work, a Photos library is not a folder and cannot be browsed.
-- **Notifications** (Settings → Notifications, off by default): a system notification when a check finds new posts from your
-  follows, new posts on a live board, or new pages in a saved pool. Text only, never a picture, and generic by default
-  (“New posts from your follows”, “Your boards have new updates”). You can opt in to naming followed artists. They only appear
-  while the app is in the background, and on Android's lock screen only “New activity” shows. Live boards also show a “N new” mark.
-  On Android this keeps working with the app closed (a background check about every 30 minutes, no Google services needed).
-- **#blur**: add `#blur` to a blacklist line (`wolf solo #blur`) to blur matching posts instead of hiding them. They stay
-  blurred, in the gallery and the viewer, until you tap reveal, even when blacklisting is set to Hide or Off.
-- **Sync**: Settings → Sync on the computer turns on sharing; *Add a phone* shows a QR code, and the phone's Settings → Sync →
-  *Scan the code* pairs it (a typed code works too). The computer announces itself on the home network, so a phone finds it by
-  itself, and a roommate's Board Roamer on the same Wi-Fi is simply ignored (each computer has its own id and certificate, and a
-  phone only trusts the one it scanned). The connection is encrypted and pinned to that computer's certificate. Away from home
-  it works the same way when Tailscale is installed on both; the app suggests it when it can't reach the computer. Boards, pins,
-  follows, library, trail, reading progress and look/search settings merge both ways. Logins and layout sizes stay per device.
-  Phones paired before 2.13 pair again once (old address-and-code pairings were unencrypted).
-- **Phone layout**: bottom tab bar, sheets instead of popovers, swipe/pinch/long-press gestures, pull to refresh, Back
-  button support, and a touch-friendly comic reader.
-
-**Dual-screen phones, foldables and split-screen.** On a Surface Duo with the window spanned across both screens, Board Roamer
-treats each screen as a phone: the gallery, tabs and bars stay on the first screen and the viewer, reader and settings open on
-the second, so nothing is drawn under the hinge (side by side or one above the other). The Android shell reports the hinge
-(display cutout) to the page; try the layout in a desktop browser with `?hinge=x,y,width,height` (CSS pixels, for example
-`?hinge=557,0,28,720` in a 1114 x 720 window). A single Duo screen held sideways (720 x 540) and short split-screen windows
-also use the phone layout, with slimmer bars.
-
-## Building and releasing
+### Building and releasing
 
 Every push to `main` builds all platforms in GitHub Actions (`.github/workflows/build.yml`). Pushing a tag publishes a release:
 
@@ -234,3 +308,9 @@ never committed. Create it once with `python android/build.py` (it writes `andro
 - `ANDROID_KEYSTORE_PASS`: the contents of `android/keystore.pass`
 
 Local Android build: `python android/build.py` (needs the Android SDK build-tools 34, platform 34 and a JDK).
+
+</details>
+
+---
+
+<div align="center"><sub>Made for roaming. Not affiliated with any of the sites it can browse.</sub></div>
