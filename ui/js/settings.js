@@ -19,11 +19,13 @@ let panel = null;
 
 const THEMES = [['night', 'Night Survey', '#0a1113', '#c8ff3d', 128], ['paper', 'Paper Chart', '#ece5d3', '#e8431c', 35], ['violet', 'Ultraviolet', '#0d0a18', '#ff5fd2', 335]];
 
-let offStatus = null, offUpd = null;
+let offStatus = null, offUpd = null, offKey = null;
 export function closeSettings() {
   if (!panel) return;
   offStatus?.();
   offUpd?.();
+  offKey?.();
+  offKey = null;
   const p = panel;
   panel = null;
   p.classList.remove('in');
@@ -435,13 +437,57 @@ export function openSettings(section) {
   );
 
   paintCreds();
-  panel = h('aside', { class: 'settings' },
-    h('div', { class: 'st-head' }, h('h2', {}, 'Settings'), h('button', { class: 'ibtn', html: icon('close', 18), onclick: closeSettings })),
-    h('nav', { class: 'st-nav' }, ['source', 'look', 'notifications', ...(isAndroid() ? ['links'] : []), ...(faSupported() ? ['fa'] : []), 'gallery', ...((isTouch() || isPhone()) ? ['phone'] : []), 'viewer', 'starred', 'filters', 'sync', ...(isNative() && !isAndroid() ? ['background'] : []), 'updates', 'data'].map((s) => h('button', { onclick: () => document.getElementById('st-' + s)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, s === 'filters' ? 'blacklist' : s === 'fa' ? 'Fur Affinity' : s))),
-    body);
+
+  /* --- categories: a menu of areas, each one a page holding everything for that area */
+  const phone = isPhone();
+  const CATS = [
+    ['sources', 'Sources', 'Booru site and logins, Fur Affinity, local folders', ['source', 'fa', 'local']],
+    ['look', 'Look & layout', 'Theme, home screen, tabs, gallery', ['look', 'gallery']],
+    ['viewer', 'Viewer', 'Videos, zoom, scrolling, how a post opens', ['viewer']],
+    ['filters', 'Blacklist & starred', 'Hidden tags and rules, starred artists and tags', ['filters', 'starred']],
+    ['notifications', 'Notifications', 'New posts from follows, boards and pools', ['notifications']],
+    ['device', 'This device', 'Touch, privacy, links, running in the background', ['phone', 'links', 'background']],
+    ['sync', 'Sync', 'Pair your phone and computer', ['sync']],
+    ['updates', 'Updates', 'Version and update checks', ['updates']],
+    ['data', 'Data & backup', 'Backups, saved files, reset', ['data']],
+  ];
+  const secEl = (id) => body.querySelector('#st-' + id);
+  const cats = CATS.map(([id, title, hint, ids]) => ({ id, title, hint, secs: ids.map(secEl).filter(Boolean) })).filter((c) => c.secs.length);
+  cats.forEach((c) => c.secs.forEach((e) => body.append(e)));
+  const catOf = (secId) => cats.find((c) => c.secs.some((e) => e.id === 'st-' + secId));
+  let cur = null;
+  const title = h('h2', {}, 'Settings');
+  const back = h('button', { class: 'ibtn st-back', 'aria-label': 'Back to Settings', html: icon('left', 20), onclick: () => show(null) });
+  const items = cats.map((c) => h('button', { class: 'st-item', onclick: () => show(c.id) }, h('div', {}, h('b', {}, c.title), h('small', {}, c.hint)), h('i', { class: 'st-chev', html: icon('right', 16) })));
+  const menu = h('nav', { class: 'st-menu' }, items);
+  const show = (id, scrollTo) => {
+    cur = id || (phone ? null : cats[0].id);
+    const c = cats.find((x) => x.id === cur);
+    cats.forEach((k) => k.secs.forEach((e) => { e.hidden = k !== c; }));
+    items.forEach((el, i) => el.classList.toggle('on', cats[i] === c));
+    panel.classList.toggle('page', !!c);
+    body.classList.toggle('single', !!c && c.secs.length === 1);
+    title.textContent = phone && c ? c.title : 'Settings';
+    back.hidden = !(phone && c);
+    body.scrollTop = 0;
+    if (scrollTo) secEl(scrollTo)?.scrollIntoView();
+  };
+  // Back / Esc: on a phone a page goes back to the menu first
+  const onKey = (e) => {
+    if (e.key !== 'Escape' || !phone || !cur || !panel) return;
+    e.preventDefault(); e.stopPropagation();
+    show(null);
+  };
+  window.addEventListener('keydown', onKey, true);
+  offKey = () => window.removeEventListener('keydown', onKey, true);
+
+  panel = h('aside', { class: 'settings' + (phone ? ' phone-nav' : ' wide') },
+    h('div', { class: 'st-head' }, back, title, h('button', { class: 'ibtn st-x', 'aria-label': 'Close settings', html: icon('close', 18), onclick: closeSettings })),
+    h('div', { class: 'st-main' }, menu, body));
   document.body.append(panel);
+  const target = section ? catOf(section) : null;
+  show(target?.id, section);
   requestAnimationFrame(() => panel?.classList.add('in'));
-  if (section) setTimeout(() => document.getElementById('st-' + section)?.scrollIntoView(), 50);
 }
 
 /* ------------------------------------------------------------------ shortcuts sheet */
