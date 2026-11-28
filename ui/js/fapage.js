@@ -298,16 +298,19 @@ function followingPane(ctx) {
   const list = () => subs.all().filter((f) => f.p === 'fa');
   const paint = () => {
     const fl = list();
+    const isPaused = (f) => /^Paused:/.test(f.err || '');
+    const paused = fl.filter(isPaused);
     wrap.replaceChildren(
       h('div', { class: 'fa-fl-head' },
-        h('p', {}, fl.length ? `${fl.length} artist${fl.length === 1 ? '' : 's'} you follow here. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.` : 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow.'),
+        fl.length ? null : h('p', {}, 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.'),
         h('div', { class: 'row-btns' },
           h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Reads the watch list page you can see in the Fur Affinity window, once, when you tap', onclick: () => importWatchList(paint) }),
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
+      paused.length ? h('p', { class: 'fa-fl-note', title: 'Fur Affinity asks apps to stay away while it is busy. Checks continue by themselves.' }, `Fur Affinity is busy, so checking is paused for ${paused.length === fl.length ? 'everyone' : paused.length + ' of ' + fl.length + ' artists'}. It continues by itself.`) : null,
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', 'data-fa-user': f.t, onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
         h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => cachedImg(u))),
-        h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
+        h('b', {}, pretty(f.t)), h('small', {}, f.err && !isPaused(f) ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
   };
   paint();
   const off = on('subs-progress', () => (wrap.isConnected ? paint() : off()));
