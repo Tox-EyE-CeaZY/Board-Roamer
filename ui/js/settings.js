@@ -384,6 +384,7 @@ export function openSettings(section) {
     faSupported() ? sec('fa', 'Fur Affinity',
       toggle('Fur Affinity section', 'faOn', 'A separate place to browse furaffinity.net with the gallery, viewer, follows and filters you already know. It reads the site slowly, one request a second, and never uses its search, watch feed or notes'),
       toggle('Check followed artists in the background', 'faFollowCheck', 'Off by default so nothing is requested from Fur Affinity unless you ask. Checks pause while the site is busy'),
+      seg('Check each artist about every', 'faFollowEvery', [[30, '30 min'], [60, 'Hour'], [180, '3 hours']], 'A few artists at a time, a second apart, so the site never gets a burst. Pictures and results are kept on this device, so opening Following asks the site for nothing'),
       faSettingsBox()) : null,
     sec('gallery', 'Gallery',
       seg('Layout', 'layout', [['masonry', 'Masonry'], ['rows', 'Rows'], ['grid', 'Grid']]),

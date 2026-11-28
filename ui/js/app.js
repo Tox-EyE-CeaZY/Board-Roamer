@@ -1680,6 +1680,7 @@ function boot() {
   // quietly keep followed artists fresh
   setTimeout(() => refreshAll(), parseHash().view === 'feed' ? 40000 : 4500); // the Feed is first in line for e621's request queue on launch
   setInterval(() => refreshAll(), 30 * 60 * 1000);
+  setInterval(() => refreshAll({ only: subs.all().filter((f) => f.p === 'fa') }), 6 * 60 * 1000); // Fur Affinity: a few stale artists per round (own, slower schedule; only when background checks are on)
   setTimeout(askHome, 900);
 }
 

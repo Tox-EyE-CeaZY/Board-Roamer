@@ -7,8 +7,12 @@ import { openExternal } from './actions.js';
 import { showMenu, bindContext } from './ctxmenu.js';
 import { isPhone } from './platform.js';
 import { announce } from './notify.js';
+import { cachedImg } from './thumbcache.js';
 
 const staleMs = () => (S('followsFresh') || 20) * 60 * 1000;
+// Fur Affinity artists are looked at far less often (and a few at a time) so the site is never hit with a burst
+const faStaleMs = () => (S('faFollowEvery') || 60) * 60 * 1000;
+const FA_BATCH = 10;
 let running = false;
 
 /* ================================================================== checking for new posts */
@@ -44,7 +48,13 @@ export async function checkSub(f, { background = false } = {}) {
 /** Check followed artists one by one (the proxy paces the requests). Only stale ones unless forced. */
 export async function refreshAll({ force = false, only = null } = {}) {
   if (running) return;
-  const list = (only || subs.all()).filter((f) => (force || f.p !== 'fa' || S('faFollowCheck')) && (force || !f.checked || Date.now() - f.checked > staleMs())); // Fur Affinity artists are only checked unattended when the person turned that on
+  const stale = (f) => !f.checked || Date.now() - f.checked > (f.p === 'fa' ? faStaleMs() : staleMs());
+  let list = (only || subs.all()).filter((f) => (force || f.p !== 'fa' || S('faFollowCheck')) && (force || stale(f))); // Fur Affinity artists are only checked unattended when the person turned that on
+  if (!force) {
+    // unattended: at most a small batch of the longest-unchecked Fur Affinity artists per round, the rest wait for the next
+    const fa = list.filter((f) => f.p === 'fa').sort((a, b) => (a.checked || 0) - (b.checked || 0)).slice(0, FA_BATCH);
+    list = [...list.filter((f) => f.p !== 'fa'), ...fa];
+  }
   if (!list.length) return;
   running = true;
   let done = 0;
@@ -174,7 +184,7 @@ export function renderFollows(root, ctx) {
     const prov = getProvider(f.p);
     const thumbs = (f.thumbs || []).slice(0, 4);
     const el = h('article', { 'data-hash': ctx.roamHash([{ t: f.t, op: '+' }], {}, prov.id), class: 'fcard' + (f.newCount ? ' has-new' : '') + (f.err ? ' errd' : '') + (st.sel.has(f.id) ? ' sel' : ''), tabindex: 0, 'data-id': f.id, style: `--ph:${prov.color}` },
-      h('div', { class: 'fc-thumbs' }, thumbs.length ? thumbs.map((s) => h('img', { src: s, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') })) : h('i', { class: 'fc-empty', html: icon('user', 26) })),
+      h('div', { class: 'fc-thumbs' }, thumbs.length ? thumbs.map((s) => (f.p === 'fa' ? cachedImg(s, { onload: (e) => e.target.classList.add('ready') }) : h('img', { src: s, alt: '', loading: 'lazy', draggable: 'false', onload: (e) => e.target.classList.add('ready') }))) : h('i', { class: 'fc-empty', html: icon('user', 26) })),
       f.newCount ? h('span', { class: 'fc-new', title: `${f.newCount} new since you last looked`, html: icon('sparkle', 12) + (f.newCount >= 8 ? '8+' : f.newCount) + ' new' }) : null,
       h('div', { class: 'fc-body' },
         h('h3', {}, pretty(f.t), h('span', { class: 'prov' }, prov.short)),

@@ -76,6 +76,7 @@ export const DEFAULTS = {
   localOn: false, // the Local section: browse pictures and videos in folders you choose, on this and your other devices
   localSort: 'new',
   faOn: false, // the Fur Affinity section (computers): its own place to browse furaffinity.net, apart from the boards
+  faFollowEvery: 60, // minutes before a followed Fur Affinity artist is checked again in the background
   faFollowCheck: false, // check followed Fur Affinity artists in the background (off: only when you press Check)
   notify: false, // system notifications when something new turns up (text only, never pictures)
   notifyFollows: true,
