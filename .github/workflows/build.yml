@@ -150,12 +150,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"; fi
+          # What changed: the description of the merged pull request. The app shows everything above the end-of-changes marker.
+          bash .github/scripts/release_notes.sh "$GITHUB_SHA" > "$RUNNER_TEMP/changes.md" || true
+          ANDROID="Android: Android or Play Protect may warn that the app is from an unknown source or not commonly installed. That is normal for an app installed outside Google Play. The APK asks for All files access (only for Settings > Local) and Install unknown apps (only for in-app updates). Details are in the README."
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            # a later pull request under the same version adds its notes on top of the earlier ones
+            MARK=$(grep -o '<!-- pr:[0-9]* -->' "$RUNNER_TEMP/changes.md" || true)
+            OLD=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+            if [ -s "$RUNNER_TEMP/changes.md" ] && ! grep -qF "$MARK" <<<"$OLD"; then
+              if grep -q '^<!-- end-of-changes -->$' <<<"$OLD"; then OLD_CHANGES=$(sed '/^<!-- end-of-changes -->$/,$d' <<<"$OLD"); OLD_TAIL=$(sed -n '/^<!-- end-of-changes -->$/,$p' <<<"$OLD"); else OLD_CHANGES=""; OLD_TAIL=$'<!-- end-of-changes -->\n\n'"$OLD"; fi
+              { cat "$RUNNER_TEMP/changes.md"; echo; [ -n "$OLD_CHANGES" ] && { echo "$OLD_CHANGES"; echo; }; echo "$OLD_TAIL"; } > "$RUNNER_TEMP/notes.md"
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+            fi
           else
+            { [ -s "$RUNNER_TEMP/changes.md" ] && { cat "$RUNNER_TEMP/changes.md"; echo; }; echo "<!-- end-of-changes -->"; echo; echo "$ANDROID"; } > "$RUNNER_TEMP/notes.md"
             gh release create "$TAG" dist/* \
               --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "Board Roamer ${TAG#v}" \
-              --generate-notes \
-              --notes "Android: Android or Play Protect may warn that the app is from an unknown source or not commonly installed. That is normal for an app installed outside Google Play. The APK asks for All files access (only for Settings > Local) and Install unknown apps (only for in-app updates). Details are in the README."
+              --notes-file "$RUNNER_TEMP/notes.md"
           fi

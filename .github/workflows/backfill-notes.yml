@@ -1,0 +1,34 @@
+name: Backfill release notes
+
+# One-off (run it by hand from the Actions tab): gives the newest releases the description of the pull request they came
+# from, the same way the release job does for new ones. Releases that already have notes are left alone.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many of the newest releases to look at
+        default: '30'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rewrite release bodies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=${{ inputs.count }}" --jq '.[] | [.id, .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
+            body=$(gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body)
+            if grep -q 'end-of-changes' <<<"$body"; then echo "$tag: already has notes"; continue; fi
+            sha=$(git rev-list -n1 "$tag")
+            bash .github/scripts/release_notes.sh "$sha" > changes.md || true
+            if [ ! -s changes.md ]; then echo "$tag: no pull request found"; continue; fi
+            { cat changes.md; echo; echo "<!-- end-of-changes -->"; echo; echo "$body"; } > notes.md
+            gh release edit "$tag" --notes-file notes.md
+            echo "$tag: notes added"
+          done
