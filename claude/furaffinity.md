@@ -1,6 +1,6 @@
 # Fur Affinity in Board Roamer
 
-Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by default, computers only). It is not a board: Fur Affinity (FA) has no API, so it is read by scraping pages, one request a second.
+Its own section (`#/fa`, nav "Fur Affinity" (tab "FA" on phones), Settings > Fur Affinity, off by default, desktop and Android). It is not a board: Fur Affinity (FA) has no API, so it is read by scraping pages, one request a second.
 
 ## Rules the code enforces
 - Claude agents must never browse furaffinity.net (robots.txt). Test fixtures in `tools/fa-fixtures/` are scrubbed pages Maven saved; keep them free of the account name and fav/watch/logout keys.
@@ -50,3 +50,9 @@ Maven chose (2026-11-28) a hidden background page for Watch/Unwatch even though 
 - `featured` comes from `#gallery-preview`; the `.section-submission` picture is `profileId`.
 - About keeps the bio's formatting (`richText`: bold, italic, headings, alignment, quotes, rules, links, user icons) as data, never as the page's markup. In both `richText` and `plainText`, source line breaks are spaces; only `<br>` and blocks start new lines.
 - The Watch button reads "Watched" when the page's watch button points at `/unwatch/`. It still opens the site.
+
+## Android (2.17.0)
+- Java port of the desktop rules: `android/.../FaNet.java` (allow-list, 1 s gap, cookies only on the page host, Cloudflare reported, picture Referer; JVM-testable) and `Fa.java` (`/fa/*` API, session in app-private SharedPreferences, one full-screen WebView dialog for sign-in, quick check, watch-list read, and the hidden Watch/Unwatch page which only shows when sign-in or Cloudflare needs the person). MainActivity routes `/fa/*`, FA pages in `/proxy` and FA pictures in `/img`; `Net.download` accepts FA picture hosts.
+- The webview gives request handlers no body, so `faPost` also puts its JSON in `?q=` (the desktop server ignores it).
+- UI is the same as desktop; hover preview is mouse-only; the tab bar label is "FA".
+- Unverified: never built or run on a device (no Android SDK here); only compiled against API stubs for the new files. CookieManager reading of HttpOnly cookies `a`/`b` assumed to work.

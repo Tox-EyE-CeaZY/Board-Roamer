@@ -71,6 +71,7 @@ public class MainActivity extends Activity {
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         setBars("#0a1113", true);
         Local.init(this);
+        Fa.init(this);
         web = new WebView(this);
         web.setBackgroundColor(0xFF0A1113);
         setContentView(web);
@@ -302,6 +303,12 @@ public class MainActivity extends Activity {
         String path = u.getPath();
         if (path == null || path.equals("/")) path = "/index.html";
         if (path.startsWith("/local/") || path.startsWith("/remote/")) return Local.intercept(u, r.getMethod(), r.getRequestHeaders());
+        if (path.startsWith("/fa/")) {
+            Net.Resp fr = Fa.handle(path, r.getMethod(), u.getQueryParameter("q"));
+            Map<String, String> extra = new HashMap<>();
+            extra.put("Cache-Control", "no-store");
+            return build(fr.code, fr.contentType, new ByteArrayInputStream(fr.body), extra);
+        }
         switch (path) {
             case "/proxy": return proxy(r, u);
             case "/img": return image(u);
@@ -320,6 +327,12 @@ public class MainActivity extends Activity {
     private WebResourceResponse proxy(WebResourceRequest r, Uri u) {
         String target = u.getQueryParameter("u");
         if (target == null) return text(400, "application/json", "{\"error\":\"missing u\"}");
+        if (FaNet.isFa(Net.hostOf(target))) { // Fur Affinity: its own rules and session (FaNet)
+            FaNet.Page fp = FaNet.page(r.getMethod(), target);
+            Map<String, String> fx = new HashMap<>(fp.headers);
+            fx.put("Cache-Control", "no-store");
+            return build(fp.code, fp.contentType, new ByteArrayInputStream(fp.body), fx);
+        }
         Map<String, String> h = r.getRequestHeaders();
         Net.Resp resp = Net.api(r.getMethod(), target, header(h, "x-br-ua"), header(h, "x-br-auth"), null);
         Map<String, String> extra = new HashMap<>();
@@ -331,7 +344,7 @@ public class MainActivity extends Activity {
         String target = u.getQueryParameter("u");
         if (target == null) return text(400, "application/json", "{\"error\":\"missing u\"}");
         try {
-            final HttpURLConnection c = Net.openImage(target);
+            final HttpURLConnection c = FaNet.isFa(Net.hostOf(target)) ? FaNet.openImage(target) : Net.openImage(target);
             int code = c.getResponseCode();
             if (code >= 400) { c.disconnect(); return text(code, "application/json", "{\"error\":\"upstream refused\"}"); }
             InputStream in = new FilterInputStream(c.getInputStream()) {
