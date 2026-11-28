@@ -436,7 +436,8 @@ export class Viewer {
         this.ring.hidden = true;
       };
       this._upgrade = upgrade;
-      if (isTouch()) this.ring.hidden = true;
+      // Fur Affinity's own preview is small (600px or so), so its full file is always worth fetching at once, touch screen or not
+      if (isTouch() && !post.viaProxy) this.ring.hidden = true;
       else upgrade();
     } else this.ring.hidden = true;
     img.addEventListener('load', () => {
