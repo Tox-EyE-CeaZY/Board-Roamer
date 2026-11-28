@@ -1463,6 +1463,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 /* ---------- Fur Affinity section ---------- */
 .fa-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 4px 30px 12px; }
 .fa-bar .fa-fill { flex: 1 1 0; }
+.fa-ftools { display: flex; align-items: center; gap: 8px; }
+.fa-fl-intro { margin: 0 0 12px; color: var(--dim); }
 .fa-ratings { display: inline-flex; gap: 6px; }
 .fa-rt { font: 600 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: 6px 10px; border: 1px solid var(--line2); background: transparent; color: var(--faint); cursor: pointer; }
 .fa-rt.on { color: var(--ink); border-color: currentColor; }
@@ -1472,6 +1474,7 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fa-folders, .fa-follow { padding: 4px 30px 30px; }
 .fa-fgroup h3 { font: 700 12px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 14px 0 8px; }
 .fa-fl-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.fa-fl-note { margin: 0 0 12px; padding: 7px 12px; border: 1px solid var(--line2); background: var(--bg2); color: var(--dim); font: 500 11.5px/1.4 var(--f-mono); letter-spacing: .02em; }
 .fa-fl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .fa-fl { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 10px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: 600 13px var(--f-body, inherit); }
 .fa-fl:hover { border-color: var(--accent); }
