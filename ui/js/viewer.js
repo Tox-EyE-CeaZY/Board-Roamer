@@ -296,6 +296,7 @@ export class Viewer {
         this.media?._refresh?.();
         this._relayoutMedia();
         this._paintToggles();
+        this._lookAhead();
       }).catch((e) => this.post === post && toast(e.message, { kind: 'err' }));
     }
     this._paintToggles();
@@ -457,6 +458,17 @@ export class Viewer {
     const nw = p.w || this.media?.naturalWidth || this.media?.videoWidth || 800;
     const nh = p.h || this.media?.naturalHeight || this.media?.videoHeight || 800;
     return Math.round(this.trot / 90) % 2 ? [nh, nw] : [nw, nh];
+  }
+
+  /** Fur Affinity: once this post is in, read the neighbours' pages and start the next picture, so stepping onward is instant. */
+  _lookAhead() {
+    const i = this.i, here = this.post;
+    for (const p of [this.list[i + 1], this.list[i - 1]]) {
+      if (!p?._lazy) continue;
+      getProvider(p.provider).fill(p, { prio: 2 }).then(() => {
+        if (p === this.list[i + 1] && p.kind === 'image' && p.full && this.post === here) new Image().src = '/img?u=' + encodeURIComponent(p.full);
+      }).catch(() => {});
+    }
   }
 
   /** Re-measure the stage and snap (used on resize/new post, so growing panels stay in lock-step). */

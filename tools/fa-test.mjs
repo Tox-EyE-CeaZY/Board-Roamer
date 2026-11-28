@@ -106,6 +106,12 @@ ok('submission', () => {
 const mini = await run(fixture('submission-image'), (P, d) => P.parseFigures(d));
 ok('mini-gallery thumbnails are not listed as results', () => assert.equal(mini.length, 0));
 
+/* watch list page: only the listed users, never the page's other words or links */
+const wl = await run(fixture('watchlist'), (P, d) => P.parseWatchNames(d));
+ok('watch list names (page)', () => assert.deepEqual(wl, ['wolf_artist', 'fox-guy', 'tilde.name', 'lone_wolf']));
+const wlPaste = await run(fixture('watchlist'), (P, d) => P.parseWatchNames(d, 'body'));
+ok('watch list names (pasted page: own name may appear, nothing else does)', () => assert.deepEqual(wlPaste, ['user3', 'wolf_artist', 'fox-guy', 'tilde.name', 'lone_wolf']));
+
 /* user page */
 const up = await run(fixture('userpage'), (P, d) => P.parseUserpage(d));
 ok('user page', () => {

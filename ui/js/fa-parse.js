@@ -322,10 +322,31 @@ export function parseUserpage(doc) {
     fields: [...page.querySelectorAll('#userpage-contact-item .table-row')].map((r) => [txt(r.querySelector('.userpage-profile-question')), clean(r.textContent).replace(txt(r.querySelector('.userpage-profile-question')), '').trim()]).filter(([k]) => k),
     contacts: [...page.querySelectorAll('#userpage-contact .user-contact-item')].map((c) => ({ label: txt(c.querySelector('strong')), url: c.querySelector('a[href^="http"]')?.getAttribute('href') || '', text: txt(c.querySelector('a')) })),
     featured: featured ? featured[1] : '',
+    featuredImg: (() => { const i = page.querySelector('.section-submission img'); return cdn(i?.getAttribute('src') || i?.getAttribute('data-src') || i?.getAttribute('data-preview-src')); })(),
+    featuredTitle: clean(page.querySelector('.section-submission img')?.getAttribute('alt') || ''),
     latest: parseFigures(doc, { root: '#gallery-latest-submissions' }),
     latestFavs: parseFigures(doc, { root: '#gallery-latest-favorites' }),
     shouts: parseShouts(doc),
   };
+}
+
+/**
+ * The users on a watch list page: links to user pages whose text is the user's own name. That keeps the list itself and drops
+ * everything else on the page (navigation, news, footer), which also link places but never with a user's name as their text.
+ */
+export function parseWatchNames(doc, root = '#site-content') {
+  const scope = doc.querySelector(root) || doc.body || doc;
+  const flat = (s) => String(s || '').toLowerCase().replace(/[\s_~@.\-]+/g, '');
+  const out = new Set();
+  for (const a of scope.querySelectorAll('a[href*="/user/"]')) {
+    const m = /\/user\/([^/?#]+)/.exec(a.getAttribute('href') || '');
+    if (!m) continue;
+    let name = m[1];
+    try { name = decodeURIComponent(name); } catch { /* keep */ }
+    name = name.toLowerCase();
+    if (/^[a-z0-9][a-z0-9_.~-]{0,39}$/.test(name) && flat(a.textContent) === flat(name)) out.add(name);
+  }
+  return [...out];
 }
 
 /** Shouts on a profile (markup not seen in a saved page yet: read defensively, empty when it does not match). */

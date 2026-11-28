@@ -86,13 +86,25 @@ export class FaError extends Error {
 
 /* ------------------------------------------------------------------ requests */
 let lastAt = 0;
-let chain = Promise.resolve();
+// One request at a time, a second apart. Whoever is waiting on the screen goes first (0); checks nobody is waiting on
+// (background follows, looking ahead at the next pictures) go after (2).
 const GAP = 1000;
-const serial = (fn) => {
-  const run = chain.then(fn, fn);
-  chain = run.catch(() => {});
-  return run;
-};
+const queue = [];
+let pumping = false;
+const serial = (fn, prio = 0) => new Promise((resolve, reject) => {
+  queue.push({ fn, prio, resolve, reject });
+  pump();
+});
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  while (queue.length) {
+    queue.sort((a, b) => a.prio - b.prio); // stable: first come, first served within a level
+    const job = queue.shift();
+    try { job.resolve(await job.fn()); } catch (e) { job.reject(e); }
+  }
+  pumping = false;
+}
 
 let waiters = [];
 let pollTimer = 0;
@@ -136,12 +148,12 @@ async function once(url) {
  * the request goes again once it is passed), backs off on 429 and 5xx, and never loops on a refusal.
  * `background`: work nobody asked for right now (checking follows). It is held while FA is busy or a check is pending.
  */
-export async function faHtml(url, { background = false } = {}) {
+export async function faHtml(url, { background = false, prio = background ? 2 : 0 } = {}) {
   if (!faSupported()) throw new FaError('Fur Affinity is not available on Android yet.');
   for (let attempt = 0; ; ) {
     if (background && !backgroundOk()) throw new FaError('Paused: Fur Affinity asks apps to stay away while it is busy.', { paused: true });
     await untilClear();
-    const r = await serial(() => once(url));
+    const r = await serial(() => once(url), prio);
     if (r.via === 'challenge') {
       await startChallenge();
       continue;
@@ -403,8 +415,8 @@ export function faEngine({ CATS }) {
     },
 
     /** A whole post: the submission page, with the full-size file and everything written about it. */
-    async post(id) {
-      const { doc } = await faHtml(faUrl.view(id));
+    async post(id, opts = {}) {
+      const { doc } = await faHtml(faUrl.view(id), opts);
       const s = P.parseSubmission(doc);
       if (!s) throw new FaError('That submission could not be read. It may have been removed, or it is not an ordinary submission page.');
       const th = P.thumbParts(s.preview);
@@ -415,11 +427,11 @@ export function faEngine({ CATS }) {
     },
 
     /** Fill in a post that came from a thumbnail (once, however often it is asked). */
-    fill(post) {
+    fill(post, opts = {}) {
       if (!post._lazy) return Promise.resolve(post);
       if (post._fp) return post._fp;
       // not an enumerable property: a pinned or saved copy of the post must not carry a promise
-      const pr = this.post(post.id).then((full) => {
+      const pr = this.post(post.id, opts).then((full) => {
         const { _lazy, ...rest } = full;
         Object.assign(post, rest, { _lazy: false });
         delete post._set;

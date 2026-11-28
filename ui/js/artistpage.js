@@ -2,7 +2,8 @@
    Swipe the page to the right (or press Back) to return to the post you came from. */
 import { h, pretty, fmtNum } from './util.js';
 import { icon } from './icons.js';
-import { S, subs, tagc } from './store.js';
+import { S, subs, tagc, tagLinks } from './store.js';
+import { faUserIn, faLink, faSupported } from './fa.js';
 import { getProvider, Feed } from './providers.js';
 import { Gallery } from './gallery.js';
 import { follow } from './follows.js';
@@ -21,7 +22,8 @@ const covered = () => viewerOpen() || !!document.querySelector('.sheet-back, .po
  * @returns      { close() }
  */
 export function openArtistPage(host, ctx, { provId, names, name = names[0], onClose, onFollow, openReel }) {
-  const prov = getProvider(provId);
+  const base = getProvider(provId);
+  let prov = base;
   let current = name, gal = null, feed = null, run = 0, closed = false, reel = null;
   let more = () => Promise.resolve(); // the next page of the artist shown
   const title = h('div', { class: 'fd-ap-title' });
@@ -31,13 +33,19 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     body);
 
   const hideTop = () => { const b = document.querySelector(".fab"); if (b) b.hidden = true; }; // the app's "back to top": it only follows scrolling
-  async function load(who) {
+  /**
+   * `fa`: show the artist's Fur Affinity gallery instead ({ user, folder?: { id, slug, name } }). It is the same page: the
+   * same grid and the same way a post opens, with the artist's Fur Affinity folders as chips above the posts.
+   */
+  async function load(who, fa = null) {
     hideTop();
     const mine = ++run;
-    current = who;
-    title.replaceChildren(h('b', {}, pretty(who)), h('small', {}, prov.name));
+    prov = fa ? getProvider('fa') : base;
+    if (!fa) current = who;
+    title.replaceChildren(h('b', {}, pretty(who)), h('small', {}, prov.name + (fa?.folder ? ' · ' + (fa.folder.name || 'folder') : '')));
     const count = h('span', { class: 'fd-ap-count' });
     const about = h('div', { class: 'fd-ap-about' });
+    const folderRow = h('div', { class: 'fd-ap-others fd-ap-folders', hidden: true });
     const followBtn = h('button', { class: 'btn', onclick: () => { follow(who, prov.id); paintFollow(); onFollow?.(); } });
     const paintFollow = () => {
       const on = !!subs.find(prov.credKey, who);
@@ -46,11 +54,14 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     };
     paintFollow();
     const info = h('div', { class: 'fd-ap-info' },
-      names.length > 1 ? h('div', { class: 'fd-ap-others' }, names.map((n) => h('button', { class: 'fd-chip' + (n === who ? ' on' : ''), onclick: () => n !== current && load(n) }, pretty(n)))) : null,
+      !fa && names.length > 1 ? h('div', { class: 'fd-ap-others' }, names.map((n) => h('button', { class: 'fd-chip' + (n === who ? ' on' : ''), onclick: () => n !== current && load(n) }, pretty(n)))) : null,
       h('div', { class: 'fd-ap-name' }, h('h2', {}, pretty(who)), count),
       about,
       h('div', { class: 'fd-btnrow' }, followBtn,
-        h('button', { class: 'btn', html: icon('search', 15) + '<span>Open in search</span>', onclick: () => ctx.go(ctx.roamHash([{ t: who, op: '+' }], null, prov.id)) })));
+        fa ? h('button', { class: 'btn', html: icon('left', 15) + `<span>Back to ${base.name}</span>`, onclick: () => load(current) })
+          : h('button', { class: 'btn', html: icon('search', 15) + '<span>Open in search</span>', onclick: () => ctx.go(ctx.roamHash([{ t: who, op: '+' }], null, prov.id)) }),
+        fa ? h('button', { class: 'btn', html: icon('external', 15) + '<span>Open on Fur Affinity</span>', onclick: () => ctx.go(`#/fa/user/${encodeURIComponent(fa.user)}`) }) : null),
+      folderRow);
 
     const scroller = h('div', { class: 'gal' });
     body.replaceChildren(scroller);
@@ -65,6 +76,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
     });
     gal.setFoot(status);
     feed = new Feed(prov, [{ t: who, op: '+' }], { order: '', score: 0, ratings: S('filters').ratings, media: '', shape: '', age: '' });
+    if (fa) feed.fa = fa.folder ? { kind: 'folder', user: fa.user, folder: { id: fa.folder.id, slug: fa.folder.slug || '' } } : { kind: 'gallery', user: fa.user };
     let fetching = null;
     /** The next page; asked again while one is on its way, it hands back the same wait. */
     more = () => {
@@ -77,6 +89,14 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
         if (mine !== run || closed) return;
         gal.append(posts);
         status.textContent = feed.done ? (gal.length ? 'That is everything' : 'No posts to show') : '';
+        // Fur Affinity: the artist's folders, as soon as their first page has said what they are
+        const groups = fa && feed.pageInfo?.folders;
+        if (groups?.length && folderRow.hidden) {
+          const all = groups.flatMap((g) => g.folders).filter((f) => f.id);
+          folderRow.replaceChildren(h('button', { class: 'fd-chip' + (fa.folder ? '' : ' on'), onclick: () => load(who, { user: fa.user }) }, 'All'),
+            ...all.map((f) => h('button', { class: 'fd-chip' + (fa.folder?.id === f.id ? ' on' : ''), title: `${f.count || ''} submissions`.trim(), onclick: () => load(who, { user: fa.user, folder: f }) }, f.name)));
+          folderRow.hidden = !all.length;
+        }
       } catch (e) {
         status.replaceChildren(h('span', {}, e.message + ' '), h('button', { class: 'btn', onclick: () => ((status.textContent = 'Loading posts…'), more()) }, 'Try again'));
       }
@@ -85,6 +105,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
 
     // post count, other names and links, as they arrive
     try {
+      if (fa) return;
       let tag = tagc.get(prov.id, who);
       if (!tag?.count && prov.tagInfo) {
         tag = await prov.tagInfo(who);
@@ -95,10 +116,19 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
       const a = prov.artist ? await prov.artist(who) : null;
       if (mine !== run || !a) return;
       const links = (a.urls || []).filter((u) => /^https?:/.test(u)).slice(0, 10);
+      const faOn = faSupported() && S('faOn');
+      const faUser = faOn ? faUserIn(a.urls) || tagLinks.suggest(prov.credKey, who, 'fa') || '' : '';
+      const openLink = (u) => {
+        const l = faOn && faLink(u);
+        if (l?.user) return (tagLinks.link([{ key: prov.credKey, tag: who }, { key: 'fa', tag: l.user }]), ctx.go(l.hash)); // a Fur Affinity link opens in the app
+        openExternal(u);
+      };
       about.replaceChildren(
         a.other?.length ? h('p', {}, 'Also known as ', a.other.slice(0, 6).map(pretty).join(', ')) : null,
         a.group ? h('p', {}, 'Group: ', pretty(a.group)) : null,
-        links.length ? h('div', { class: 'fd-ap-links' }, links.map((u) => h('button', { title: u, onclick: () => openExternal(u) }, u.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]))) : null);
+        links.length ? h('div', { class: 'fd-ap-links' }, links.map((u) => h('button', { title: u, onclick: () => openLink(u) }, u.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]))) : null,
+        faUser ? h('div', { class: 'fd-btnrow' }, h('button', { class: 'btn', title: 'Their Fur Affinity gallery and folders, in this same view', html: icon('paw', 15) + `<span>${pretty(faUser)} on Fur Affinity</span>`, onclick: () => (tagLinks.link([{ key: prov.credKey, tag: who }, { key: 'fa', tag: faUser }]), load(faUser, { user: faUser })) }),
+          h('button', { class: 'btn', html: icon('external', 15) + '<span>Open the full page</span>', onclick: () => ctx.go(`#/fa/user/${encodeURIComponent(faUser)}`) })) : null);
     } catch {
       /* the posts matter more than the notes about them */
     }
