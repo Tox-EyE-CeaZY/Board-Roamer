@@ -174,14 +174,15 @@ final class Net {
     /** Stream a file to disk. Used for saves and shares. */
     static void download(String target, String ua, File out) throws IOException {
         String host = hostOf(target);
-        if (!allowed(host)) throw new IOException("host not allowed");
-        throttle(host);
+        boolean fa = FaNet.isFa(host) && !FaNet.isPageHost(host); // Fur Affinity's picture hosts, with FA's own Referer
+        if (!allowed(host) && !fa) throw new IOException("host not allowed");
+        if (!fa) throttle(host);
         HttpURLConnection c = (HttpURLConnection) new URL(target).openConnection();
         try {
             c.setConnectTimeout(15_000);
             c.setReadTimeout(120_000);
             c.setRequestProperty("User-Agent", ua == null || ua.isEmpty() ? DEFAULT_UA : ua);
-            c.setRequestProperty("Referer", referer(host));
+            c.setRequestProperty("Referer", fa ? "https://www.furaffinity.net/" : referer(host));
             int code = c.getResponseCode();
             if (code >= 400) throw new IOException("HTTP " + code);
             try (InputStream in = c.getInputStream(); FileOutputStream o = new FileOutputStream(out)) {

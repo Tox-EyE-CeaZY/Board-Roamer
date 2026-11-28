@@ -71,7 +71,7 @@ const appbar = h('header', { id: 'appbar' },
   h('button', { class: 'ibtn', 'aria-label': 'Cloak the screen', onclick: () => toggleCloak(), html: icon('cloak', 21) }),
   h('button', { class: 'ibtn', 'aria-label': 'Settings', onclick: () => openSettings(), html: icon('settings', 21) }));
 const tabbar = h('nav', { id: 'tabbar', 'aria-label': 'Sections' }, h('i', { class: 'tab-ind' }),
-  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, label), id === 'follows' ? tabBadge : id === 'pools' ? poolTabBadge : id === 'boards' ? boardTabBadge : null)));
+  NAV.map(([id, label, ic]) => h('a', { class: 'tab', href: '#/' + id, 'data-view': id }, h('span', { class: 'tab-ic', html: icon(ic, 23) }), h('span', { class: 'tab-t' }, id === 'fa' ? 'FA' : label), id === 'follows' ? tabBadge : id === 'pools' ? poolTabBadge : id === 'boards' ? boardTabBadge : null)));
 const fab = h('button', { class: 'fab', hidden: true, 'aria-label': 'Back to top', onclick: () => document.querySelector('#v-roam:not([hidden]) .gal, #v-other:not([hidden]) .gal, #v-other:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' }), html: icon('up', 22) });
 const ptr = h('div', { class: 'ptr', 'aria-hidden': 'true', html: icon('refresh', 20) });
 document.body.append(appbar, tabbar, fab);

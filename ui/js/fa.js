@@ -11,13 +11,12 @@
  */
 import { kv, emit, voted } from './store.js';
 import { sleep } from './util.js';
-import { isAndroid } from './platform.js';
 import * as P from './fa-parse.js';
 
 const enc = encodeURIComponent;
 export const FA_ID = 'fa';
-/** Windows, macOS and Linux builds only: the sign-in window and the proxy rules live in the desktop app. */
-export const faSupported = () => !isAndroid();
+/** Every build: the desktop app's sign-in window and proxy rules live in src/, the Android app's in Fa.java and FaNet.java. */
+export const faSupported = () => true;
 
 export const faUrl = {
   front: () => P.FA_WEB + '/',
@@ -73,7 +72,8 @@ export async function faStatus() {
   touch();
   return faState;
 }
-export const faPost = (path, body) => fetch('/fa/' + path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }).then((r) => r.json().catch(() => ({})));
+// the arguments also travel in the address (`q`): Android's webview gives its request handler no request body
+export const faPost = (path, body) => fetch('/fa/' + path + (body ? '?q=' + encodeURIComponent(JSON.stringify(body)) : ''), { method: 'POST', body: body ? JSON.stringify(body) : undefined }).then((r) => r.json().catch(() => ({})));
 export const faLogin = () => faPost('login');
 export const faVerify = () => faPost('verify');
 /** Opens the person's own watch list in the Fur Affinity window (they sign in there if asked); the names come back through `faWatchNames`. */
@@ -169,7 +169,6 @@ async function once(url) {
  * `background`: work nobody asked for right now (checking follows). It is held while FA is busy or a check is pending.
  */
 export async function faHtml(url, { background = false, prio = background ? 2 : 0 } = {}) {
-  if (!faSupported()) throw new FaError('Fur Affinity is not available on Android yet.');
   for (let attempt = 0; ; ) {
     if (background && !backgroundOk()) throw new FaError('Paused: Fur Affinity asks apps to stay away while it is busy.', { paused: true });
     await untilClear();
