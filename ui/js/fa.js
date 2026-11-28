@@ -12,6 +12,7 @@
 import { kv, emit, voted } from './store.js';
 import { sleep } from './util.js';
 import * as P from './fa-parse.js';
+import { isAndroid, native } from './platform.js';
 
 const enc = encodeURIComponent;
 export const FA_ID = 'fa';
@@ -129,13 +130,52 @@ async function pump() {
 let waiters = [];
 let pollTimer = 0;
 let starting = false;
+/* ------------------------------------------------------------------ diagnostics log (Settings > Fur Affinity > Diagnostics)
+   What the verification flow did, for finding out why it fails. Never a cookie value, a password or a query string. The app's
+   own lines are kept here (and survive a restart); the desktop / Android side adds its own (windows, cookies present or not). */
+const LOG_CAP = 300;
+let appLog = kv.get('faLog', []);
+let logTimer = 0;
+const where = (url) => { try { return new URL(url, P.FA_WEB).pathname.slice(0, 80); } catch { return '?'; } };
+export function faLog(m) {
+  appLog.push({ t: Date.now(), m: String(m).slice(0, 300) });
+  if (appLog.length > LOG_CAP) appLog.splice(0, appLog.length - LOG_CAP);
+  clearTimeout(logTimer);
+  logTimer = setTimeout(() => kv.set('faLog', appLog), 1500);
+}
+const clock = (t) => { const d = new Date(t); return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0'); };
+/** The whole log as text, oldest first, with a header saying what this is running on and the session's state (booleans only). */
+export async function faLogText() {
+  let native = [];
+  try { native = (await (await fetch('/fa/log')).json()).lines || []; } catch { /* the app is closing */ }
+  await faStatus();
+  const all = [...appLog.map((l) => ({ ...l, s: 'app' })), ...native.map((l) => ({ ...l, s: isAndroid() ? 'phone' : 'desktop' }))].sort((a, b) => a.t - b.t);
+  let app = {};
+  try { app = await (await import('./updates.js')).appInfo(); } catch { /* unknown */ }
+  let dev = '';
+  try { if (isAndroid()) { const i = native.info(); dev = ` (${i.device || '?'}, SDK ${i.sdk || '?'})`; } } catch { /* unknown */ }
+  const head = [
+    `Board Roamer ${app.version || '?'} on ${isAndroid() ? 'Android' + dev : [app.os, app.arch].filter(Boolean).join(' ') || 'desktop'}`,
+    `Now: signed in ${faState.connected}, check passed ${faState.cleared}, check showing ${faState.challenge}, session ${faState.gen}`,
+    `${new Date().toString()}`,
+    '',
+  ];
+  return head.concat(all.length ? all.map((l) => `${clock(l.t)} [${l.s}] ${l.m}`) : ['(nothing logged yet)']).join('\n');
+}
+export async function faLogClear() {
+  appLog = [];
+  kv.set('faLog', appLog);
+  await fetch('/fa/log', { method: 'POST' }).catch(() => {});
+}
+
 /** One polite look at the page that was asked for (a check can be set on one page and not another), to find out whether the check has been passed (the banner must not outlive it). */
 async function checkPassed(url) {
   try {
     const r = await serial(() => once(url || P.FA_WEB + '/'), 1);
     if (r.via === 'challenge' || r.res.status === 503) return false;
     return !P.inspect(P.parseHtml(r.text)).challenge;
-  } catch {
+  } catch (e) {
+    faLog(`look at ${where(url)} failed: ${String(e.message || e).slice(0, 120)}`);
     return false;
   }
 }
@@ -150,17 +190,19 @@ async function startChallenge(url) {
   if (faState.challenge) return;
   const gen0 = faState.gen;
   faState.challenge = true;
+  faLog(`check detected on ${where(url)}: waiting for the person to pass it (session ${gen0}, signed in ${faState.connected}, check cookie ${faState.cleared})`);
   touch();
   clearInterval(pollTimer);
   let ticks = 0, probing = false;
   pollTimer = setInterval(async () => {
     await faStatus();
-    if (faState.gen !== gen0) return endChallenge();
+    if (faState.gen !== gen0) return (faLog(`session changed (${gen0} -> ${faState.gen}): check ended`), endChallenge());
     // the session can already have changed before this started watching, so the generation alone is not proof: look every few seconds
     if (++ticks % 4 || probing) return;
     probing = true;
     const ok = await checkPassed(url);
     probing = false;
+    faLog(`looked at ${where(url)} again: ${ok ? 'passed' : 'still blocked'} (after ${Math.round(ticks * 1.5)} s)`);
     if (ok) endChallenge();
   }, 1500);
 }
@@ -168,6 +210,7 @@ export function endChallenge() {
   clearInterval(pollTimer);
   if (!faState.challenge) return;
   faState.challenge = false;
+  faLog('check over: waiting requests continue');
   touch();
   waiters.splice(0).forEach((r) => r());
 }
@@ -198,12 +241,14 @@ export async function faHtml(url, { background = false, prio = background ? 2 : 
     await untilClear();
     const r = await serial(() => once(url), prio);
     if (r.via === 'challenge') {
+      faLog(`${where(url)} answered with a Cloudflare check (HTTP ${r.res.status})`);
       await startChallenge(url);
       continue;
     }
     if (r.res.status === 403 && /robots/.test(r.text)) throw new FaError('Fur Affinity asks apps not to open that page. It opens in your browser instead.', { robots: true });
     if (r.res.status === 404) throw new FaError('Fur Affinity says that page does not exist (it may have been removed).', { status: 404 });
     if (r.res.status === 429 || r.res.status >= 500) {
+      faLog(`${where(url)} answered HTTP ${r.res.status} (try ${attempt + 1})`);
       if (++attempt > 3) throw new FaError(`Fur Affinity is not answering (HTTP ${r.res.status}). Try again in a minute.`, { status: r.res.status });
       faState.backoff = 2000 * 2 ** attempt;
       touch();
@@ -216,6 +261,7 @@ export async function faHtml(url, { background = false, prio = background ? 2 : 
     const doc = P.parseHtml(r.text);
     const info = P.inspect(doc);
     if (info.challenge) {
+      faLog(`${where(url)} loaded, but it is the check page`);
       await startChallenge(url);
       continue;
     }

@@ -83,11 +83,28 @@ static CREDS: OnceLock<Mutex<Creds>> = OnceLock::new();
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// The names the person's own watch list page showed in the app's Fur Affinity window (read once by the page).
 static WATCH: Mutex<Option<Vec<String>>> = Mutex::new(None);
+/// The diagnostics log (Settings > Fur Affinity > Diagnostics): newest last, capped. Never holds a cookie value, a password or a query string.
+static LOG: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+pub fn log(msg: impl Into<String>) {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let mut l = LOG.lock().unwrap();
+    l.push((t, msg.into().chars().take(300).collect()));
+    if l.len() > 400 {
+        l.remove(0);
+    }
+}
+/// The path of an address without its query, so a log line cannot carry anything personal.
+pub fn log_path(url: &str) -> String {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let path = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
+    path.split(['?', '#']).next().unwrap_or("/").chars().take(80).collect()
+}
 
 /// The outcome of the last Watch / Unwatch the background page did: {user, watching, ok, error}.
 static ACT: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 
 pub fn set_act(user: &str, watching: bool, error: &str) {
+    log(format!("watch result for {user}: watching={watching}{}", if error.is_empty() { String::new() } else { format!(", problem: {error}") }));
     *ACT.lock().unwrap() = Some(serde_json::json!({ "user": user, "watching": watching, "ok": error.is_empty(), "error": error }));
 }
 
@@ -172,6 +189,7 @@ pub fn set_from_window(a: Option<&str>, b: Option<&str>, clearance: Option<&str>
         c.ua = u.chars().take(400).collect();
     }
     let changed = before != (c.a.clone(), c.b.clone(), c.clearance.clone(), c.ua.clone());
+    log(format!("session from window: a/b {}, clearance {}, changed: {changed}", if sane(&c.a) && sane(&c.b) { "kept" } else { "missing" }, if sane(&c.clearance) { "kept" } else { "missing" }));
     if changed {
         let snap = c.clone();
         drop(c);
@@ -217,11 +235,21 @@ pub fn status() -> serde_json::Value {
 pub fn request(mut rq: Request, path: &str) {
     match (path, rq.method().clone()) {
         ("/fa/status", _) => json(rq, 200, status()),
+        ("/fa/log", Method::Post) => {
+            LOG.lock().unwrap().clear();
+            json(rq, 200, serde_json::json!({ "ok": true }))
+        }
+        ("/fa/log", _) => {
+            let lines: Vec<_> = LOG.lock().unwrap().iter().map(|(t, m)| serde_json::json!({ "t": t, "m": m })).collect();
+            json(rq, 200, serde_json::json!({ "lines": lines }))
+        }
         ("/fa/login", Method::Post) => {
+            log("sign-in window requested");
             crate::appcfg::send_event("fa:login".into());
             json(rq, 200, serde_json::json!({ "ok": true }))
         }
         ("/fa/verify", Method::Post) => {
+            log("quick-check window requested");
             crate::appcfg::send_event("fa:verify".into());
             json(rq, 200, serde_json::json!({ "ok": true }))
         }
@@ -263,6 +291,7 @@ pub fn request(mut rq: Request, path: &str) {
             json(rq, 200, serde_json::json!({ "result": got }))
         }
         ("/fa/disconnect", Method::Post) => {
+            log("disconnected: session cleared");
             clear();
             crate::appcfg::send_event("fa:close".into());
             json(rq, 200, status())
