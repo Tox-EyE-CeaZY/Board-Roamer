@@ -46,13 +46,14 @@ export function plainText(el) {
   const out = [];
   const walk = (n) => {
     for (const c of n.childNodes) {
-      if (c.nodeType === 3) out.push(c.nodeValue);
+      // a line break in the page's source is only a space, as in a browser: <br> and blocks are what make new lines
+      if (c.nodeType === 3) out.push(c.nodeValue.replace(/\s+/g, ' '));
       else if (c.nodeType === 1) {
         const tag = c.tagName.toLowerCase();
         if (tag === 'br') out.push('\n');
         else if (tag === 'script' || tag === 'style') continue;
         else {
-          const block = /^(p|div|h[1-6]|li|tr|section)$/.test(tag);
+          const block = /^(p|div|h[1-6]|li|tr|section|blockquote|hr)$/.test(tag) || /\bbbcode_(center|right|left|quote|h[1-6]|hr)\b/.test(c.getAttribute('class') || '');
           if (block && out.length && !/\n$/.test(out[out.length - 1])) out.push('\n');
           walk(c);
           if (block) out.push('\n');
@@ -62,6 +63,67 @@ export function plainText(el) {
   };
   walk(el);
   return out.join('').replace(/[ \t ]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const STYLES = { b: 'b', strong: 'b', i: 'i', em: 'i', u: 'u', s: 's', strike: 's', del: 's', sup: 'sup', sub: 'sub', blockquote: 'quote', p: 'block', div: 'block', li: 'block' };
+
+/**
+ * Formatted text (a profile's bio) as plain data: strings and {t, kids} for bold, italic, headings, alignment, quotes, links,
+ * user icons, line breaks and rules. Only these kinds come out, so the screen never receives the page's own markup. No more
+ * than one empty line in a row is kept.
+ */
+export function richText(el) {
+  if (!el) return [];
+  const isBr = (n) => n?.t === 'br';
+  const walk = (node) => {
+    const out = [];
+    let breaks = 0;
+    const push = (n) => {
+      if (isBr(n)) {
+        if (++breaks > 2) return;
+      } else if (typeof n !== 'string' || n.trim()) breaks = 0;
+      out.push(n);
+    };
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) {
+        const t = c.nodeValue.replace(/\s+/g, ' ');
+        if (t) push(t);
+        continue;
+      }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName.toLowerCase();
+      const cls = c.getAttribute('class') || '';
+      if (/^(script|style|template|noscript|iframe)$/.test(tag) || /\bsmilie\b/.test(cls)) continue;
+      if (tag === 'br') push({ t: 'br' });
+      else if (tag === 'hr' || /\bbbcode_hr\b/.test(cls)) push({ t: 'hr' });
+      else if (tag === 'img') push(clean(c.getAttribute('alt')));
+      else if (tag === 'a') {
+        const href = (c.getAttribute('href') || '').trim();
+        const user = /\b(iconusername|linkusername)\b/.test(cls) ? nameFromHref(href) : '';
+        if (user) {
+          const img = c.querySelector('img');
+          push({ t: 'user', user, name: txt(c), icon: cdn(img?.getAttribute('src')) });
+          continue;
+        }
+        const url = href && !href.startsWith('#') ? abs(href) : '';
+        const kids = walk(c);
+        if (/^https?:\/\//i.test(url)) push({ t: 'a', href: url, kids: kids.length ? kids : [url] });
+        else kids.forEach(push);
+      } else {
+        const level = (/^h([1-6])$/.exec(tag) || /\bbbcode_h([1-6])\b/.exec(cls) || [])[1];
+        const kind = level ? 'h' : (/\bbbcode_(center|right|left|quote|b|i|u|s|sup|sub)\b/.exec(cls) || [])[1] || STYLES[tag];
+        const kids = walk(c);
+        if (!kind) kids.forEach(push);
+        else if (kids.length) push(level ? { t: kind, level: +level, kids } : { t: kind, kids });
+      }
+    }
+    return out;
+  };
+  const out = walk(el);
+  const empty = (n) => isBr(n) || (typeof n === 'string' && !n.trim());
+  while (out.length && empty(out[0])) out.shift();
+  while (out.length && empty(out[out.length - 1])) out.pop();
+  return out;
 }
 
 /* ------------------------------------------------------------------ page health */
@@ -317,6 +379,7 @@ export function parseUserpage(doc) {
   return {
     ...head,
     bio: plainText(page.querySelector('.userpage-layout-profile .userpage-profile')),
+    bioRich: richText(page.querySelector('.userpage-layout-profile .userpage-profile')),
     stats,
     watchers: count('.watched-by-block'),
     watching_count: count('.is-watching-block'),
@@ -383,6 +446,25 @@ export function parseFeaturedJournal(page) {
     };
   }
   return null;
+}
+
+/**
+ * The users on a watch list page: links to user pages whose text is the user's own name. That keeps the list itself and drops
+ * everything else on the page (navigation, news, footer), which also link places but never with a user's name as their text.
+ */
+export function parseWatchNames(doc, root = '#site-content') {
+  const scope = doc.querySelector(root) || doc.body || doc;
+  const flat = (s) => String(s || '').toLowerCase().replace(/[\s_~@.\-]+/g, '');
+  const out = new Set();
+  for (const a of scope.querySelectorAll('a[href*="/user/"]')) {
+    const m = /\/user\/([^/?#]+)/.exec(a.getAttribute('href') || '');
+    if (!m) continue;
+    let name = m[1];
+    try { name = decodeURIComponent(name); } catch { /* keep */ }
+    name = name.toLowerCase();
+    if (/^[a-z0-9][a-z0-9_.~-]{0,39}$/.test(name) && flat(a.textContent) === flat(name)) out.add(name);
+  }
+  return [...out];
 }
 
 /** Shouts on a profile (markup not seen in a saved page yet: read defensively, empty when it does not match). */

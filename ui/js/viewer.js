@@ -10,6 +10,8 @@ import { isPhone, isTouch, isAndroid, haptic, native } from './platform.js';
 import { toggleFullscreen, isFullscreen, setFullscreen } from './titlebar.js';
 import { renderDText } from './dtext.js';
 import { makeDoc } from './fadoc.js';
+import { openExternal } from './actions.js';
+import { faSupported, faPostIn } from './fa.js';
 
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 
@@ -49,6 +51,9 @@ export class Viewer {
   /* ============================================================ structure */
   _build() {
     const btn = (name, tip, fn, cls = '') => h('button', { class: 'vbtn ' + cls, title: tip, 'aria-label': tip, onclick: fn, html: icon(name, 19) });
+    // shown only when the post's sources name its Fur Affinity page: a small jump into the app's Fur Affinity section
+    this.bFa = btn('paw', 'Also on Fur Affinity: open it in Board Roamer', () => this.bFa.dataset.u && openExternal(this.bFa.dataset.u));
+    this.bFa.hidden = true;
     this.bg = h('div', { class: 'vw-bg' });
     this.counter = h('span', { class: 'vw-count' });
     this.title = h('div', { class: 'vw-title' });
@@ -89,6 +94,7 @@ export class Viewer {
       this.bSaveDesk,
       btn('copy', 'Copy post link (C)', () => this.copyLink(), 'v-desk'),
       btn('external', 'Open on site (O)', () => this.openSite(), 'v-desk'),
+      this.bFa,
       this.bPanel,
       btn('keyboard', 'Shortcuts (?)', () => this.help(), 'v-desk'),
       this.bMore,
@@ -296,6 +302,7 @@ export class Viewer {
         this.media?._refresh?.();
         this._relayoutMedia();
         this._paintToggles();
+        this._lookAhead();
       }).catch((e) => this.post === post && toast(e.message, { kind: 'err' }));
     }
     this._paintToggles();
@@ -459,6 +466,17 @@ export class Viewer {
     return Math.round(this.trot / 90) % 2 ? [nh, nw] : [nw, nh];
   }
 
+  /** Fur Affinity: once this post is in, read the neighbours' pages and start the next picture, so stepping onward is instant. */
+  _lookAhead() {
+    const i = this.i, here = this.post;
+    for (const p of [this.list[i + 1], this.list[i - 1]]) {
+      if (!p?._lazy) continue;
+      getProvider(p.provider).fill(p, { prio: 2 }).then(() => {
+        if (p === this.list[i + 1] && p.kind === 'image' && p.full && this.post === here) new Image().src = '/img?u=' + encodeURIComponent(p.full);
+      }).catch(() => {});
+    }
+  }
+
   /** Re-measure the stage and snap (used on resize/new post, so growing panels stay in lock-step). */
   _relayoutMedia(reset) {
     const m = this.media;
@@ -565,7 +583,7 @@ export class Viewer {
   }
 
   _wheel(e) {
-    if (e.target.closest('.vw-panel,.pc')) return;
+    if (e.target.closest('.vw-panel,.pc,.media.doc')) return; // a reading page scrolls itself (_holdScroll keeps the page behind still)
     e.preventDefault();
     if (S('wheel') === 'nav' && !e.ctrlKey) {
       const now = performance.now();
@@ -617,7 +635,7 @@ export class Viewer {
   }
 
   _pdown(e) {
-    if (e.target.closest('button,.pc,.vw-panel')) return;
+    if (e.target.closest('button,.pc,.vw-panel,.media.doc')) return; // reading pages: let the browser scroll and select
     this.stage.setPointerCapture?.(e.pointerId);
     if (!this.pointers.size) this._settle();
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -984,6 +1002,9 @@ export class Viewer {
     const prov = getProvider(p.provider);
     this.bFav.hidden = !prov.fav;
     this.bUp.hidden = !prov.vote;
+    const faSrc = p.provider !== 'fa' && faSupported() && S('faOn') ? faPostIn(p.sources) : '';
+    this.bFa.hidden = !faSrc;
+    this.bFa.dataset.u = faSrc;
     this.bFav.title = prov.localLikes ? 'Favorite here (V): saved in Board Roamer only, not on ' + prov.name : 'Favorite (V)';
     this.bUp.title = prov.localLikes ? 'Upvote here (U): saved in Board Roamer only, not on ' + prov.name : 'Upvote (U)';
     this.bFav.classList.toggle('local', !!prov.localLikes);
@@ -1068,7 +1089,7 @@ export class Viewer {
   }
 
   openSite() {
-    fetch('/open?u=' + encodeURIComponent(this.post.url), { method: 'POST' });
+    openExternal(this.post.url, this.post.provider === 'fa'); // a Fur Affinity post's own address leaves the app
   }
 
   help() {
@@ -1159,6 +1180,13 @@ export class Viewer {
     }
     if (document.querySelector('.dlg-back,.help-back') || menuOpen()) return;
     const pl = this.isVideo ? this.player : null;
+    const doc = this.stage.querySelector('.doc-body');
+    if (doc && !e.shiftKey && doc.scrollHeight > doc.clientHeight + 1) {
+      // reading a story: up/down, page keys, space, home/end scroll the text; left/right still move between posts
+      const page = doc.clientHeight * 0.9;
+      const by = { arrowup: -60, arrowdown: 60, pageup: -page, pagedown: page, ' ': page, home: -1e9, end: 1e9 }[e.key === ' ' ? ' ' : k];
+      if (by) return stop(), doc.scrollBy({ top: by }), this._wake();
+    }
     const nav = (d) => () => this.go(d);
     const map = {
       arrowright: () => (e.shiftKey && pl ? pl.seekBy(5) : this.go(1)), d: nav(1), j: nav(1),
@@ -1278,7 +1306,7 @@ export class Viewer {
 
   _infoTab(p, prov) {
     const row = (k, v) => v == null || v === '' ? null : h('div', { class: 'ir' }, h('span', {}, k), h('b', {}, v));
-    const openSrc = (s) => fetch('/open?u=' + encodeURIComponent(s), { method: 'POST' });
+    const openSrc = (s) => openExternal(s);
     const src = p.sources.length ? h('div', { class: 'srcs' }, p.sources.slice(0, 8).map((s) =>
       /^https?:/.test(s)
         ? h('a', { href: '#', title: s, onclick: (e) => (e.preventDefault(), openSrc(s)), oncontextmenu: (e) => (e.preventDefault(), e.stopPropagation(), showMenu(e.clientX, e.clientY, [{ label: 'Open in browser', icon: 'external', run: () => openSrc(s) }, { label: 'Copy link', icon: 'copy', run: () => copyText(s) }])) }, host(s), h('i', { html: icon('external', 11) }))

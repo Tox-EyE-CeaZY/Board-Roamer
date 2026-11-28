@@ -16,12 +16,13 @@ import { S, setS, on, subs, kv, tagLinks } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented, dialog } from './ui.js';
-import { selBar, openExternal, downloadMany } from './actions.js';
+import { selBar, openExternal as openExt, downloadMany } from './actions.js';
+const openExternal = (u) => openExt(u, true); // this section's own buttons are the ones that leave the app
 import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faPosts } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faName, faPosts } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -214,7 +215,7 @@ function renderHome(root, ctx, p) {
 
   const tabs = segmented([['front', 'Latest'], ['browse', 'Browse'], ['following', 'Following'], ['seen', 'Seen'], ['liked', 'Liked here']], tab, (v) => ctx.go(hashOf('', { t: v === 'front' ? '' : v })));
   const open = nameBox('Open an artist…  e.g. a user name', (name, input, enter) => {
-    const user = name.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_');
+    const user = faName(name);
     if (user) ctx.go(hashOf('/user/' + enc(user)));
   });
   const head = h('div', { class: 'vhead' },
@@ -279,8 +280,8 @@ function followingPane(ctx) {
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
-        h('span', { class: 'fa-fl-thumbs' }, (f.thumbs || []).slice(0, 3).map((u) => h('img', { src: u, alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))),
-        h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new` : f.checked ? 'checked ' + ago(f.checked) : 'not checked yet')))));
+        h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => h('img', { src: '/img?u=' + encodeURIComponent(u), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }))),
+        h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
   };
   paint();
   const off = on('subs-progress', () => (wrap.isConnected ? paint() : off()));
@@ -289,17 +290,6 @@ function followingPane(ctx) {
 const P_WATCH = 'https://www.furaffinity.net/msg/submissions/';
 const P_BUDDY = 'https://www.furaffinity.net/controls/buddylist/';
 
-/** Names in text copied from the watch list page (one per line, with whatever else the page has around them). */
-const NOT_NAMES = new Set(['watching', 'watched', 'by', 'remove', 'next', 'previous', 'prev', 'page', 'view', 'options', 'edit', 'watchlist', 'list', 'users', 'user', 'you', 'your', 'the', 'and', 'all', 'none', 'select', 'save', 'cancel', 'search', 'home', 'browse', 'settings', 'logout', 'notes', 'messages', 'submissions', 'favorites', 'journals', 'gallery', 'scraps', 'plus', 'watch', 'unwatch', 'block', 'online', 'offline', 'new', 'old', 'of', 'to', 'is', 'in', 'on']);
-export function namesFromWatchText(text) {
-  const seen = new Set();
-  for (const raw of String(text || '').split(/[\s,;|]+/)) {
-    const t = raw.replace(/^[@~]+/, '').replace(/[()\[\]{}"'.:]+$/g, '').toLowerCase();
-    if (/^[a-z0-9][a-z0-9_.~-]{1,29}$/.test(t) && !NOT_NAMES.has(t) && !/^\d+$/.test(t)) seen.add(t);
-  }
-  return [...seen];
-}
-
 /** One-time import: nothing is requested from the site. The person opens their own watch list in their browser and pastes it. */
 async function importWatchList(done) {
   const have = new Set(subs.all().filter((f) => f.p === 'fa').map((f) => f.t));
@@ -307,13 +297,24 @@ async function importWatchList(done) {
   const list = h('div', { class: 'fa-imp', hidden: true });
   let picks = [];
   const preview = () => {
-    const names = namesFromWatchText(area.value).filter((n) => !have.has(n));
+    // typed one per line; a paste is read from its links (see the paste handler), never by guessing at words
+    const names = [...new Set(area.value.split(/\r?\n/).map((l) => l.trim().toLowerCase().replace(/^[@~]+/, '')).filter((l) => /^[a-z0-9][a-z0-9_.~-]{0,39}$/.test(l)))].filter((n) => !have.has(n) && n !== (faState.me || '').toLowerCase());
     picks = names.map((n) => ({ n, on: true }));
     list.hidden = !names.length;
     list.replaceChildren(h('p', { class: 'st-note' }, `${names.length} name${names.length === 1 ? '' : 's'} found. Untick anything that is not an artist.`),
       h('div', { class: 'fa-imp-grid' }, picks.map((p) => h('label', { class: 'fa-imp-i' }, h('input', { type: 'checkbox', checked: true, onchange: (e) => (p.on = e.target.checked) }), p.n))));
   };
   area.addEventListener('input', debounce(preview, 200));
+  area.addEventListener('paste', async (e) => {
+    const html = e.clipboardData?.getData('text/html');
+    e.preventDefault();
+    if (!html) { status.textContent = 'That copy had no links in it, so the artists can not be told apart from the other words on the page. Use the button above, or type one name per line.'; return; }
+    const P = await import('./fa-parse.js');
+    const names = P.parseWatchNames(P.parseHtml(html), 'body');
+    area.value = names.join('\n');
+    status.textContent = names.length ? `Read ${names.length} names from the pasted page.` : 'No artists were found in that. Is it the watch list page?';
+    preview();
+  });
   const status = h('p', { class: 'st-note' }, '');
   let timer = 0;
   const auto = h('button', { class: 'btn primary', html: icon('download', 15) + '<span>Open my watch list and import it</span>', onclick: async () => {
@@ -329,10 +330,10 @@ async function importWatchList(done) {
     }, 1500);
   } });
   const body = h('div', { class: 'dlg-text' },
-    h('p', {}, 'Board Roamer opens your own watch list page in its Fur Affinity window, the same page you would open yourself, and reads the names you see there. It makes that one visit only when you tap, and follows nothing until you confirm the list.'),
+    h('p', {}, 'Board Roamer opens your own watch list page in its Fur Affinity window, the same page you would open yourself, and reads the names you see there. It visits the list (one page at a time, a second apart, if it has several pages) only when you tap, and follows nothing until you confirm the list.'),
     h('div', { class: 'row-btns' }, auto, h('button', { class: 'btn', onclick: () => openExternal(P_BUDDY), html: icon('external', 14) + '<span>Open it in my browser</span>' })),
     status,
-    h('details', {}, h('summary', {}, 'Or paste the page by hand'), h('p', { class: 'st-note' }, 'Select the whole watch list page (Ctrl+A), copy it (Ctrl+C), and paste it here.'), area),
+    h('details', {}, h('summary', {}, 'Or paste the page by hand'), h('p', { class: 'st-note' }, 'Select the whole watch list page in your browser (Ctrl+A), copy it (Ctrl+C), and paste it here. The artists are read from the page’s links.'), area),
     list);
   const r = await dialog({ title: 'Import my watch list', body, wide: true, actions: [{ label: 'Cancel', value: false }, { label: 'Follow these artists', cls: 'primary', value: true }] });
   clearInterval(timer);
@@ -341,6 +342,43 @@ async function importWatchList(done) {
   for (const p of add) subs.add({ p: 'fa', t: p.n, cat: 'artist' }); // no check per artist: "Check for new" (or the background option) does that, one request a second
   toast(add.length ? `Following ${add.length} artist${add.length === 1 ? '' : 's'} from your watch list. Press “Check for new” when you want to look for new art` : 'Nothing new to add', { ms: 3600 });
   done?.();
+}
+
+
+const noSuchUser = (e) => e.status === 400 || e.status === 404;
+
+/** A user page that would not load: a friendly "no such user" for 400/404, otherwise the plain error. */
+function missingUser(e, name, ctx) {
+  const gone = noSuchUser(e);
+  if (!gone) return h('div', { class: 'empty-state err' }, h('h2', {}, 'That did not load'), h('p', {}, e.message));
+  const tried = faName(name);
+  return h('div', { class: 'empty-state err' }, h('h2', {}, 'No artist called “' + name + '” on Fur Affinity'),
+    h('p', {}, 'Fur Affinity names have no spaces or underscores (“barbie wire” is “barbiewire”). Check the spelling, or look the artist up on e621 to find their Fur Affinity link.'),
+    h('div', { class: 'row-btns' },
+      h('button', { class: 'btn', onclick: () => ctx.go('#/fa') }, 'Back'),
+      h('button', { class: 'btn primary', html: icon('search', 15) + '<span>Search e621 for “' + tried + '”</span>', onclick: async () => { const t = await pickE621Artist(tried); if (t) ctx.go(ctx.roamHash([{ t, op: '+' }], null, 'e621')); } })));
+}
+
+/** Which e621 artist tag does this Fur Affinity name mean? Asks when unsure; remembers the answer. */
+async function pickE621Artist(name) {
+  const e6 = getProvider('e621');
+  const bare = faName(name);
+  const seen = new Map();
+  for (const q of new Set([name, bare, bare + '*'])) {
+    try { for (const t of await e6.autocomplete(q)) if (t.cat === 'artist' && !seen.has(t.name)) seen.set(t.name, t); } catch {}
+  }
+  const norm = (t) => faName(t.replace(/_\(artist\)$/, ''));
+  const list = [...seen.values()].filter((t) => norm(t.name).includes(bare) || bare.includes(norm(t.name))).sort((a, b) => (norm(b.name) === bare) - (norm(a.name) === bare) || (b.count || 0) - (a.count || 0)).slice(0, 8);
+  const link = (t) => (tagLinks.link([{ key: 'fa', tag: name }, { key: 'e621', tag: t }]), t);
+  if (list.length === 1 && norm(list[0].name) === bare) return link(list[0].name);
+  if (!list.length) return bare;
+  const rows = list.map((t, i) => h('label', { class: 'pick-row' }, h('input', { type: 'radio', name: 'e6pick', value: t.name, checked: i === 0 }), h('span', {}, pretty(t.name)), h('span', { class: 'dim' }, ' · ' + fmtNum(t.count || 0) + ' posts')));
+  const body = h('div', {}, h('p', {}, 'Which e621 tag is “' + name + '”?'), ...rows);
+  const r = await dialog({ title: 'Which artist?', body, actions: [{ label: 'Cancel', value: null }, { label: 'Search “' + bare + '” as typed', value: 'raw' }, { label: 'Search this one', cls: 'primary', value: 'ok' }] });
+  if (r === 'raw') return bare;
+  if (r !== 'ok') return null;
+  const pick = body.querySelector('input:checked');
+  return pick ? link(pick.value) : null;
 }
 
 /* ------------------------------------------------------------------ an artist */
@@ -355,18 +393,22 @@ function renderUser(root, ctx, name, p) {
   const avatar = h('div', { class: 'fa-av' }, h('span', {}, name.slice(0, 1).toUpperCase()));
   const stats = h('div', { class: 'fa-nums', hidden: true });
   const actions = h('div', { class: 'fa-act' });
+  let watching = false; // what their page says about your watch on Fur Affinity (known once it has loaded, when signed in)
   const paintFollow = () => {
     const on = !!subs.find('fa', name);
     actions.replaceChildren(...[
       h('button', { class: 'btn' + (on ? ' primary' : ''), title: 'Board Roamer’s own follow: new posts show up in Follows. It does not watch them on Fur Affinity', onclick: () => (follow(name, 'fa'), setTimeout(paintFollow, 50)), html: icon(on ? 'bellOn' : 'bell', 15) + `<span>${on ? 'Following' : 'Follow'}</span>` }),
-      home ? h('button', { class: 'btn', title: 'Fur Affinity does not let apps watch for you: its page opens in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon('eye', 15) + '<span>Watch on Fur Affinity</span>' }) : null,
+      home ? h('button', { class: 'btn fa-watch' + (watching ? ' primary' : ''), title: watching ? 'You watch them on Fur Affinity. Their page there opens in your browser' : 'Fur Affinity does not let apps watch for you: its page opens in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon(watching ? 'check' : 'eye', 15) + `<span>${watching ? 'Watched' : 'Watch on Fur Affinity'}</span>` }) : null,
       home ? h('button', { class: 'btn', onclick: () => openExternal(faUrl.journals(name)), html: icon('book', 15) + '<span>Journals</span>', title: 'Journals open on Fur Affinity' }) : null,
       linked(name),
     ].filter(Boolean));
   };
   const linked = (n) => {
     const e6 = tagLinks.suggest('fa', n, 'e621');
-    return h('button', { class: 'btn', title: e6 ? `Same artist on e621 as ${pretty(e6)}` : 'Look for this artist on e621', onclick: () => ctx.go(ctx.roamHash([{ t: e6 || n, op: '+' }], null, 'e621')), html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
+    return h('button', { class: 'btn', title: e6 ? `Same artist on e621 as ${pretty(e6)}` : 'Look for this artist on e621', onclick: async () => {
+      const tag = e6 || (await pickE621Artist(n));
+      if (tag) ctx.go(ctx.roamHash([{ t: tag, op: '+' }], null, 'e621'));
+    }, html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
   };
   const tabs = segmented([['profile', 'Home'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
   const hero = h('header', { class: 'fa-hero' + (home ? '' : ' slim') },
@@ -387,7 +429,11 @@ function renderUser(root, ctx, name, p) {
   const paintInfo = (u) => {
     title.textContent = u.display || pretty(name);
     const parts = [`@${u.lower || name}`, u.title, u.registered ? 'joined ' + new Date(u.registered).toLocaleDateString(undefined, { year: 'numeric', month: 'short' }) : '', u.aliases?.length ? 'was ' + u.aliases.slice(0, 3).join(', ') : ''].filter(Boolean);
-    sub.replaceChildren(...[parts.join(' · '), u.watching ? h('em', { class: 'fa-watching' }, 'You watch them on Fur Affinity') : null].filter(Boolean));
+    sub.replaceChildren(...[parts.join(' · '), u.watching && !home ? h('em', { class: 'fa-watching' }, 'Watched') : null].filter(Boolean));
+    if (u.watching != null && watching !== u.watching) {
+      watching = u.watching;
+      paintFollow();
+    }
     if (u.avatar && !pictured) {
       pictured = true;
       const img = h('img', { alt: '', draggable: 'false', onload: () => avatar.classList.add('has'), onerror: (e) => e.target.remove() });
@@ -412,8 +458,11 @@ function renderUser(root, ctx, name, p) {
           profileBody(host, u, name, ctx);
         };
         repaint();
-      }).catch((e) => host.replaceChildren(h('div', { class: 'empty-state err' }, h('h2', {}, e.needsLogin ? 'Sign in to Fur Affinity' : 'That did not load'), h('p', {}, e.message),
-        h('div', { class: 'row-btns' }, e.needsLogin ? h('button', { class: 'btn primary', onclick: () => faLogin() }, 'Sign in') : null, h('button', { class: 'btn', onclick: load }, 'Try again')))));
+      }).catch((e) => {
+        if (noSuchUser(e)) return host.replaceChildren(missingUser(e, name, ctx));
+        host.replaceChildren(h('div', { class: 'empty-state err' }, h('h2', {}, e.needsLogin ? 'Sign in to Fur Affinity' : 'That did not load'), h('p', {}, e.message),
+          h('div', { class: 'row-btns' }, e.needsLogin ? h('button', { class: 'btn primary', onclick: () => faLogin() }, 'Sign in') : null, h('button', { class: 'btn', onclick: load }, 'Try again'))));
+      });
     };
     load();
     const off = on('settings', (e) => (!host.isConnected ? off() : ['blacklist', 'blacklistMode', 'blurThumbs'].includes(e.detail.key) && repaint?.()));
@@ -458,11 +507,31 @@ function linkify(text) {
   let at = 0;
   for (const m of String(text).matchAll(/https?:\/\/[^\s<>"')]+/g)) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExternal(m[0])) }, m[0]));
+    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExt(m[0])) }, m[0]));
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
   return out;
+}
+
+/** A bio with its formatting, built from `richText`'s data. `go` opens a user's page. Addresses typed as plain text become links. */
+function richNodes(nodes, go, inLink = false) {
+  return nodes.flatMap((n) => {
+    if (typeof n === 'string') return inLink ? n : linkify(n);
+    if (n.t === 'br' || n.t === 'hr') return h(n.t);
+    if (n.t === 'user') {
+      const label = n.name || n.user;
+      const text = h('span', { hidden: !!n.icon && !n.name }, label);
+      const img = n.icon ? h('img', { src: '/img?u=' + enc(n.icon), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => (e.target.remove(), (text.hidden = false)) }) : null;
+      return h('a', { href: '#', class: 'fa-uicon', title: label, onclick: (e) => (e.preventDefault(), go(n.user)) }, ...[img, text].filter(Boolean));
+    }
+    const kids = richNodes(n.kids || [], go, inLink || n.t === 'a');
+    if (n.t === 'a') return h('a', { href: '#', title: n.href, onclick: (e) => (e.preventDefault(), openExt(n.href)) }, ...kids);
+    if (n.t === 'h') return h('h' + Math.min(6, n.level + 2), {}, ...kids);
+    if (n.t === 'quote') return h('blockquote', {}, ...kids);
+    if (['center', 'right', 'left', 'block'].includes(n.t)) return h('div', { class: 'fa-al-' + n.t }, ...kids);
+    return h(['b', 'i', 'u', 's', 'sup', 'sub'].includes(n.t) ? n.t : 'span', {}, ...kids);
+  });
 }
 
 const panel = (title, extra, ...body) => h('section', { class: 'fa-panel' }, h('header', {}, h('h3', {}, title), extra), ...body);
@@ -473,11 +542,14 @@ const dateOf = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { yea
 function folded(cls, ...kids) {
   const body = h('div', { class: 'fa-fold ' + cls }, ...kids);
   const more = h('button', { class: 'fa-link fa-more', hidden: true, onclick: () => { more.textContent = body.classList.toggle('open') ? 'Show less' : 'Read more'; } }, 'Read more');
-  requestAnimationFrame(() => {
+  const measure = () => {
+    if (body.classList.contains('open')) return;
     const over = body.scrollHeight > body.clientHeight + 4;
     more.hidden = !over;
     body.classList.toggle('over', over);
-  });
+  };
+  requestAnimationFrame(measure);
+  body.addEventListener('load', measure, true); // user icons arriving can make it taller
   return [body, more];
 }
 
@@ -603,7 +675,7 @@ function profileBody(host, u, name, ctx) {
       u.fields?.length ? h('dl', { class: 'fa-info' }, u.fields.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, ...linkify(v))))) : null);
   };
   const contact = () => u.contacts?.length ? panel('Contact', null,
-    h('dl', { class: 'fa-info' }, u.contacts.map((c) => h('div', {}, h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', title: c.url, onclick: (e) => (e.preventDefault(), openExternal(c.url)) }, c.text || c.url) : c.text))))) : null;
+    h('dl', { class: 'fa-info' }, u.contacts.map((c) => h('div', {}, h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', title: c.url, onclick: (e) => (e.preventDefault(), openExt(c.url)) }, c.text || c.url) : c.text))))) : null;
 
   const st = u.stats || {};
   const table = [['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Comments earned', st['comments earned']], ['Comments made', st['comments made']], ['Journals', st.journals]].filter(([, v]) => v != null);
@@ -612,7 +684,7 @@ function profileBody(host, u, name, ctx) {
     list?.length ? h('div', { class: 'fa-people' }, list.map((x) => h('button', { onclick: () => go(x.user) }, x.display || pretty(x.user)))) : null) : null;
 
   const main = [
-    u.bio ? panel('About', null, ...folded('fa-pf-bio', ...linkify(u.bio))) : null,
+    u.bioRich?.length || u.bio ? panel('About', null, ...(u.bioRich?.length ? folded('fa-pf-bio rich', ...richNodes(u.bioRich, go)) : folded('fa-pf-bio', ...linkify(u.bio)))) : null,
     showcase('Gallery', u.featured, u.latest, 'gallery'),
     showcase('Favorites', u.favPreview, u.latestFavs, 'favs', true),
     shouts(),

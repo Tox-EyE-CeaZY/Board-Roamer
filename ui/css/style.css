@@ -820,7 +820,6 @@ html.native:not(.maxed):not(.fullscreen) .rz { display: block; }
 .nav-badge { position: absolute; top: 8px; right: 8px; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; font: 800 10px var(--f-mono); background: var(--hot); color: #000; }
 .nav-i { position: relative; }
 
-
 /* ============================================================ context menus */
 .ctxm { position: fixed; z-index: 1200; min-width: 220px; max-width: 360px; max-height: calc(100vh - 12px); overflow-y: auto; padding: 5px 0; background: var(--bg2); border: 1px solid var(--line2); border-top: 3px solid var(--accent);
   box-shadow: 0 24px 60px oklch(0 0 0 / .5); opacity: 0; transform: translateY(6px) scale(.98); transform-origin: top left; transition: opacity .12s, transform .16s var(--ease); outline: 0; }
@@ -1090,7 +1089,6 @@ video.media { background: transparent; backface-visibility: hidden; }
 @media (hover: hover) {
   .chip.collapse:hover { color: var(--accent); }
 }
-
 
 /* ---- boards: pin boards vs live searches ---- */
 .bsec { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 22px 30px 0; }
@@ -1458,6 +1456,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fa-fl { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 10px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: 600 13px var(--f-body, inherit); }
 .fa-fl:hover { border-color: var(--accent); }
 .fa-fl-thumbs { display: flex; gap: 3px; height: 56px; overflow: hidden; }
+.fa-fl-thumbs.empty { align-items: center; justify-content: center; background: var(--bg3, rgba(255,255,255,.04)); }
+.fa-fl-thumbs.empty::before { content: attr(data-i); font: 700 26px var(--f-head, inherit); color: var(--dim); opacity: .6; }
 .fa-fl-thumbs img { flex: 1 1 0; min-width: 0; object-fit: cover; height: 100%; }
 .fa-banner { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg3); color: var(--ink); border: 1px solid var(--accent); border-left-width: 4px; font: 500 12.5px var(--f-mono); cursor: pointer; box-shadow: 0 6px 24px #0006; }
 .fa-banner[hidden] { display: none; }
@@ -1483,6 +1483,8 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .media.doc h2 { margin: 0; font: 800 26px/1.15 var(--f-display, inherit); letter-spacing: -.02em; }
 .media.doc .doc-by, .media.doc .doc-meta { margin: 0; font: 500 12px var(--f-mono); color: var(--faint); letter-spacing: .04em; }
 .media.doc .doc-body { flex: 1 1 auto; overflow: auto; white-space: pre-wrap; font: 400 16px/1.7 var(--f-body, Georgia, serif); max-width: 62ch; user-select: text; }
+.media.doc .doc-body { touch-action: pan-y; overscroll-behavior: contain; }
+.media.doc .doc-pdf { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: #fff; }
 .media.doc .doc-note { color: var(--dim); font: 500 13px var(--f-mono); }
 .media.doc-music { height: auto !important; max-height: 86%; align-items: center; text-align: center; }
 .media.doc-music .doc-desc { text-align: left; max-height: 30vh; }
@@ -1492,6 +1494,9 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fa-imp { margin-top: 10px; max-height: 32vh; overflow: auto; }
 .fa-imp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; font: 500 12px var(--f-mono); }
 .fa-imp-i { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.walkbar .wb-fa { flex: 0 0 auto; }
+.walkbar .wb-fa[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ Fur Affinity: an artist's page */
 /* every grid track is minmax(0, ..) and every flex child may shrink: long names, links and picture rows never push the page sideways */
@@ -1540,6 +1545,16 @@ html.phone .walkbar .wb-back { flex: 0 0 52px; }
 .fa-fold { max-height: 8.4em; overflow: hidden; line-height: 1.6; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .fa-fold.over:not(.open) { -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
 .fa-fold.open { max-height: none; }
+.fa-fold.rich { white-space: normal; }
+.fa-fold.rich h3, .fa-fold.rich h4, .fa-fold.rich h5, .fa-fold.rich h6 { margin: .2em 0; font-family: var(--f-display); line-height: 1.25; color: var(--ink); }
+.fa-fold.rich h3 { font-size: 22px; } .fa-fold.rich h4 { font-size: 19px; } .fa-fold.rich h5 { font-size: 16px; } .fa-fold.rich h6 { font-size: 14px; }
+.fa-fold.rich b { color: var(--ink); }
+.fa-fold.rich hr { border: 0; border-top: 1px solid var(--line2); margin: .7em 0; }
+.fa-fold.rich blockquote { margin: .5em 0; padding: 4px 12px; border-left: 3px solid var(--line2); }
+.fa-al-center { text-align: center; } .fa-al-right { text-align: right; } .fa-al-left { text-align: left; }
+.fa-uicon { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+.fa-uicon img { width: 40px; height: 40px; object-fit: cover; }
+.fa-uicon span[hidden] { display: none; }
 .fa-more { margin-top: 10px; color: var(--accent); }
 .fa-more[hidden] { display: none; }
 

@@ -27,7 +27,7 @@ import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute
 import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText, dialog } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
-import { downloadMany, selBar, openExternal, savePost } from './actions.js';
+import { downloadMany, selBar, openExternal, savePost, interceptLinks } from './actions.js';
 import * as actions from './actions.js';
 import { initTitlebar, isNative, windowCommand } from './titlebar.js';
 import { showMenu, bindContext, closeMenu, menuOpen } from './ctxmenu.js';
@@ -1140,14 +1140,37 @@ function paintWalk(strict = false) {
   const last = walk.i >= walk.ids.length - 1;
   const nextBtn = h('button', { class: 'btn primary wb-next', title: last ? 'You have reached the end' : 'Next artist with new posts (])', onclick: () => (last ? walkLeave('That’s everything new — all caught up') : walkStep(walk.i + 1)) },
     h('span', {}, last ? 'Finish' : 'Next'), !last && after ? h('b', { class: 'wb-n' }, after) : h('i', { html: icon(last ? 'check' : 'right', 15) }));
+  const faBtn = h('button', { class: 'btn wb-fa', hidden: true, title: 'This artist links a Fur Affinity page: open it in Board Roamer', html: icon('paw', 15) + '<span>Fur Affinity</span>' });
+  const stepAt = walk.i;
+  faFor(getProvider(f.p), f.t).then((u) => {
+    if (!u || walk?.i !== stepAt || !faBtn.isConnected) return;
+    faBtn.hidden = false;
+    faBtn.onclick = () => (tagLinks.link([{ key: getProvider(f.p).credKey, tag: f.t }, { key: 'fa', tag: u }]), go(`#/fa/user/${encodeURIComponent(u)}`));
+  });
   walkBar.replaceChildren(
     h('button', { class: 'btn wb-back', title: 'Back to Following', onclick: () => walkLeave(), html: icon('left', 15) + '<span>Following</span>' }),
     h('div', { class: 'wb-mid' },
       h('span', { class: 'wb-k' }, `${walk.i + 1} of ${walk.ids.length}`),
       h('b', { class: 'wb-name' }, pretty(f.t))),
+    faBtn,
     h('button', { class: 'btn wb-prev', title: 'Previous artist ([)', disabled: walk.i === 0, onclick: () => walkStep(walk.i - 1), html: icon('left', 15) + '<span>Previous</span>' }),
     nextBtn);
   walkBar.hidden = false;
+}
+
+/** The Fur Affinity user an artist links (their wiki or a saved link), '' when none or the section is off. Asked once per artist. */
+const faMemo = new Map();
+function faFor(pv, name) {
+  if (!S('faOn') || !faSupported() || pv.id === 'fa') return Promise.resolve('');
+  const key = pv.id + '|' + name;
+  if (!faMemo.has(key)) {
+    faMemo.set(key, (async () => {
+      const saved = tagLinks.suggest(pv.credKey, name, 'fa');
+      if (saved) return saved;
+      try { return faUserIn((await pv.artist?.(name))?.urls); } catch { return ''; }
+    })());
+  }
+  return faMemo.get(key);
 }
 
 /* ---------- dossier */
@@ -1599,6 +1622,14 @@ function boot() {
   buildRail();
   paintLocalNav();
   initFaBanner();
+  // any Fur Affinity link the app can show opens inside it, wherever it was clicked
+  interceptLinks((url) => {
+    if (!S('faOn') || !faSupported()) return false;
+    const l = faLink(url);
+    if (!l) return false;
+    go(l.hash);
+    return true;
+  });
   on('settings', (e) => (e.detail.key === 'localOn' || e.detail.key === 'faOn') && paintLocalNav());
   paintDial();
   paintFollowBadge();

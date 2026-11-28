@@ -106,10 +106,23 @@ ok('submission', () => {
 const mini = await run(fixture('submission-image'), (P, d) => P.parseFigures(d));
 ok('mini-gallery thumbnails are not listed as results', () => assert.equal(mini.length, 0));
 
+/* watch list page: only the listed users, never the page's other words or links */
+const wl = await run(fixture('watchlist'), (P, d) => P.parseWatchNames(d));
+ok('watch list names (page)', () => assert.deepEqual(wl, ['wolf_artist', 'fox-guy', 'tilde.name', 'lone_wolf']));
+const wlPaste = await run(fixture('watchlist'), (P, d) => P.parseWatchNames(d, 'body'));
+ok('watch list names (pasted page: own name may appear, nothing else does)', () => assert.deepEqual(wlPaste, ['user3', 'wolf_artist', 'fox-guy', 'tilde.name', 'lone_wolf']));
+
 /* user page */
 const up = await run(fixture('userpage'), (P, d) => P.parseUserpage(d));
 ok('user page', () => {
-  assert.equal(up.lower, 'user3'); assert.equal(up.bio, 'Hello there\nSome bio text\nsecond line');
+  assert.equal(up.lower, 'user3'); assert.equal(up.bio, 'Hello there\nSome bio text\nsecond line\n\nCentered a link', 'source line breaks are spaces, one empty line at most');
+  const bio = up.bioRich;
+  assert.deepEqual([bio[0].t, bio[0].level], ['h', 2]);
+  assert.equal(bio.filter((n) => n.t === 'br').length, 3, 'a run of breaks keeps one empty line');
+  const mid = bio.find((n) => n.t === 'center');
+  assert.deepEqual(mid.kids[0], { t: 'b', kids: ['Centered'] });
+  assert.deepEqual(mid.kids.find((n) => n.t === 'a'), { t: 'a', href: 'https://example.com/x', kids: ['a link'] });
+  assert.deepEqual(mid.kids.find((n) => n.t === 'user'), { t: 'user', user: 'user93', name: '', icon: 'https://a.furaffinity.net/1700000000/user93.gif' });
   assert.equal(up.stats.views, 100053); assert.equal(up.stats.submissions, 229); assert.equal(up.stats['comments earned'], 2514);
   assert.equal(up.watchers, 6242); assert.equal(up.watching_count, 69);
   assert.deepEqual([up.featured.id, up.featured.title, up.featured.rating, up.featured.thumb], ['10000014', 'Sample Title', 'mature', 'https://t.furaffinity.net/10000014@600-1700000015.jpg']);

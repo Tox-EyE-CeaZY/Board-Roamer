@@ -192,6 +192,9 @@ struct FaWin {
     /// reading the person's own watch list: opens it once signed in, takes the names off the page, closes
     watch: bool,
     went: bool,
+    /// names collected so far across the watch list's pages, and the pages already read
+    acc: Vec<String>,
+    seen: std::collections::HashSet<String>,
 }
 
 fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy<String>, login: bool, watch: bool, icon: Option<Icon>) -> Option<FaWin> {
@@ -217,13 +220,14 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
         let vbox = window.default_vbox()?;
         builder.build_gtk(vbox).ok()?
     };
-    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false })
+    Some(FaWin { webview, window, _ctx: ctx, login, watch, went: false, acc: Vec::new(), seen: Default::default() })
 }
 
 /// A page finished loading in the sign-in window: ask it who it is and what it is showing; the answer comes back as "fa:info:...".
 fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
-    // on the watch list page it also reads the names the person can see there (links to user pages in the page's content)
-    let js = "JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,names:/^\\/controls\\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*=\\\"/user/\\\"]')].map(a=>(/\\/user\\/([^/?#]+)/.exec(a.getAttribute('href'))||[])[1]).filter(Boolean))]:[]})";
+    // on the watch list page it also reads the users listed there: links to user pages whose text is that user's own name
+    // (the list itself; navigation, news and the footer never match). Same rule as parseWatchNames in ui/js/fa-parse.js.
+    let js = r#"JSON.stringify({ua:navigator.userAgent,title:document.title,path:location.pathname,host:location.hostname,next:(()=>{if(!/^\/controls\/buddylist/.test(location.pathname))return '';const ok=a=>{const u=new URL(a.href,location.href);return u.hostname==='www.furaffinity.net'&&/^\/(controls\/buddylist|watchlist)/.test(u.pathname)&&!/remove|add/.test(u.search)&&u.href!==location.href};const as=[...document.querySelectorAll('#site-content a[href]')].filter(a=>{try{return ok(a)}catch(e){return false}});const a=as.find(a=>a.rel==='next'||/^\s*(next|older|>|>>|›|»)|next/i.test(a.textContent)&&!/prev|back/i.test(a.textContent))||as.find(a=>/[?&]page=/.test(a.href)&&!/prev/i.test(a.textContent)&&Number((/[?&]page=(\d+)/.exec(a.href)||[])[1])>Number((/[?&]page=(\d+)/.exec(location.search)||[,1])[1]));return a?a.href:''})(),names:/^\/controls\/buddylist/.test(location.pathname)?[...new Set([...document.querySelectorAll('#site-content a[href*="/user/"]')].map(a=>{const m=/\/user\/([^/?#]+)/.exec(a.getAttribute('href')||'');if(!m)return '';let n=m[1];try{n=decodeURIComponent(n)}catch(e){}const f=s=>String(s||'').toLowerCase().replace(/[\s_~@.\-]+/g,'');return f(a.textContent)===f(n)?n:''}).filter(Boolean))]:[]})"#;
     let _ = w.webview.evaluate_script_with_callback(js, move |raw| {
         // the callback gets the JSON text of a string; unwrap that once
         let inner: String = serde_json::from_str(&raw).unwrap_or_default();
@@ -232,7 +236,7 @@ fn fa_probe(w: &FaWin, events: EventLoopProxy<String>) {
 }
 
 /// Read what the site gave the window, keep it (src/fa.rs), and close the window once it has done its job.
-fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str) {
+fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy<String>) {
     let Some(w) = fa_win.as_ref() else { return };
     let v: serde_json::Value = serde_json::from_str(info).unwrap_or_default();
     if !v["host"].as_str().unwrap_or("").ends_with("furaffinity.net") {
@@ -247,8 +251,26 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str) {
     if w.watch {
         let names: Vec<String> = v["names"].as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default();
         if path.starts_with("/controls/buddylist") && !names.is_empty() {
-            fa::set_watch(names);
-            *fa_win = None;
+            let next = v["next"].as_str().unwrap_or("").to_string();
+            let before = w.acc.len();
+            let Some(w) = fa_win.as_mut() else { return };
+            for n in names {
+                if !w.acc.contains(&n) {
+                    w.acc.push(n);
+                }
+            }
+            let grew = w.acc.len() > before;
+            // more pages: one request a second, stop on a repeat, on a page with nothing new, or after 100 pages
+            if !next.is_empty() && grew && w.seen.len() < 100 && w.seen.insert(next.clone()) {
+                let _ = w.window.set_title(&format!("Fur Affinity: your watch list ({} so far)", w.acc.len()));
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1100));
+                    let _ = events.send_event(format!("fa:next:{next}"));
+                });
+            } else {
+                fa::set_watch(std::mem::take(&mut w.acc));
+                *fa_win = None;
+            }
         } else if !checking && !path.starts_with("/login") && !path.starts_with("/controls/buddylist") && fa::connected() {
             // signed in but on some other page (just after signing in): go to the watch list once
             if let Some(w) = fa_win.as_mut() {
@@ -484,7 +506,14 @@ fn main() {
                         }
                     }
                     "fa:close" => fa_forget_window(&mut fa_win),
-                    c if c.starts_with("fa:info:") => fa_handle_info(&mut fa_win, &c[8..]),
+                    c if c.starts_with("fa:info:") => fa_handle_info(&mut fa_win, &c[8..], fa_events.clone()),
+                    c if c.starts_with("fa:next:") => {
+                        if let Some(w) = &fa_win {
+                            if c[8..].starts_with("https://www.furaffinity.net/") {
+                                let _ = w.webview.load_url(&c[8..]);
+                            }
+                        }
+                    }
                     "fs:1" => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
                     "fs:0" => window.set_fullscreen(None),
                     c if c.starts_with("title:") => window.set_title(&c[6..]),
