@@ -4,6 +4,7 @@ import { getProvider } from './providers.js';
 import { toast, promptText } from './ui.js';
 import { downloadMany, openExternal, savePost } from './actions.js';
 import { isAndroid, native } from './platform.js';
+import { faUrl, faLink } from './fa.js';
 
 /**
  * Context-menu builders shared by the gallery, viewer, filmstrip, boards, pools and follows views.
@@ -26,6 +27,7 @@ export const M = {
   toggleLibPool: () => {}, // (provId, pool, post)
   pin: () => {}, // (posts, x, y)
   share: () => {},
+  go: () => {}, // (hash) open a route inside the app
 };
 
 export function boardSub(posts) {
@@ -95,7 +97,7 @@ export function postMenu(post, { gallery, open, viewer } = {}) {
   for (const a of post.artists.slice(0, 3)) {
     const fol = M.isFollowing(a, post.provider);
     items.push(
-      { label: `More from ${pretty(a)}`, icon: 'user', run: () => M.tagAction(a, 'only', post.provider) },
+      { label: `More from ${pretty(a)}`, icon: 'user', run: () => (post.provider === 'fa' ? M.go(`#/fa/user/${encodeURIComponent(a)}`) : M.tagAction(a, 'only', post.provider)) },
       { label: fol ? `Unfollow ${pretty(a)}` : `Follow ${pretty(a)}`, icon: fol ? 'bellOn' : 'bell', run: () => M.toggleFollow(a, post.provider) },
     );
   }
@@ -126,12 +128,57 @@ export function postMenu(post, { gallery, open, viewer } = {}) {
   return items;
 }
 
+/** Right-click on a Fur Affinity artist: hero, follow cards, people lists, shouts, user icons in descriptions. */
+export function faUserMenu(name, { page = true } = {}) {
+  if (!name) return [];
+  const fol = M.isFollowing(name, 'fa');
+  const to = (t) => () => M.go(`#/fa/user/${encodeURIComponent(name)}` + (t ? `?t=${t}` : ''));
+  return [
+    { header: pretty(name) },
+    page && { label: 'Open page', icon: 'user', run: to('') },
+    M.tabsOn() && { label: 'Open in new tab', icon: 'plus', run: () => M.openTab(`#/fa/user/${encodeURIComponent(name)}`, pretty(name)) },
+    page && { label: 'Gallery', icon: 'grid', run: to('gallery') },
+    page && { label: 'Scraps', icon: 'grid', run: to('scraps') },
+    page && { label: 'Favorites', icon: 'heart', run: to('favs') },
+    { sep: true },
+    { label: fol ? 'Unfollow' : 'Follow', icon: fol ? 'bellOn' : 'bell', run: () => M.toggleFollow(name, 'fa') },
+    { sep: true },
+    { label: 'Open on Fur Affinity', icon: 'external', run: () => openExternal(faUrl.user(name)) },
+    { label: 'Copy profile link', icon: 'link', run: () => (copyText(faUrl.user(name)), toast('Profile link copied', { ms: 1200 })) },
+    { label: 'Copy name', icon: 'copy', run: () => (copyText(name), toast('Copied', { ms: 900 })) },
+    { sep: true },
+    { label: `Blacklist ${pretty(name)}`, icon: 'cloak', danger: true, run: () => blacklistAdd(name) },
+  ];
+}
+
+/** Right-click on a link in a description, bio or comment. `nav(hash)` opens in-app targets. */
+export function linkMenu(url, nav) {
+  if (!url) return [];
+  const l = faLink(url);
+  return [
+    l && { label: 'Open here', icon: 'eye', run: () => (nav || M.go)(l.hash) },
+    { label: 'Open in browser', icon: 'external', run: () => openExternal(url) },
+    { label: 'Copy link', icon: 'link', run: () => (copyText(url), toast('Link copied', { ms: 1200 })) },
+  ];
+}
+
 /** Right-click on a tag (viewer list, search chip, dossier). */
 export function tagMenu(tag, cat, provId) {
   if (!tag) return [];
   const prov = getProvider(provId);
   const artist = cat === 'artist' || tagc.get(prov.id, tag)?.cat === 'artist';
   const meta = tag.includes(':');
+  if (prov.id === 'fa') {
+    if (artist) return faUserMenu(tag);
+    return [
+      { header: pretty(tag) },
+      { label: 'Find in Fur Affinity here', icon: 'search', run: () => M.tagAction(tag, 'only', 'fa') },
+      { label: 'Search on Fur Affinity', icon: 'external', run: () => openExternal(faUrl.search(tag.replace(/_/g, ' '))) },
+      { label: 'Copy tag', icon: 'copy', run: () => (copyText(tag), toast('Copied', { ms: 900 })) },
+      { sep: true },
+      { label: 'Add to blacklist', icon: 'cloak', danger: true, run: () => blacklistAdd(tag) },
+    ];
+  }
   const on = artist ? M.isFollowing(tag, provId) : M.isStarred(tag, provId);
   return [
     { header: pretty(tag) },

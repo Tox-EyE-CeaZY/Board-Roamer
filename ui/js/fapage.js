@@ -16,6 +16,8 @@ import { S, setS, on, subs, kv, tagLinks } from './store.js';
 import { getProvider, Feed, compileBlacklist, blacklistHit, isBlurred } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented, dialog } from './ui.js';
+import { bindContext } from './ctxmenu.js';
+import { postMenu, faUserMenu, linkMenu } from './menus.js';
 import { selBar, openExternal as openExt, downloadMany } from './actions.js';
 const openExternal = (u) => openExt(u, true); // this section's own buttons are the ones that leave the app
 import { pinPopover, quickPin } from './pins.js';
@@ -201,9 +203,31 @@ export function renderFa(root, ctx) {
   initFaBanner();
   faStatus();
   intro();
+  bindFaMenus(root, ctx);
   const { seg, p } = route();
   if (seg[0] === 'user' && seg[1]) return renderUser(root, ctx, decodeURIComponent(seg[1]).toLowerCase(), p);
   return renderHome(root, ctx, p);
+}
+
+/* ------------------------------------------------------------------ right-click / long-press menus
+   One listener on the Fur Affinity screen. Elements say what they are: data-fa-user (an artist), data-url (a link), and a
+   picture button is looked up in `menuPost`. The long-press on a phone arrives as the same contextmenu event. */
+const menuPost = new WeakMap(); // picture button -> {post, open}
+const menuBound = new WeakSet();
+function bindFaMenus(root, ctx) {
+  if (menuBound.has(root)) return;
+  menuBound.add(root);
+  bindContext(root, (e) => {
+    const t = e.target;
+    const pic = t.closest('.fa-th');
+    const mp = pic && menuPost.get(pic);
+    if (mp) return postMenu(mp.post, { open: mp.open });
+    const a = t.closest('a[data-url]');
+    if (a) return linkMenu(a.dataset.url, ctx.go);
+    const u = t.closest('[data-fa-user]');
+    if (u) return faUserMenu(u.dataset.faUser);
+    return null;
+  });
 }
 
 /* ------------------------------------------------------------------ home */
@@ -281,7 +305,7 @@ function followingPane(ctx) {
           h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Reads the watch list page you can see in the Fur Affinity window, once, when you tap', onclick: () => importWatchList(paint) }),
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
-      h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
+      h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', 'data-fa-user': f.t, onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
         h('span', { class: 'fa-fl-thumbs' + (f.thumbs?.length ? '' : ' empty'), 'data-i': f.thumbs?.length ? '' : (f.t[0] || '?').toUpperCase() }, (f.thumbs || []).slice(0, 3).map((u) => cachedImg(u))),
         h('b', {}, pretty(f.t)), h('small', {}, f.err ? f.err : f.newCount ? `${f.newCount} new${f.latestAt ? ' · latest ' + ago(f.latestAt) : ''}` : f.latestAt ? 'latest ' + ago(f.latestAt) : f.checked ? 'nothing posted' : 'tap Check for new')))));
   };
@@ -429,6 +453,7 @@ function renderUser(root, ctx, name, p) {
     }, html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
   };
   const tabs = segmented([['profile', 'Home'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
+  avatar.dataset.faUser = name;
   const hero = h('header', { class: 'fa-hero' + (home ? '' : ' slim') },
     home
       ? crumb('Fur Affinity', () => ctx.go(origin.name === name && origin.hash ? origin.hash : '#/fa')) // back to the list it was opened from
@@ -439,7 +464,7 @@ function renderUser(root, ctx, name, p) {
       }),
     h('button', { class: 'btn fa-out', title: 'Open this page in your browser', onclick: () => openExternal(faUrl.user(name)), html: icon('external', 15) + '<span>On Fur Affinity</span>' }),
     avatar,
-    h('div', { class: 'fa-who' }, title, sub),
+    h('div', { class: 'fa-who', 'data-fa-user': name }, title, sub),
     actions,
     home ? stats : null);
   const bar = h('div', { class: 'fa-bar fa-tabs' }, tabs, h('div', { class: 'fa-fill' }));
@@ -531,7 +556,7 @@ function linkify(text) {
   let at = 0;
   for (const m of String(text).matchAll(/https?:\/\/[^\s<>"')]+/g)) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push(h('a', { href: '#', onclick: (e) => (e.preventDefault(), openExt(m[0])) }, m[0]));
+    out.push(h('a', { href: '#', 'data-url': m[0], onclick: (e) => (e.preventDefault(), openExt(m[0])) }, m[0]));
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
@@ -547,12 +572,12 @@ export function richNodes(nodes, go, inLink = false, nav = null) {
       const label = n.name || n.user;
       const text = h('span', { hidden: !!n.icon && !n.name }, label);
       const img = n.icon ? h('img', { src: '/img?u=' + enc(n.icon), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => (e.target.remove(), (text.hidden = false)) }) : null;
-      return h('a', { href: '#', class: 'fa-uicon', title: label, onclick: (e) => (e.preventDefault(), go(n.user)) }, ...[img, text].filter(Boolean));
+      return h('a', { href: '#', class: 'fa-uicon', 'data-fa-user': n.user, title: label, onclick: (e) => (e.preventDefault(), go(n.user)) }, ...[img, text].filter(Boolean));
     }
     const kids = richNodes(n.kids || [], go, inLink || n.t === 'a', nav);
     if (n.t === 'a') {
       const l = nav && faLink(n.href); // a Fur Affinity submission or artist opens inside the app
-      return h('a', { href: '#', title: n.href, onclick: (e) => (e.preventDefault(), l ? nav(l.hash) : openExt(n.href)) }, ...kids);
+      return h('a', { href: '#', 'data-url': n.href, title: n.href, onclick: (e) => (e.preventDefault(), l ? nav(l.hash) : openExt(n.href)) }, ...kids);
     }
     if (n.t === 'h') return h('h' + Math.min(6, n.level + 2), {}, ...kids);
     if (n.t === 'color') return h('span', { style: `color:${n.color}` }, ...kids);
@@ -609,6 +634,7 @@ function profileBody(host, u, name, ctx) {
     const { post, item, hit } = x;
     const ratio = Math.min(2, Math.max(.62, post.w / post.h || 1));
     const el = h('button', { class: classes(x, cls), style: `--ar:${ratio.toFixed(3)}`, 'data-id': post.id });
+    menuPost.set(el, { post, open: () => open(post.id) });
     let timer = 0;
     const paint = () => {
       const veiled = !!hit && !revealed.has(post.id);
@@ -647,6 +673,7 @@ function profileBody(host, u, name, ctx) {
       const veiled = !!hit && !revealed.has(post.id);
       const pic = h('button', { class: classes(x, 'big') + (veiled ? ' veiled' : ''), 'data-id': post.id, title: veiled ? 'Veiled by your blacklist: tap to reveal' : 'Open',
         onclick: () => (veiled ? (revealed.add(post.id), show(cur, true), box.dispatchEvent(new CustomEvent('revealed', { detail: post.id }))) : open(post.id)) });
+      menuPost.set(pic, { post, open: () => open(post.id) });
       if (veiled) pic.append(veilOf(hit));
       else {
         const small = '/img?u=' + enc(item.thumb);
@@ -678,7 +705,7 @@ function profileBody(host, u, name, ctx) {
         }, 900);
         pic.append(img, ...(item.id === u.featured?.id && !by ? [h('span', { class: 'fa-flag' }, 'Featured')] : []));
       }
-      const line = veiled ? [] : [h('b', {}, item.title || 'Untitled'), by && item.user ? h('button', { class: 'fa-link', onclick: () => go(item.user) }, 'by ' + pretty(item.user)) : null,
+      const line = veiled ? [] : [h('b', {}, item.title || 'Untitled'), by && item.user ? h('button', { class: 'fa-link', 'data-fa-user': item.user, onclick: () => go(item.user) }, 'by ' + pretty(item.user)) : null,
         item.created ? h('small', {}, dateOf(item.created)) : null];
       box.replaceChildren(pic, h('p', { class: 'fa-stage-t' }, line.filter(Boolean)));
     };
@@ -705,10 +732,10 @@ function profileBody(host, u, name, ctx) {
 
   const shouts = () => u.shouts?.length ? panel(`Shouts (${u.shouts.length})`, outBtn('Leave one', faUrl.user(name)),
     h('div', { class: 'fa-shouts' }, u.shouts.map((s) => h('article', { class: 'fa-shout' },
-      h('button', { class: 'fa-shout-av', title: pretty(s.user), onclick: () => go(s.user) }, h('span', {}, s.user.slice(0, 1).toUpperCase()),
+      h('button', { class: 'fa-shout-av', 'data-fa-user': s.user, title: pretty(s.user), onclick: () => go(s.user) }, h('span', {}, s.user.slice(0, 1).toUpperCase()),
         s.avatar ? h('img', { src: '/img?u=' + enc(s.avatar), alt: '', loading: 'lazy', draggable: 'false', onerror: (e) => e.target.remove() }) : null),
       h('div', {},
-        h('div', { class: 'fa-shout-h' }, h('button', { class: 'fa-link', onclick: () => go(s.user) }, s.display || pretty(s.user)), s.created || s.at ? h('small', { title: s.at }, s.created ? ago(s.created) : s.at) : null),
+        h('div', { class: 'fa-shout-h' }, h('button', { class: 'fa-link', 'data-fa-user': s.user, onclick: () => go(s.user) }, s.display || pretty(s.user)), s.created || s.at ? h('small', { title: s.at }, s.created ? ago(s.created) : s.at) : null),
         h('p', {}, ...linkify(s.text))))))) : null;
 
   const journal = () => u.journal ? panel('Featured journal', outBtn('All journals', faUrl.journals(name)),
@@ -725,13 +752,13 @@ function profileBody(host, u, name, ctx) {
       u.fields?.length ? h('dl', { class: 'fa-info' }, u.fields.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, ...linkify(v))))) : null);
   };
   const contact = () => u.contacts?.length ? panel('Contact', null,
-    h('dl', { class: 'fa-info' }, u.contacts.map((c) => h('div', {}, h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', title: c.url, onclick: (e) => (e.preventDefault(), openExt(c.url)) }, c.text || c.url) : c.text))))) : null;
+    h('dl', { class: 'fa-info' }, u.contacts.map((c) => h('div', {}, h('dt', {}, c.label), h('dd', {}, c.url ? h('a', { href: '#', 'data-url': c.url, title: c.url, onclick: (e) => (e.preventDefault(), openExt(c.url)) }, c.text || c.url) : c.text))))) : null;
 
   const st = u.stats || {};
   const table = [['Views', st.views], ['Submissions', st.submissions], ['Favs', st.favs], ['Comments earned', st['comments earned']], ['Comments made', st['comments made']], ['Journals', st.journals]].filter(([, v]) => v != null);
   const numbers = () => table.length ? panel('Stats', null, h('dl', { class: 'fa-table' }, table.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v.toLocaleString()))))) : null;
   const people = (title, list, count, url) => list?.length || count ? panel(title, outBtn(count ? `All ${count.toLocaleString()}` : 'All', url),
-    list?.length ? h('div', { class: 'fa-people' }, list.map((x) => h('button', { onclick: () => go(x.user) }, x.display || pretty(x.user)))) : null) : null;
+    list?.length ? h('div', { class: 'fa-people' }, list.map((x) => h('button', { 'data-fa-user': x.user, onclick: () => go(x.user) }, x.display || pretty(x.user)))) : null) : null;
 
   const main = [
     u.bioRich?.length || u.bio ? panel('About', null, ...(u.bioRich?.length ? folded('fa-pf-bio rich', ...richNodes(u.bioRich, go)) : folded('fa-pf-bio', ...linkify(u.bio)))) : null,

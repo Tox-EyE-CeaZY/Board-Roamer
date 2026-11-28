@@ -207,6 +207,7 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
     let mut wb = WindowBuilder::new()
         .with_title(if watch { "Fur Affinity: your watch list" } else if login { "Sign in to Fur Affinity" } else { "Fur Affinity: quick check" })
         .with_window_icon(icon)
+        .with_decorations(cfg!(target_os = "macos")) // elsewhere the page draws Board Roamer's own frame (src/fa_chrome.js)
         .with_inner_size(LogicalSize::new(1000.0, 780.0));
     // A Watch / Unwatch runs unseen. A window that is hidden outright may never load its page (the browser engine pauses it),
     // so on Windows it is "shown" far off screen with no taskbar button; it moves into view only if the site needs the person.
@@ -224,7 +225,20 @@ fn open_fa_window(target: &EventLoopWindowTarget<String>, events: EventLoopProxy
     let window = wb.build(target).ok()?;
     // its own profile, so signing out here cannot touch the app's settings
     let mut ctx = WebContext::new(Some(os::data_dir().join("fa-webview")));
+    let mode = if act.is_some() { "WATCH" } else if watch { "YOUR WATCH LIST" } else if login { "SIGN IN" } else { "QUICK CHECK" };
     let builder = WebViewBuilder::new_with_web_context(&mut ctx)
+        .with_background_color((10, 17, 19, 255))
+        .with_initialization_script(&include_str!("fa_chrome.js").replace("__MODE__", mode))
+        .with_ipc_handler({
+            let ev = events.clone();
+            move |req| {
+                // the page is someone else's site: only the frame's own few messages get through
+                let m = req.body().as_str();
+                if matches!(m, "fa:drag" | "fa:min" | "fa:max" | "fa:shut") || m.starts_with("fa:resize:") {
+                    let _ = ev.send_event(m.to_string());
+                }
+            }
+        })
         .with_url(&if let Some((u, _)) = &act { format!("https://www.furaffinity.net/user/{u}/") } else if watch { "https://www.furaffinity.net/controls/buddylist/".to_string() } else if login { "https://www.furaffinity.net/login/".to_string() } else { "https://www.furaffinity.net/".to_string() })
         .with_on_page_load_handler(move |ev, _url| {
             if matches!(ev, PageLoadEvent::Finished) {
@@ -359,6 +373,14 @@ fn fa_handle_info(fa_win: &mut Option<FaWin>, info: &str, events: EventLoopProxy
     if done {
         *fa_win = None;
     }
+}
+
+/// The person closed the Fur Affinity window: a pending Watch answers "not changed" instead of waiting out its minute.
+fn fa_shut(fa_win: &mut Option<FaWin>) {
+    if let Some((u, want)) = fa_win.as_ref().and_then(|w| w.act.clone()) {
+        fa::set_act(&u, !want, "The Fur Affinity window was closed before it finished");
+    }
+    *fa_win = None;
 }
 
 fn fa_forget_window(fa_win: &mut Option<FaWin>) {
@@ -536,7 +558,13 @@ fn main() {
         let _keep_tray_alive = &tray;
         *flow = ControlFlow::Wait;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => close_or_hide(&window, flow),
+            Event::WindowEvent { event: WindowEvent::CloseRequested, window_id, .. } => {
+                if fa_win.as_ref().map_or(false, |w| w.window.id() == window_id) {
+                    fa_shut(&mut fa_win); // the Fur Affinity window's own close: only that window goes
+                } else {
+                    close_or_hide(&window, flow)
+                }
+            }
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => push_state(&window, &webview),
             Event::UserEvent(cmd) => {
                 match cmd.as_str() {
@@ -598,6 +626,22 @@ fn main() {
                         }
                     }
                     "fa:close" => fa_forget_window(&mut fa_win),
+                    "fa:shut" => fa_shut(&mut fa_win),
+                    "fa:min" => { if let Some(w) = &fa_win { w.window.set_minimized(true); } }
+                    "fa:max" => { if let Some(w) = &fa_win { w.window.set_maximized(!w.window.is_maximized()); } }
+                    "fa:drag" => { if let Some(w) = &fa_win { let _ = w.window.drag_window(); } }
+                    c if c.starts_with("fa:resize:") => {
+                        if let Some(w) = &fa_win {
+                            let dir = match &c[10..] {
+                                "N" => Some(ResizeDirection::North), "S" => Some(ResizeDirection::South),
+                                "E" => Some(ResizeDirection::East), "W" => Some(ResizeDirection::West),
+                                "NE" => Some(ResizeDirection::NorthEast), "NW" => Some(ResizeDirection::NorthWest),
+                                "SE" => Some(ResizeDirection::SouthEast), "SW" => Some(ResizeDirection::SouthWest),
+                                _ => None,
+                            };
+                            if let Some(d) = dir { let _ = w.window.drag_resize_window(d); }
+                        }
+                    }
                     c if c.starts_with("fa:info:") => fa_handle_info(&mut fa_win, &c[8..], fa_events.clone()),
                     c if c.starts_with("fa:next:") => {
                         if let Some(w) = &fa_win {

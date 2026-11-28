@@ -32,7 +32,7 @@ import * as actions from './actions.js';
 import { initTitlebar, isNative, windowCommand } from './titlebar.js';
 import { showMenu, bindContext, closeMenu, menuOpen } from './ctxmenu.js';
 import { isPhone, isTouch, isAndroid, onLayout, native, onBack, haptic } from './platform.js';
-import { M, postMenu, tagMenu } from './menus.js';
+import { M, postMenu, tagMenu, faUserMenu, linkMenu } from './menus.js';
 
 /* ================================================================== state */
 let prov = getProvider(S('provider'));
@@ -653,6 +653,8 @@ const viewer = new Viewer($('#viewer'), {
   savePost: (p) => saveOne(p),
   postMenu: (p, o) => postMenu(p, o),
   tagMenu: (t, c, pv) => tagMenu(t, c, pv),
+  faUserMenu: (n) => faUserMenu(n),
+  linkMenu: (u) => linkMenu(u, (hh) => { if (viewer.isOpen) closeViewerQuiet(); go(hh); }),
   poolInfo: (pv, id) => poolInfo(pv, id),
   enterPool: (id, postId) => enterPool(id, postId, viewer.post?.provider),
   openPoolPage: (id) => { const pv = viewer.post?.provider || prov.id; if (viewer.isOpen) closeViewerQuiet(); go(`#/pool/${id}?p=${pv}`); },
@@ -804,6 +806,7 @@ function tagAction(tag, mode, provId) {
 
 /* ---------- menus need to reach back into the app */
 Object.assign(M, {
+  go: (hash) => go(hash),
   openTab: (hash, title, thumb) => openTab(hash, { title, thumb }),
   tabsOn: () => tabsEnabled(),
   roamHash: roamHashFor,
