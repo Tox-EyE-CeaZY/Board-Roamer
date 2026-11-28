@@ -21,7 +21,7 @@ import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
-import { faState, faStatus, faLogin, faVerify, faUrl, faIndex, faLikes, faSupported, faBusy } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -276,7 +276,7 @@ function followingPane(ctx) {
       h('div', { class: 'fa-fl-head' },
         h('p', {}, fl.length ? `${fl.length} artist${fl.length === 1 ? '' : 's'} you follow here. Following is Board Roamer’s own list; Fur Affinity’s watch feed opens on the site.` : 'You are not following anyone from Fur Affinity yet. Open an artist and tap Follow.'),
         h('div', { class: 'row-btns' },
-          h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Fur Affinity does not let apps read your watch list, so you copy it from your browser once', onclick: () => importWatchList(paint) }),
+          h('button', { class: 'btn' + (fl.length ? '' : ' primary'), html: icon('download', 15) + '<span>Import my watch list</span>', title: 'Reads the watch list page you can see in the Fur Affinity window, once, when you tap', onclick: () => importWatchList(paint) }),
           fl.length ? h('button', { class: 'btn primary', html: icon('refresh', 15) + '<span>Check for new</span>', onclick: async (e) => { e.currentTarget.disabled = true; await refreshAll({ force: true, only: fl }); paint(); } }) : null,
           h('button', { class: 'btn', html: icon('external', 15) + '<span>My watch feed on Fur Affinity</span>', title: 'Fur Affinity does not let apps read it, so it opens in your browser', onclick: () => openExternal(P_WATCH) }))),
       h('div', { class: 'fa-fl-grid' }, fl.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || a.t.localeCompare(b.t)).map((f) => h('button', { class: 'fa-fl', onclick: () => ctx.go(hashOf('/user/' + enc(f.t))) },
@@ -315,12 +315,28 @@ async function importWatchList(done) {
       h('div', { class: 'fa-imp-grid' }, picks.map((p) => h('label', { class: 'fa-imp-i' }, h('input', { type: 'checkbox', checked: true, onchange: (e) => (p.on = e.target.checked) }), p.n))));
   };
   area.addEventListener('input', debounce(preview, 200));
+  const status = h('p', { class: 'st-note' }, '');
+  let timer = 0;
+  const auto = h('button', { class: 'btn primary', html: icon('download', 15) + '<span>Open my watch list and import it</span>', onclick: async () => {
+    auto.disabled = true;
+    status.textContent = 'A Fur Affinity window opened. Sign in there if it asks; the list is read once the page shows it.';
+    await faWatchStart();
+    clearInterval(timer);
+    const t0 = Date.now();
+    timer = setInterval(async () => {
+      const names = await faWatchNames();
+      if (names) { clearInterval(timer); auto.disabled = false; const me = (faState.me || '').toLowerCase(); area.value = names.filter((n) => n !== me).join('\n'); status.textContent = names.length ? `Read ${names.length} names from your watch list.` : 'The list looked empty.'; preview(); }
+      else if (Date.now() - t0 > 5 * 60_000 || !auto.isConnected) { clearInterval(timer); auto.disabled = false; if (auto.isConnected) status.textContent = 'Nothing arrived. You can try again, or paste the list below.'; }
+    }, 1500);
+  } });
   const body = h('div', { class: 'dlg-text' },
-    h('p', {}, 'Fur Affinity does not let apps read your watch list, so Board Roamer never asks the site for it. Instead:'),
-    h('ol', {}, h('li', {}, 'Open your watch list in your browser: ', h('button', { class: 'btn', onclick: () => openExternal(P_BUDDY), html: icon('external', 14) + '<span>Open my watch list</span>' })),
-      h('li', {}, 'Select the whole page (Ctrl+A), copy it (Ctrl+C), and paste it below.')),
-    area, list);
+    h('p', {}, 'Board Roamer opens your own watch list page in its Fur Affinity window, the same page you would open yourself, and reads the names you see there. It makes that one visit only when you tap, and follows nothing until you confirm the list.'),
+    h('div', { class: 'row-btns' }, auto, h('button', { class: 'btn', onclick: () => openExternal(P_BUDDY), html: icon('external', 14) + '<span>Open it in my browser</span>' })),
+    status,
+    h('details', {}, h('summary', {}, 'Or paste the page by hand'), h('p', { class: 'st-note' }, 'Select the whole watch list page (Ctrl+A), copy it (Ctrl+C), and paste it here.'), area),
+    list);
   const r = await dialog({ title: 'Import my watch list', body, wide: true, actions: [{ label: 'Cancel', value: false }, { label: 'Follow these artists', cls: 'primary', value: true }] });
+  clearInterval(timer);
   if (!r) return;
   const add = picks.filter((p) => p.on && !have.has(p.n));
   for (const p of add) subs.add({ p: 'fa', t: p.n, cat: 'artist' }); // no check per artist: "Check for new" (or the background option) does that, one request a second
