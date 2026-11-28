@@ -71,6 +71,13 @@ pub fn set_tray_ok(ok: bool) {
 pub fn tray_ok() -> bool {
     TRAY_OK.load(Ordering::Relaxed)
 }
+/// Ask the window loop (src/main.rs) to do something: the same strings the page's own IPC sends, plus "fa:...".
+pub fn send_event(cmd: String) {
+    if let Some(p) = PROXY.get() {
+        let _ = p.send_event(cmd);
+    }
+}
+
 /// Lets the HTTP side ask the window loop to do things ("show").
 pub fn set_proxy(p: EventLoopProxy<String>) {
     let _ = PROXY.set(p);
