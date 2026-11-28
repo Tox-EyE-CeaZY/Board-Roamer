@@ -27,7 +27,7 @@ import { setupTabs, tabsButton, tabsEnabled, bootHash, noteRoute as tabNoteRoute
 import { startAutoUpdateCheck } from './updates.js';
 import { toast, popover, closePopover, promptText, dialog } from './ui.js';
 import { pinPopover, quickPin } from './pins.js';
-import { downloadMany, selBar, openExternal, savePost } from './actions.js';
+import { downloadMany, selBar, openExternal, savePost, interceptLinks } from './actions.js';
 import * as actions from './actions.js';
 import { initTitlebar, isNative, windowCommand } from './titlebar.js';
 import { showMenu, bindContext, closeMenu, menuOpen } from './ctxmenu.js';
@@ -1622,6 +1622,14 @@ function boot() {
   buildRail();
   paintLocalNav();
   initFaBanner();
+  // any Fur Affinity link the app can show opens inside it, wherever it was clicked
+  interceptLinks((url) => {
+    if (!S('faOn') || !faSupported()) return false;
+    const l = faLink(url);
+    if (!l) return false;
+    go(l.hash);
+    return true;
+  });
   on('settings', (e) => (e.detail.key === 'localOn' || e.detail.key === 'faOn') && paintLocalNav());
   paintDial();
   paintFollowBadge();

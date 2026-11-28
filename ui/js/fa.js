@@ -23,7 +23,7 @@ export const faUrl = {
   front: () => P.FA_WEB + '/',
   browse: () => P.FA_WEB + '/browse/',
   view: (id) => `${P.FA_WEB}/view/${id}/`,
-  user: (n) => `${P.FA_WEB}/user/${enc(n)}/`,
+  user: (n) => `${P.FA_WEB}/user/${enc(faName(n))}/`,
   gallery: (n, folder) => `${P.FA_WEB}/gallery/${enc(n)}/` + (folder ? `folder/${folder.id}/${folder.slug || ''}` : ''),
   scraps: (n) => `${P.FA_WEB}/scraps/${enc(n)}/`,
   favorites: (n) => `${P.FA_WEB}/favorites/${enc(n)}/`,
@@ -34,15 +34,20 @@ export const faUrl = {
 
 /** A Fur Affinity link -> where it opens inside Board Roamer: {hash, user?, post?}, or null. */
 export function faLink(url) {
-  const m = /^https?:\/\/(?:www\.)?furaffinity\.net\/(user|gallery|scraps|favorites|journals|view|full)\/([^/?#]+)/i.exec(String(url || '').trim());
-  if (!m) return null;
+  const m = /^https?:\/\/(?:www\.)?furaffinity\.net\/(user|gallery|scraps|favorites|view|full)\/([^/?#]+)(?:\/folder\/(\d+)(?:\/([^/?#]*))?)?/i.exec(String(url || '').trim());
+  if (!m) return null; // journals, search, messages and the rest are not read here: they open in the browser
   const kind = m[1].toLowerCase();
   let id = m[2];
   try { id = decodeURIComponent(id); } catch { /* keep as is */ }
-  if (kind === 'view' || kind === 'full') return /^\d+$/.test(id) ? { post: id, hash: `#/fa/post/${id}` } : null;
+  if (kind === 'view' || kind === 'full') return /^\d+$/.test(id) ? { post: id, hash: `#/fa?post=${id}` } : null;
   const user = id.toLowerCase();
-  return { user, hash: `#/fa/user/${enc(user)}` };
+  const base = `#/fa/user/${enc(user)}`;
+  if (m[3]) return { user, hash: `${base}?t=folder&f=${m[3]}/${m[4] || ''}` };
+  return { user, hash: kind === 'gallery' ? `${base}?t=gallery` : kind === 'scraps' ? `${base}?t=scraps` : kind === 'favorites' ? `${base}?t=favs` : base };
 }
+/** The first link among some (a post's sources) that is a Fur Affinity submission. */
+export const faPostIn = (urls) => (urls || []).find((u) => faLink(u)?.post) || '';
+
 /** The first Fur Affinity user among some links (an e621 artist's URLs, a post's sources). */
 export function faUserIn(urls) {
   for (const u of urls || []) {
@@ -478,3 +483,6 @@ export function faEngine({ CATS }) {
   };
 }
 const userCache = new Map();
+
+/** Fur Affinity's address form of a name: lowercase, no spaces, underscores or punctuation ("Barbie Wire" -> barbiewire). */
+export const faName = (s) => String(s || '').trim().replace(/^[@~]+/, '').toLowerCase().replace(/[^a-z0-9.\-`]/g, '');

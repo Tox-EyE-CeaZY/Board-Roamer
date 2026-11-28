@@ -21,6 +21,8 @@ Its own section (`#/fa`, nav "Fur Affinity", Settings > Fur Affinity, off by def
 - Search is only over what this device has seen (`Seen` tab, tag/artist/rating/title). FA's own search opens in the browser.
 - Follow checks of FA artists run unattended only if Settings > "Check followed artists in the background" is on (default off). "Check for new" always works.
 - e621 artist dossier: if the artist's e621 URLs (or a saved tag link) name an FA user, a button opens that artist in the FA section and saves the e621 <-> FA link.
+- Names typed into "Open an artist" are normalized (`faName`: "barbie wire" -> barbiewire); a 400/404 shows a "no such artist" state. "On e621?" asks which tag when unsure (`pickE621Artist`) and saves the pair.
+- Any Fur Affinity link inside the app opens in the section; e621 posts with an FA source get a jump button in the viewer.
 - Tags in the viewer: artist -> artist page; others -> `Seen` search.
 
 ## Unverified (needs Maven on Windows with real pages)

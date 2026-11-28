@@ -8,6 +8,7 @@ import { showMenu, bindContext, menuOpen, lastLongPress } from './ctxmenu.js';
 import { isFullscreen, setFullscreen, toggleFullscreen } from './titlebar.js';
 import { postMenu } from './menus.js';
 import { isPhone, isTouch, isAndroid, native } from './platform.js';
+import { openExternal } from './actions.js';
 
 const WIDE = 1.15; // a page wider than this ratio is already a spread: show it alone
 
@@ -651,7 +652,7 @@ export class ComicReader {
       '+': () => this.setZoom(this.zoom * 1.25), '=': () => this.setZoom(this.zoom * 1.25), '-': () => this.setZoom(this.zoom / 1.25), '0': () => this.setZoom(1),
       g: () => (this.jump.focus(), this.jump.select()),
       v: () => this.hooks.openInViewer?.(this.pages[this.i], this.i),
-      o: () => fetch('/open?u=' + encodeURIComponent(this.pages[this.i].url), { method: 'POST' }),
+      o: () => openExternal(this.pages[this.i].url),
       s: () => this.hooks.savePost?.(this.pages[this.i]),
       enter: () => (this.endCard.hidden = true),
     };

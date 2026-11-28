@@ -71,7 +71,7 @@ export function openArtistPage(host, ctx, { provId, names, name = names[0], onCl
       onOpen: (vi) => openAt(vi, who),
       onNeedMore: () => more(),
       onPin: (ps) => quickPin(ps),
-      onOpenSite: (p) => openExternal(p.url),
+      onOpenSite: (p) => openExternal(p.url, p.provider === 'fa'),
       onSelect: () => {},
     });
     gal.setFoot(status);

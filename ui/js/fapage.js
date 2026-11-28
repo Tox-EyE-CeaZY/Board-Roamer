@@ -16,12 +16,13 @@ import { S, setS, on, subs, kv, tagLinks } from './store.js';
 import { getProvider, Feed } from './providers.js';
 import { Gallery } from './gallery.js';
 import { toast, segmented, dialog } from './ui.js';
-import { selBar, openExternal, downloadMany } from './actions.js';
+import { selBar, openExternal as openExt, downloadMany } from './actions.js';
+const openExternal = (u) => openExt(u, true); // this section's own buttons are the ones that leave the app
 import { pinPopover, quickPin } from './pins.js';
 import { folderCard } from './folders.js';
 import { follow, refreshAll } from './follows.js';
 import { parseToken } from './search.js';
-import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy } from './fa.js';
+import { faState, faStatus, faLogin, faVerify, faWatchStart, faWatchNames, faUrl, faIndex, faLikes, faSupported, faBusy, faName } from './fa.js';
 
 const enc = encodeURIComponent;
 const RATING_NAMES = [['s', 'General'], ['q', 'Mature'], ['e', 'Adult']];
@@ -215,7 +216,7 @@ function renderHome(root, ctx, p) {
 
   const tabs = segmented([['front', 'Latest'], ['browse', 'Browse'], ['following', 'Following'], ['seen', 'Seen'], ['liked', 'Liked here']], tab, (v) => ctx.go(hashOf('', { t: v === 'front' ? '' : v })));
   const open = nameBox('Open an artist…  e.g. a user name', (name, input, enter) => {
-    const user = name.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_');
+    const user = faName(name);
     if (user) ctx.go(hashOf('/user/' + enc(user)));
   });
   const head = h('div', { class: 'vhead' },
@@ -344,6 +345,41 @@ async function importWatchList(done) {
   done?.();
 }
 
+
+/** A user page that would not load: a friendly "no such user" for 400/404, otherwise the plain error. */
+function missingUser(e, name, ctx) {
+  const gone = /HTTP (400|404)|not found|no such/i.test(e.message || '');
+  if (!gone) return h('div', { class: 'empty-state err' }, h('h2', {}, 'That did not load'), h('p', {}, e.message));
+  const tried = faName(name);
+  return h('div', { class: 'empty-state err' }, h('h2', {}, 'No artist called “' + name + '” on Fur Affinity'),
+    h('p', {}, 'Fur Affinity names have no spaces or underscores (“barbie wire” is “barbiewire”). Check the spelling, or look the artist up on e621 to find their Fur Affinity link.'),
+    h('div', { class: 'row-btns' },
+      h('button', { class: 'btn', onclick: () => ctx.go('#/fa') }, 'Back'),
+      h('button', { class: 'btn primary', html: icon('search', 15) + '<span>Search e621 for “' + tried + '”</span>', onclick: async () => { const t = await pickE621Artist(tried); if (t) ctx.go(ctx.roamHash([{ t, op: '+' }], null, 'e621')); } })));
+}
+
+/** Which e621 artist tag does this Fur Affinity name mean? Asks when unsure; remembers the answer. */
+async function pickE621Artist(name) {
+  const e6 = getProvider('e621');
+  const bare = faName(name);
+  const seen = new Map();
+  for (const q of new Set([name, bare, bare + '*'])) {
+    try { for (const t of await e6.autocomplete(q)) if (t.cat === 'artist' && !seen.has(t.name)) seen.set(t.name, t); } catch {}
+  }
+  const norm = (t) => faName(t.replace(/_\(artist\)$/, ''));
+  const list = [...seen.values()].filter((t) => norm(t.name).includes(bare) || bare.includes(norm(t.name))).sort((a, b) => (norm(b.name) === bare) - (norm(a.name) === bare) || (b.count || 0) - (a.count || 0)).slice(0, 8);
+  const link = (t) => (tagLinks.link([{ key: 'fa', tag: name }, { key: 'e621', tag: t }]), t);
+  if (list.length === 1 && norm(list[0].name) === bare) return link(list[0].name);
+  if (!list.length) return bare;
+  const rows = list.map((t, i) => h('label', { class: 'pick-row' }, h('input', { type: 'radio', name: 'e6pick', value: t.name, checked: i === 0 }), h('span', {}, pretty(t.name)), h('span', { class: 'dim' }, ' · ' + fmtNum(t.count || 0) + ' posts')));
+  const body = h('div', {}, h('p', {}, 'Which e621 tag is “' + name + '”?'), ...rows);
+  const r = await dialog({ title: 'Which artist?', body, actions: [{ label: 'Cancel', value: null }, { label: 'Search “' + bare + '” as typed', value: 'raw' }, { label: 'Search this one', cls: 'primary', value: 'ok' }] });
+  if (r === 'raw') return bare;
+  if (r !== 'ok') return null;
+  const pick = body.querySelector('input:checked');
+  return pick ? link(pick.value) : null;
+}
+
 /* ------------------------------------------------------------------ an artist */
 function renderUser(root, ctx, name, p) {
   const tab = ['profile', 'gallery', 'scraps', 'favs', 'folders', 'folder'].includes(p.get('t')) ? p.get('t') : 'profile';
@@ -363,7 +399,10 @@ function renderUser(root, ctx, name, p) {
   };
   const linked = (n) => {
     const e6 = tagLinks.suggest('fa', n, 'e621');
-    return h('button', { class: 'btn', title: e6 ? `Same artist on e621 as ${pretty(e6)}` : 'Look for this artist on e621', onclick: () => ctx.go(ctx.roamHash([{ t: e6 || n, op: '+' }], null, 'e621')), html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
+    return h('button', { class: 'btn', title: e6 ? `Same artist on e621 as ${pretty(e6)}` : 'Look for this artist on e621', onclick: async () => {
+      const tag = e6 || (await pickE621Artist(n));
+      if (tag) ctx.go(ctx.roamHash([{ t: tag, op: '+' }], null, 'e621'));
+    }, html: icon('search', 15) + `<span>On e621${e6 ? '' : '?'}</span>` });
   };
   const tabs = segmented([['profile', 'Profile'], ['gallery', 'Gallery'], ['scraps', 'Scraps'], ['favs', 'Favorites'], ['folders', 'Folders']], tab === 'folder' ? 'folders' : tab, (v) => ctx.go(hashOf('/user/' + enc(name), { t: v === 'profile' ? '' : v })));
   const head = h('div', { class: 'vhead bd' },
@@ -391,7 +430,7 @@ function renderUser(root, ctx, name, p) {
     root.append(h('div', { class: 'fa-userwrap' }, info), bar);
     const host = h('div', { class: 'fa-profile' }, h('p', { class: 'dim' }, 'Loading the profile…'));
     root.append(host);
-    prov.user(name).then((u) => { paintInfo(u); profileBody(host, u, name, ctx); }).catch((e) => host.replaceChildren(h('div', { class: 'empty-state err' }, h('h2', {}, 'That did not load'), h('p', {}, e.message))));
+    prov.user(name).then((u) => { paintInfo(u); profileBody(host, u, name, ctx); }).catch((e) => host.replaceChildren(missingUser(e, name, ctx)));
     return null;
   }
 
