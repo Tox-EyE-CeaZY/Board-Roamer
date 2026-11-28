@@ -377,7 +377,9 @@ pub fn image(rq: Request, query: &str) {
     } else {
         "https://safebooru.org/"
     };
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).build();
+    // one shared agent: pictures reuse connections instead of a new TLS handshake each
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    let agent = AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).max_idle_connections_per_host(16).build());
     let resp = match agent.get(&target).set("User-Agent", DEFAULT_UA).set("Referer", referer).call() {
         Ok(r) => r,
         Err(ureq::Error::Status(code, _)) => return err(rq, code, "upstream refused"),

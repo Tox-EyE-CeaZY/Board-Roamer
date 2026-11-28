@@ -268,10 +268,14 @@ function fromItem(it, prov) {
   if (it.category && !BORING.test(it.category)) tags.meta.push('category:' + it.category);
   const id = +it.id;
   const ts = it.ts;
-  const w = (it.w || 200) * 5, h = (it.h || 200) * 5;
+  // writing and music are not pictures: they show as a card (when the site has no cover for them) and open as a reading page or a player
+  const doc = it.type === 'text' || it.type === 'audio';
+  const card = doc && !P.thumbParts(it.thumb || '') && !ts;
+  const w = card ? (it.type === 'audio' ? 1000 : 750) : (it.w || 200) * 5, h = card ? 1000 : (it.h || 200) * 5;
   return {
-    provider: prov.id, id, rating: P.FA_RATING[it.rating] || 'q', w: Math.round(w), h: Math.round(h), ext: it.type === 'image' ? 'jpg' : it.type, kind: 'image', md5: '', size: 0,
-    thumb: ts ? P.thumbUrl(id, ts, THUMB) : it.thumb, sample: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb, full: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb,
+    provider: prov.id, id, rating: P.FA_RATING[it.rating] || 'q', w: Math.round(w), h: Math.round(h), ext: it.type === 'image' ? 'jpg' : it.type, kind: doc ? (it.type === 'audio' ? 'music' : 'story') : 'image', card, md5: '', size: 0,
+    // the picture the page itself listed is known to exist and is small; the 600px version is only for the viewer's first look
+    thumb: it.thumb || (ts ? P.thumbUrl(id, ts, THUMB) : ''), sample: it.thumb || (ts ? P.thumbUrl(id, ts, THUMB) : ''), full: ts ? P.thumbUrl(id, ts, SAMPLE) : it.thumb, viaProxy: true,
     score: 0, up: 0, down: 0, favs: 0, noScore: true, tags, artists: it.user ? [it.user] : [], sources: [], created: '', desc: unBB(it.desc),
     parent: null, children: [], pools: [], duration: 0, comments: 0, faved: faLikes.isFav(id), url: faUrl.view(id), alts: [], isComic: false,
     title: it.title || '', type: it.type, facts: [], folders: [], _lazy: true, _ts: ts,
@@ -300,8 +304,13 @@ function applySubmission(p, s) {
     if (p.kind === 'video') p.sample = null;
     else if (p.kind === 'anim') p.sample = p.full;
   } else {
+    // a story or a song: the viewer shows a reading page or a player (see fadoc.js)
     p.ext = s.ext || s.type;
-    p.external = s.type; // a story, a song: read or hear it on the site
+    p.kind = s.type === 'audio' ? 'music' : 'story';
+    p.full = s.full || p.full;
+    p.body = s.body || '';
+    p.audio = s.audio || '';
+    if (p.kind === 'story' && !p.body && !['txt', 'rtf'].includes(p.ext)) p.external = s.type; // a .pdf or .docx: read it on the site
   }
   if (s.w && s.h) (p.w = s.w), (p.h = s.h);
   p.size = toBytes(s.fileSize);
@@ -314,7 +323,7 @@ function applySubmission(p, s) {
   p.newer = s.newer;
   p.older = s.older;
   p.facts = [['Views', s.views], ['Category', s.category], ['Theme', s.theme], ['Species', s.species], ['Uploaded by', s.display || s.user]].filter(([, v]) => v !== '' && v != null);
-  if (p.external) p.facts.push(['Kind', `${s.type}: open it on Fur Affinity to ${s.type === 'music' ? 'listen' : 'read'}`]);
+  if (p.kind === 'story' || p.kind === 'music') p.facts.push(['Kind', p.kind === 'music' ? 'Music' : 'Story' + (p.external ? ` (.${p.ext} file, read it on Fur Affinity)` : '')]);
   p._lazy = false;
   delete p._set; // the blacklist's cached tag set
   return p;
@@ -350,16 +359,31 @@ export function faEngine({ CATS }) {
     async page(feed) {
       const src = feed.fa || { kind: 'gallery', user: (feed.terms?.[0]?.t || '').toLowerCase() };
       if (src.kind === 'seen' || src.kind === 'liked') return this.localPage(feed, src);
-      const url = feed.nextUrl || startUrl(src);
+      // The front page lists a fixed set per section and has no next page. Past it, the feed carries on through Browse
+      // (the site's own newest-first list), keeping the section's kind of work; the screen offers it as "Load more".
+      const TYPES = ['image', 'text', 'audio'];
+      const url = feed.nextUrl || (feed.phase === 'browse' ? faUrl.browse() : startUrl(src));
       if (!url || (!src.user && !['front', 'browse'].includes(src.kind))) return ((feed.done = true), []);
-      const { doc, final } = await faHtml(url, { background: !!feed.background });
-      let figs;
-      if (src.kind === 'front') figs = P.parseFrontpage(doc)[src.section || 0]?.items || [];
-      else figs = P.parseFigures(doc);
-      const next = src.kind === 'front' ? null : P.nextPageUrl(doc, final);
-      feed.nextUrl = next;
-      if (!next) feed.done = true;
-      if (!feed.pageInfo) feed.pageInfo = { user: P.parseUserHeader(doc), folders: P.parseFolders(doc), folderTitle: P.parseFolderTitle(doc) };
+      let figs = [];
+      for (let tries = 0; ; tries++) {
+        const u = tries ? feed.nextUrl : url;
+        if (!u) { feed.done = true; break; }
+        const { doc, final } = await faHtml(u, { background: !!feed.background });
+        if (src.kind === 'front' && feed.phase !== 'browse') {
+          figs = P.parseFrontpage(doc)[src.section || 0]?.items || [];
+          feed.phase = 'browse';
+          feed.nextUrl = faUrl.browse();
+          feed.hold = true; // wait for "Load more"
+        } else {
+          figs = P.parseFigures(doc);
+          if (src.kind === 'front' && TYPES[src.section || 0]) figs = figs.filter((x) => x.type === TYPES[src.section || 0]);
+          feed.nextUrl = P.nextPageUrl(doc, final);
+          if (!feed.nextUrl) feed.done = true;
+        }
+        if (!feed.pageInfo) feed.pageInfo = { user: P.parseUserHeader(doc), folders: P.parseFolders(doc), folderTitle: P.parseFolderTitle(doc) };
+        // a filtered Browse page can be nearly empty: look at a few more before giving the screen back
+        if (figs.length >= 8 || feed.done || src.kind !== 'front' || feed.hold || tries >= 3) break;
+      }
       figs = figuresToItems(figs);
       for (const f of figs) faIndex.put(f);
       return figs.map((f) => fromItem(f, this));

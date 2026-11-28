@@ -83,8 +83,9 @@ function buildRail() {
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
       h('i', { class: 'nav-ind' }),
-      NAV.map(([id, label, ic], n) => h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : id === 'boards' ? boardBadge : null))),
+      NAV.map(([id, label, ic], n) => id === 'fa' ? null : h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : id === 'boards' ? boardBadge : null))),
     h('div', { class: 'rail-spacer' }),
+    h('a', { class: 'fa-rail', href: '#/fa', 'data-view': 'fa', hidden: true, title: 'Fur Affinity: its own section, a separate source', html: icon('paw', 22) }), // beside the source dial: it is a source of its own, not a board
     dial,
     h('button', { class: 'ibtn', title: 'Cloak screen (`)', html: icon('cloak', 20), onclick: toggleCloak }),
     h('button', { class: 'ibtn', title: 'Settings (,)', html: icon('settings', 20), onclick: () => openSettings() }),
@@ -148,6 +149,8 @@ function setActiveNav(view) {
   const items = [...rail.querySelectorAll('.nav-i')].filter((a) => !a.hidden);
   items.forEach((a) => a.classList.toggle('on', a.dataset.view === key));
   const i = items.findIndex((a) => a.dataset.view === key);
+  rail.querySelector('.nav').classList.toggle('none', key === 'fa'); // Fur Affinity lives below, next to the source dial
+  rail.querySelectorAll('.fa-rail').forEach((a) => a.classList.toggle('on', key === 'fa'));
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
   tabbar.style.setProperty('--i', Math.max(0, i));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));

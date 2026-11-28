@@ -268,6 +268,9 @@ export function parseSubmission(doc) {
     keywords: keywords.length ? keywords : tags.keywords,
     tagsAttr: tags,
     full,
+    // writing: the text when the page itself carries it; music: the player's own file (guessed selectors: needs a saved story and song page to confirm)
+    body: plainText(page.querySelector('.submission-writing, .submission-area .submission-writing')).trim(),
+    audio: cdn(doc.querySelector('audio source')?.getAttribute('src') || doc.querySelector('audio')?.getAttribute('src')),
     preview: cdn(img?.getAttribute('data-preview-src')) || cdn(doc.querySelector('meta[property="og:image"]')?.getAttribute('content')),
     folders,
     newer: idFrom(nav.find((a) => /newer/i.test(a.textContent))?.getAttribute('href')),
@@ -321,7 +324,22 @@ export function parseUserpage(doc) {
     featured: featured ? featured[1] : '',
     latest: parseFigures(doc, { root: '#gallery-latest-submissions' }),
     latestFavs: parseFigures(doc, { root: '#gallery-latest-favorites' }),
+    shouts: parseShouts(doc),
   };
+}
+
+/** Shouts on a profile (markup not seen in a saved page yet: read defensively, empty when it does not match). */
+export function parseShouts(doc) {
+  const out = [];
+  for (const c of doc.querySelectorAll('#shouts .comment_container, .shouts .comment_container, #page-comments .comment_container, .comment_container')) {
+    const who = c.querySelector('a[href*="/user/"]');
+    const text = plainText(c.querySelector('.comment_text, .comment-text, .user-submitted-links')).trim();
+    const date = c.querySelector('.popup_date');
+    if (!who || !text) continue;
+    out.push({ user: nameFromHref(who.getAttribute('href')), text, at: date?.getAttribute('title') || clean(date?.textContent) || '' });
+    if (out.length >= 40) break;
+  }
+  return out;
 }
 
 /** The folder list beside a gallery: [{name, folders: [{id, slug, name, count, active}]}]. */
