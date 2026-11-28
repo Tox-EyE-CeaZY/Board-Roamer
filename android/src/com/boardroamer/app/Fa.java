@@ -138,7 +138,9 @@ final class Fa {
         final List<String> acc = new ArrayList<>();
         final Set<String> seen = new HashSet<>();
         boolean stepped, finished;
-        int pages;
+        int variant, page = 1;
+
+        String guess(int vr, int pg) { return vr == 1 ? WWW + "controls/buddylist/?page=" + pg : WWW + "controls/buddylist/" + pg + "/"; }
 
         Win(int mode, String user, boolean want) {
             this.mode = mode; this.user = user; this.want = want;
@@ -258,13 +260,23 @@ final class Fa {
             }
             if (mode == WATCH) {
                 JSONArray names = v.optJSONArray("names");
-                if (path.startsWith("/controls/buddylist") && names != null && names.length() > 0) {
+                boolean onList = path.startsWith("/controls/buddylist");
+                if (onList && ((names != null && names.length() > 0) || !acc.isEmpty())) {
                     int before = acc.size();
-                    for (int i = 0; i < names.length(); i++) { String n = names.optString(i); if (!n.isEmpty() && !acc.contains(n)) acc.add(n); }
+                    if (names != null) for (int i = 0; i < names.length(); i++) { String n = names.optString(i); if (!n.isEmpty() && !acc.contains(n)) acc.add(n); }
+                    boolean grew = acc.size() > before;
                     String next = v.optString("next", "");
-                    if (!next.isEmpty() && acc.size() > before && seen.size() < 100 && seen.add(next)) navigateLater(next); // one request a second, up to 100 pages
+                    // more pages, one request a second: the page's own next link, else the usual address forms (?page=2, then /2/) in turn
+                    String go = null;
+                    if (seen.size() < 100) {
+                        if (grew && !next.isEmpty() && seen.add(next)) { variant = 0; go = next; }
+                        else if (grew && next.isEmpty() && variant == 0 && acc.size() >= 20) { variant = 1; page = 2; go = guess(1, 2); }
+                        else if (grew && variant > 0) { page++; go = guess(variant, page); }
+                        else if (!grew && variant == 1 && page == 2) { variant = 2; page = 2; go = guess(2, 2); }
+                    }
+                    if (go != null) { seen.add(go); navigateLater(go); }
                     else finishWatch();
-                } else if (!checking && !path.startsWith("/login") && !path.startsWith("/controls/buddylist") && FaNet.connected() && !stepped) {
+                } else if (!checking && !path.startsWith("/login") && !onList && FaNet.connected() && !stepped) {
                     stepped = true; // signed in but on some other page (just after signing in): go to the watch list once
                     web.loadUrl(WWW + "controls/buddylist/");
                 }

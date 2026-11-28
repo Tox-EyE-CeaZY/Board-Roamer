@@ -54,7 +54,8 @@ const fSig = (f = {}) => JSON.stringify({ o: f.order || '', s: f.score || 0, r: 
 
 /* ================================================================== shell */
 const rail = $('#rail');
-const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder'], ['fa', 'Fur Affinity', 'paw']];
+const NAV = [['feed', 'Feed', 'feed'], ['roam', 'Roam', 'roam'], ['fa', 'Fur Affinity', 'paw'], ['follows', 'Follows', 'bell'], ['boards', 'Boards', 'boards'], ['pools', 'Pools', 'book'], ['trail', 'Trail', 'trail'], ['local', 'Local', 'folder']];
+const NAV_KEY = { feed: 1, roam: 2, follows: 3, boards: 4, pools: 5, trail: 6 }; // the number keys (see the key handler)
 const dial = h('button', { class: 'dial', title: 'Switch source', onclick: () => providerMenu() });
 const followBadge = h('b', { class: 'nav-badge', hidden: true });
 const poolBadge = h('b', { class: 'nav-badge', hidden: true });
@@ -83,7 +84,7 @@ function buildRail() {
       h('span', { class: 'brand-name' }, 'BOARD', h('i', {}, '/'), 'ROAMER')),
     h('div', { class: 'nav' },
       h('i', { class: 'nav-ind' }),
-      NAV.map(([id, label, ic], n) => id === 'fa' ? null : h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: `${label} (${n + 1})` }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : id === 'boards' ? boardBadge : null))),
+      NAV.map(([id, label, ic]) => id === 'fa' ? null : h('a', { class: 'nav-i', href: '#/' + id, 'data-view': id, title: NAV_KEY[id] ? `${label} (${NAV_KEY[id]})` : label }, h('span', { class: 'ni-ic', html: icon(ic, 21) }), h('span', { class: 'ni-t' }, label), id === 'follows' ? followBadge : id === 'pools' ? poolBadge : id === 'boards' ? boardBadge : null))),
     h('div', { class: 'rail-spacer' }),
     h('a', { class: 'fa-rail', href: '#/fa', 'data-view': 'fa', hidden: true, title: 'Fur Affinity: its own section, a separate source', html: icon('paw', 22) }), // beside the source dial: it is a source of its own, not a board
     dial,
@@ -152,7 +153,8 @@ function setActiveNav(view) {
   rail.querySelector('.nav').classList.toggle('none', key === 'fa'); // Fur Affinity lives below, next to the source dial
   rail.querySelectorAll('.fa-rail').forEach((a) => a.classList.toggle('on', key === 'fa'));
   rail.querySelector('.nav').style.setProperty('--i', Math.max(0, i));
-  tabbar.style.setProperty('--i', Math.max(0, i));
+  // the tab bar counts its own visible tabs (the rail keeps Fur Affinity out of its list, so its index would point at Feed)
+  tabbar.style.setProperty('--i', Math.max(0, [...tabbar.querySelectorAll('.tab')].filter((a) => !a.hidden).findIndex((a) => a.dataset.view === key)));
   tabbar.querySelectorAll('.tab').forEach((a) => a.classList.toggle('on', a.dataset.view === key));
   appbarTitle.textContent = { roam: 'Roam', feed: 'Feed', boards: 'Boards', board: 'Board', follows: 'Follows', pools: 'Pools', pool: 'Pool', trail: 'Trail', local: 'Local', fa: 'Fur Affinity' }[view] || 'Roam';
 }
@@ -1439,7 +1441,7 @@ document.addEventListener('contextmenu', (e) => {
     sel && { label: 'Copy', icon: 'copy', kbd: 'Ctrl+C', run: () => copyText(sel) },
     sel && sel.length < 60 && { label: `Search “${sel.length > 22 ? sel.slice(0, 22) + '…' : sel}”`, icon: 'search', run: () => tagAction(sel.toLowerCase().replace(/\s+/g, '_'), 'only', prov.id) },
     sel && { sep: true },
-    { label: 'Go to', icon: 'compass', sub: NAV.map(([id, label, ic], n) => ({ label, icon: ic, kbd: String(n + 1), checked: (NAV_OF[view] || view) === id, run: () => go('#/' + id) })) },
+    { label: 'Go to', icon: 'compass', sub: NAV.map(([id, label, ic]) => ({ label, icon: ic, kbd: NAV_KEY[id] ? String(NAV_KEY[id]) : undefined, checked: (NAV_OF[view] || view) === id, run: () => go('#/' + id) })) },
     view === 'roam' && { label: 'Focus search', icon: 'search', kbd: '/', run: () => searchBar.focus() },
     view === 'roam' && { label: 'Refresh results', icon: 'refresh', run: () => navigateRoam({}) },
     { label: 'Back', icon: 'left', run: () => history.back() },
